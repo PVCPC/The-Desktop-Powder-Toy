@@ -414,6 +414,14 @@ int Main(int argc, char *argv[])
 		}
 	}
 
+	if (overlayMode)
+	{
+		// Before anything sized by the sim exists (save thumbnails, the drawing surface, the game).
+		auto [cells, scale] = OverlaySimSize(windowFrameOps.scale);
+		SetSimSize(cells);
+		windowFrameOps.scale = scale;
+	}
+
 	auto clientConfig = [&prefs](Argument arg, ByteString name) {
 		if (!arg)
 		{

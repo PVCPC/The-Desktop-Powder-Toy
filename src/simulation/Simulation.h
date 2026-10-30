@@ -40,7 +40,7 @@ class Parts
 	int pfree;
 
 public:
-	std::array<Particle, NPART> data;
+	std::vector<Particle> data = std::vector<Particle>(NPART);
 	// initialized in clear_sim
 	int active;
 
@@ -97,17 +97,17 @@ struct RenderableSimulation
 	playerst player2;
 	playerst fighters[MAX_FIGHTERS]; //Defined in Stickman.h
 
-	float vx[YCELLS][XCELLS];
-	float vy[YCELLS][XCELLS];
-	float pv[YCELLS][XCELLS];
-	float hv[YCELLS][XCELLS];
+	SimGrid<float> vx{ CELLS };
+	SimGrid<float> vy{ CELLS };
+	SimGrid<float> pv{ CELLS };
+	SimGrid<float> hv{ CELLS };
 
-	unsigned char bmap[YCELLS][XCELLS];
-	unsigned char emap[YCELLS][XCELLS];
+	SimGrid<unsigned char> bmap{ CELLS };
+	SimGrid<unsigned char> emap{ CELLS };
 
 	Parts parts;
-	int pmap[YRES][XRES];
-	int photons[YRES][XRES];
+	SimGrid<int> pmap{ RES };
+	SimGrid<int> photons{ RES };
 
 	int aheat_enable = 0;
 
@@ -140,16 +140,16 @@ public:
 
 	int CGOL = 0;
 	int GSPEED = 1;
-	unsigned int gol[YRES][XRES][5];
+	SimGrid<std::array<unsigned int, 5>> gol{ RES };
 
-	float fvx[YCELLS][XCELLS];
-	float fvy[YCELLS][XCELLS];
-	int Element_LOLZ_lolz[XRES/9][YRES/9];
-	int Element_LOVE_love[XRES/9][YRES/9];
-	int Element_PSTN_tempParts[std::max(XRES, YRES)];
+	SimGrid<float> fvx{ CELLS };
+	SimGrid<float> fvy{ CELLS };
+	SimGrid<int> Element_LOLZ_lolz{ Vec2(YRES / 9, XRES / 9) }; // [x][y]
+	SimGrid<int> Element_LOVE_love{ Vec2(YRES / 9, XRES / 9) }; // [x][y]
+	std::vector<int> Element_PSTN_tempParts = std::vector<int>(std::max(XRES, YRES));
 	int Element_PPIP_ppip_changed;
 
-	unsigned int pmap_count[YRES][XRES];
+	SimGrid<unsigned int> pmap_count{ RES };
 
 	int edgeMode = EDGE_VOID;
 	// The playable area, in cells. The rest of the (build-time) sim is off limits: solid wall with solid or loop

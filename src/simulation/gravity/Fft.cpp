@@ -13,13 +13,13 @@
 
 // DFT is cyclic in nature; gravity would wrap around sort of like in loop mode without the 2x here;
 // in fact it still does, it's just not as visible. the arrays are 2x as big along all dimensions as normal cell maps
-constexpr auto blocks = CELLS * 2;
+#define blocks (CELLS * 2) // the sim size is set at startup, so these are evaluated where used
 
 // https://www.fftw.org/fftw3_doc/Multi_002dDimensional-DFTs-of-Real-Data.html#Multi_002dDimensional-DFTs-of-Real-Data
-constexpr auto transSize = (blocks.X / 2 + 1) * blocks.Y;
+#define transSize ((blocks.X / 2 + 1) * blocks.Y)
 
 // NCELL * 4 is size of data array, scaling needed because FFTW calculates an unnormalized DFT
-constexpr auto scaleFactor = -float(M_GRAV) / (NCELL * 4);
+#define scaleFactor (-float(M_GRAV) / (NCELL * 4))
 
 static_assert(sizeof(std::complex<float>) == sizeof(fftwf_complex));
 struct FftwArrayDeleter        { void operator ()(float               ptr[]) const { fftwf_free(ptr);         } };
@@ -102,7 +102,7 @@ void GravityImpl::Wait()
 void GravityImpl::Work()
 {
 	{
-		auto massBigP = MakePlane<blocks.X, blocks.Y>(blocks, massBig.get());
+		auto massBigP = MakePlane(blocks, massBig.get());
 		for (auto p : CELLS.OriginRect())
 		{
 			// used to be a membwand but we'd need a new buffer for this,
@@ -122,8 +122,8 @@ void GravityImpl::Work()
 	fftwf_execute(forceXInverse.get());
 	fftwf_execute(forceYInverse.get());
 	{
-		auto forceXBigP = MakePlane<blocks.X, blocks.Y>(blocks, forceXBig.get());
-		auto forceYBigP = MakePlane<blocks.X, blocks.Y>(blocks, forceYBig.get());
+		auto forceXBigP = MakePlane(blocks, forceXBig.get());
+		auto forceYBigP = MakePlane(blocks, forceYBig.get());
 		for (auto p : CELLS.OriginRect())
 		{
 			// similarly
@@ -157,8 +157,8 @@ void GravityImpl::Init()
 	auto kernelYRaw = FftwArray(blocks.X * blocks.Y);
 	auto kernelXForward = FftwPlanPtr(fftwf_plan_dft_r2c_2d(blocks.Y, blocks.X, kernelXRaw.get(), reinterpret_cast<fftwf_complex *>(kernelXT.get()), fftwPlanFlags));
 	auto kernelYForward = FftwPlanPtr(fftwf_plan_dft_r2c_2d(blocks.Y, blocks.X, kernelYRaw.get(), reinterpret_cast<fftwf_complex *>(kernelYT.get()), fftwPlanFlags));
-	auto kernelX = MakePlane<blocks.X, blocks.Y>(blocks, kernelXRaw.get());
-	auto kernelY = MakePlane<blocks.X, blocks.Y>(blocks, kernelYRaw.get());
+	auto kernelX = MakePlane(blocks, kernelXRaw.get());
+	auto kernelY = MakePlane(blocks, kernelYRaw.get());
 	//calculate velocity map caused by a point mass
 	for (auto p : blocks.OriginRect())
 	{

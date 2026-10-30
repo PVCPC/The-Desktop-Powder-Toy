@@ -33,7 +33,7 @@ class CoordStack
 private:
 	unsigned short (*stack)[2];
 	int stack_size;
-	const static int stack_limit = XRES*YRES;
+	const int stack_limit = XRES*YRES;
 public:
 	CoordStack() :
 		stack(nullptr),

@@ -1,5 +1,7 @@
 #pragma once
 #include <cstdint>
+#include <algorithm>
+#include <vector>
 #include <common/Vec2.h>
 
 constexpr int MENUSIZE = 40;
@@ -9,28 +11,71 @@ constexpr float M_GRAV = 6.67300e-1f;
 
 //CELL, the size of the pressure, gravity, and wall maps. Larger than 1 to prevent extreme lag
 constexpr int CELL = 4;
-// The largest simulation, set at build time (meson -Dsim_cells_x/y); the playable area inside it can change at runtime.
-#ifndef SIM_CELLS_X
-# define SIM_CELLS_X 153
-# define SIM_CELLS_Y 96
-#endif
-constexpr Vec2<int> CELLS = Vec2(SIM_CELLS_X, SIM_CELLS_Y);
-constexpr Vec2<int> RES = CELLS * CELL;
+// The simulation's size, chosen at startup by SetSimSize before anything sized by it exists (the overlay sizes it to
+// the screen). Stock TPT is 153x96 cells. The playable area inside it can change at runtime.
+inline Vec2<int> CELLS = Vec2(153, 96);
+inline Vec2<int> RES = CELLS * CELL;
 
-constexpr int XCELLS = CELLS.X;
-constexpr int YCELLS = CELLS.Y;
-constexpr int NCELL  = XCELLS * YCELLS;
-constexpr int XRES   = RES.X;
-constexpr int YRES   = RES.Y;
-constexpr int NPART  = XRES * YRES;
+inline int XCELLS = CELLS.X;
+inline int YCELLS = CELLS.Y;
+inline int NCELL  = XCELLS * YCELLS;
+inline int XRES   = RES.X;
+inline int YRES   = RES.Y;
+inline int NPART  = XRES * YRES;
 
-constexpr int XCNTR = XRES / 2;
-constexpr int YCNTR = YRES / 2;
+inline int XCNTR = XRES / 2;
+inline int YCNTR = YRES / 2;
 
-constexpr Vec2<int> WINDOW = RES + Vec2(BARSIZE, MENUSIZE);
+inline Vec2<int> WINDOW = RES + Vec2(BARSIZE, MENUSIZE);
 
-constexpr int WINDOWW = WINDOW.X;
-constexpr int WINDOWH = WINDOW.Y;
+inline int WINDOWW = WINDOW.X;
+inline int WINDOWH = WINDOW.Y;
+
+inline void SetSimSize(Vec2<int> cells)
+{
+	CELLS = cells;
+	RES = CELLS * CELL;
+	XCELLS = CELLS.X;
+	YCELLS = CELLS.Y;
+	NCELL = XCELLS * YCELLS;
+	XRES = RES.X;
+	YRES = RES.Y;
+	NPART = XRES * YRES;
+	XCNTR = XRES / 2;
+	YCNTR = YRES / 2;
+	WINDOW = RES + Vec2(BARSIZE, MENUSIZE);
+	WINDOWW = WINDOW.X;
+	WINDOWH = WINDOW.Y;
+}
+
+// A height x width table sized when it is made, read like the fixed arrays it replaces: grid[y][x].
+// sizeof() is NOT its data size; use size().
+template<typename T>
+struct SimGrid
+{
+	std::vector<T> data;
+	int width;
+
+	SimGrid(Vec2<int> size, T value = T()) : data(size_t(size.X) * size.Y, value), width(size.X)
+	{
+	}
+	T *operator[](int y)
+	{
+		return data.data() + size_t(y) * width;
+	}
+	const T *operator[](int y) const
+	{
+		return data.data() + size_t(y) * width;
+	}
+	size_t size() const
+	{
+		return data.size();
+	}
+	void Clear()
+	{
+		std::fill(data.begin(), data.end(), T());
+	}
+};
 
 constexpr int MAXSIGNS = 16;
 

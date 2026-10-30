@@ -1049,23 +1049,23 @@ void Simulation::clear_sim(void)
 	emp_decor = 0;
 	emp_trigger_count = 0;
 	signs.clear();
-	memset(bmap, 0, sizeof(bmap));
-	memset(emap, 0, sizeof(emap));
+	bmap.Clear();
+	emap.Clear();
 	parts.Reset();
 	NUM_PARTS = 0;
-	memset(pmap, 0, sizeof(pmap));
-	memset(fvx, 0, sizeof(fvx));
-	memset(fvy, 0, sizeof(fvy));
-	memset(photons, 0, sizeof(photons));
+	pmap.Clear();
+	fvx.Clear();
+	fvy.Clear();
+	photons.Clear();
 	memset(wireless, 0, sizeof(wireless));
-	memset(gol, 0, sizeof(gol));
+	gol.Clear();
 	memset(portalp, 0, sizeof(portalp));
 	memset(fighters, 0, sizeof(fighters));
 	memset(&player, 0, sizeof(player));
 	memset(&player2, 0, sizeof(player2));
-	memset(&Element_LOLZ_lolz, 0, sizeof(Element_LOLZ_lolz));
-	memset(&Element_LOVE_love, 0, sizeof(Element_LOVE_love));
-	memset(&Element_PSTN_tempParts, 0, sizeof(Element_PSTN_tempParts));
+	Element_LOLZ_lolz.Clear();
+	Element_LOVE_love.Clear();
+	std::fill(Element_PSTN_tempParts.begin(), Element_PSTN_tempParts.end(), 0);
 	Element_PPIP_ppip_changed = 0;
 	std::fill(elementCount, elementCount+PT_NUM, 0);
 	elementRecount = true;
@@ -1079,9 +1079,9 @@ void Simulation::clear_sim(void)
 	player2.rocketBoots = false;
 	player2.fan = false;
 	//memset(pers_bg, 0, WINDOWW*YRES*PIXELSIZE);
-	//memset(fire_r, 0, sizeof(fire_r));
-	//memset(fire_g, 0, sizeof(fire_g));
-	//memset(fire_b, 0, sizeof(fire_b));
+	//fire_r.Clear();
+	//fire_g.Clear();
+	//fire_b.Clear();
 	//if(gravmask)
 		//memset(gravmask, 0xFFFFFFFF, NCELL*sizeof(unsigned));
 	ResetNewtonianGravity({}, {});
@@ -3343,9 +3343,9 @@ void SimulationImpl::MovementPhase(int i, Neighbourhood neighbourhood)
 void Simulation::RecalcFreeParticles(bool do_life_dec)
 {
 	FrameTime::Span span(frameTime, "Simulation::RecalcFreeParticles");
-	memset(pmap, 0, sizeof(pmap));
-	memset(pmap_count, 0, sizeof(pmap_count));
-	memset(photons, 0, sizeof(photons));
+	pmap.Clear();
+	pmap_count.Clear();
+	photons.Clear();
 
 	NUM_PARTS = 0;
 	auto &sd = SimulationData::CRef();
@@ -3478,7 +3478,7 @@ void Simulation::SimulateGoL()
 						{
 							continue;
 						}
-						unsigned int (&neighbourList)[5] = gol[ay][ax];
+						auto &neighbourList = gol[ay][ax];
 						// * Bump overall neighbour counter (bits 30..28) for the entire list.
 						neighbourList[0] += 1U << 28;
 						for (int l = 0; l < 5; ++l)
@@ -3528,7 +3528,7 @@ void Simulation::SimulateGoL()
 			{
 				continue;
 			}
-			unsigned int (&neighbourList)[5] = gol[y][x];
+			auto &neighbourList = gol[y][x];
 			auto nl0 = neighbourList[0];
 			if (r || nl0)
 			{
@@ -3959,6 +3959,11 @@ Simulation::~Simulation() = default;
 
 Simulation::Simulation()
 {
+	// pmap packs the particle index above PMAPBITS: XRES * YRES must fit (the division avoids overflow).
+	if (uint32_t(XRES) > (UINT32_C(1) << (31 - PMAPBITS)) / uint32_t(YRES))
+	{
+		throw std::runtime_error("simulation too large for pmap");
+	}
 	std::fill(elementCount, elementCount+PT_NUM, 0);
 	elementRecount = true;
 
@@ -4014,5 +4019,3 @@ void Simulation::EnableNewtonianGravity(bool enable)
 	}
 }
 
-// we want XRES * YRES <= (1 << (31 - PMAPBITS)), but we do a division because multiplication could silently overflow
-static_assert(uint32_t(XRES) <= (UINT32_C(1) << (31 - PMAPBITS)) / uint32_t(YRES), "not enough space in pmap");

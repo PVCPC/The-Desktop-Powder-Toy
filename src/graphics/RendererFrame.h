@@ -2,10 +2,15 @@
 #include "SimulationConfig.h"
 #include "Pixel.h"
 #include "common/Plane.h"
-#include <array>
+#include <vector>
 
-constexpr auto RendererFrameSize = Vec2<int>{ WINDOW.X, RES.Y };
-using RendererFrame = PlaneAdapter<std::array<pixel, WINDOW.X * RES.Y>, RendererFrameSize.X, RendererFrameSize.Y>;
+// The sim plus the side bar's width, sized when made.
+struct RendererFrame : PlaneAdapter<std::vector<pixel>>
+{
+	RendererFrame() : PlaneAdapter<std::vector<pixel>>(Vec2(WINDOW.X, RES.Y), pixel(0))
+	{
+	}
+};
 
 struct RendererStats
 {

@@ -249,7 +249,7 @@ void Air::update_airh(void)
 			vy[y][x] = dvy;
 		}
 	}
-	memcpy(hv, ohv, sizeof(hv));
+	hv.data = ohv.data;
 }
 
 static float Mix(float a, float b, float f)
@@ -490,9 +490,9 @@ void Air::update_air(void)
 				opv[y][x] = dp;
 			}
 		}
-		memcpy(vx, ovx, sizeof(vx));
-		memcpy(vy, ovy, sizeof(vy));
-		memcpy(pv, opv, sizeof(pv));
+		vx.data = ovx.data;
+		vy.data = ovy.data;
+		pv.data = opv.data;
 	}
 }
 

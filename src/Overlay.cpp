@@ -1,4 +1,7 @@
 #include "Overlay.h"
+#include "SimulationConfig.h"
+#include "simulation/ElementDefs.h"
+#include <algorithm>
 #include "OverlayWindows.h"
 #include "SimulationConfig.h"
 #include "prefs/GlobalPrefs.h"
@@ -236,6 +239,24 @@ OverlayInput OverlayGetInput()
 	return input;
 #else
 	return OverlayInput::Auto;
+#endif
+}
+
+std::pair<Vec2<int>, int> OverlaySimSize(int scale)
+{
+#ifdef _WIN32
+	Vec2<int> screen(GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
+	for (scale = std::max(scale, 1); ; scale++)
+	{
+		auto cells = (screen / scale - Vec2(BARSIZE, MENUSIZE)) / CELL;
+		// pmap holds the particle index above PMAPBITS
+		if (int64_t(cells.X) * cells.Y * CELL * CELL <= (int64_t(1) << (31 - PMAPBITS)))
+		{
+			return { cells, scale };
+		}
+	}
+#else
+	return { CELLS, scale };
 #endif
 }
 

@@ -1,6 +1,8 @@
 #pragma once
 #include <SDL.h>
 #include <cstdint>
+#include <utility>
+#include "common/Vec2.h"
 
 // overlay:on: a borderless, always-on-top window over the desktop. Empty (black) pixels are see-through; what
 // clicks do depends on the mode (OVERLAY.md). Windows only so far.
@@ -31,3 +33,6 @@ void OverlayLoadKeys(); // (re)reads the hotkeys from Overlay.Keys.* in powder.p
 extern bool overlayAutoPass; // clicks pass through while a full-screen app or game is in front (Overlay.AutoPassThrough)
 // Presents the frame (0xRRGGBB pixels, w x h) scaled to the window, with per-pixel alpha. Also polls the hotkeys.
 void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h);
+// The sim size (in cells) and pixel scale that fill the primary screen, starting from the given scale and raising it
+// until the sim fits pmap. Stock size off Windows.
+std::pair<Vec2<int>, int> OverlaySimSize(int scale);

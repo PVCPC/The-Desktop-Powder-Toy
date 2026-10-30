@@ -43,7 +43,7 @@ class Simulation;
 struct GraphicsFuncContext;
 struct Particle;
 
-#define UPDATE_FUNC_ARGS Simulation* sim, int i, int x, int y, int surround_space, int nt, Parts &parts, int pmap[YRES][XRES]
+#define UPDATE_FUNC_ARGS Simulation* sim, int i, int x, int y, int surround_space, int nt, Parts &parts, SimGrid<int> &pmap
 #define UPDATE_FUNC_SUBCALL_ARGS sim, i, x, y, surround_space, nt, parts, pmap
 
 #define GRAPHICS_FUNC_ARGS GraphicsFuncContext &gfctx, const Particle *cpart, int nx, int ny, int *pixel_mode, int* cola, int *colr, int *colg, int *colb, int *firea, int *firer, int *fireg, int *fireb

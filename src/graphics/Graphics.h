@@ -5,10 +5,11 @@
 #include "SimulationConfig.h"
 #include "RasterDrawMethods.h"
 #include <array>
+#include <vector>
 
 class Graphics: public RasterDrawMethods<Graphics>
 {
-	PlaneAdapter<std::array<pixel, WINDOW.X * WINDOW.Y>, WINDOW.X, WINDOW.Y> video;
+	PlaneAdapter<std::vector<pixel>> video{ WINDOW, pixel(0) };
 	Rect<int> clipRect = video.Size().OriginRect();
 
 	friend struct RasterDrawMethods<Graphics>;

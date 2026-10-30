@@ -958,10 +958,10 @@ void Renderer::draw_air()
 	if(!(displayMode & DISPLAY_AIR))
 		return;
 	int x, y, i, j;
-	auto *pv = sim->pv;
-	auto *hv = sim->hv;
-	auto *vx = sim->vx;
-	auto *vy = sim->vy;
+	auto &pv = sim->pv;
+	auto &hv = sim->hv;
+	auto &vx = sim->vx;
+	auto &vy = sim->vy;
 	auto c = 0x000000_rgb;
 	for (y=0; y<YCELLS; y++)
 		for (x=0; x<XCELLS; x++)
@@ -1458,7 +1458,7 @@ void Renderer::AdjustHdispLimit()
 		}
 		if (sim->aheat_enable && (displayMode & DISPLAY_AIR) && (displayMode & DISPLAY_AIRH))
 		{
-			auto *hv = sim->hv;
+			auto &hv = sim->hv;
 			for (auto p : CELLS.OriginRect())
 			{
 				visit(p * CELL, hv[p.Y][p.X]);
@@ -1600,9 +1600,9 @@ Renderer::Renderer()
 {
 	PopulateTables();
 
-	memset(fire_r, 0, sizeof(fire_r));
-	memset(fire_g, 0, sizeof(fire_g));
-	memset(fire_b, 0, sizeof(fire_b));
+	fire_r.Clear();
+	fire_g.Clear();
+	fire_b.Clear();
 
 	//Set defauly display modes
 	prepare_alpha(CELL, 1.0f);
