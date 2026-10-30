@@ -18,4 +18,5 @@ namespace OverlayWindows
 	void ClearUnderWindows(uint32_t *argb, int w, int h, int ww, int wh);
 	// The playable area in cells, saved in prefs (Overlay.PlayArea.*).
 	void SetPlayArea(int x, int y, int w, int h);
+	bool RecordingKey(); // the Overlay tab is waiting for a new shortcut: global hotkeys are off
 }

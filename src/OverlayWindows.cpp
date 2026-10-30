@@ -47,6 +47,9 @@
 namespace
 {
 	float uiScale = 1;
+	std::string recording;        // Overlay.Keys.<name> being recorded in the Overlay tab, or empty
+	bool rebuildPalette = false;  // the UI scale changed: remake the side window (not from inside its own click)
+	int reopenTab = -1;
 	int S(float v)
 	{
 		return int(std::lround(v * uiScale));
@@ -576,7 +579,7 @@ namespace
 			name = "Palette"; // keeps the saved position of the old Elements window
 			title = L"The Powder Toy";
 			appWindow = true;
-			tab = welcomeTab; // the overlay's start page, in place of TPT's text over the game
+			tab = reopenTab >= 0 ? reopenTab : welcomeTab; // the overlay's start page, in place of TPT's text over the game
 			titleH = S(28), border = S(6), tabH = S(24), navW = S(118), statusH = S(22), tileW = S(92), tileH = S(24), gap = S(4);
 		}
 
@@ -1180,20 +1183,36 @@ namespace
 				GlobalPrefs::Ref().Set("Overlay.ShowTPTMenus", showTPTMenus);
 			});
 			y += S(52);
-			top = Group(x, y, w, S(124), L"Shortcuts (any app)");
+			top = Group(x, y, w, S(140), L"Shortcuts (any app)");
 			std::wstring rows[][2] = {
 				{ L"Next input mode", key("CycleInput", "Ctrl+Alt+O") },
 				{ L"Pass-through on/off", key("PassThrough", "Ctrl+Alt+P") },
 				{ L"Locked on/off", key("Locked", "Ctrl+Alt+L") },
 				{ L"Show/hide this window", key("Palette", "Ctrl+Alt+E") },
 			};
+			const char *names[] = { "CycleInput", "PassThrough", "Locked", "Palette" };
 			for (int i = 0; i < 4; i++)
 			{
-				Caption(x + S(12), top + i * S(24), rows[i][0]);
-				Caption(x + S(200), top + i * S(24), rows[i][1], 0x1E395B);
+				int ry = top + i * S(26);
+				Caption(x + S(12), ry, rows[i][0]);
+				bool rec = recording == names[i];
+				Caption(x + S(200), ry, rec ? L"Press the new keys (Esc cancels)" : rows[i][1], rec ? 0xC25100 : 0x1E395B);
+				PushButton(x + w - S(100), ry, S(88), rec ? L"Cancel" : L"Change\u2026", [rec, name = std::string(names[i])] {
+					recording = rec ? "" : name;
+				}, L"Ctrl, Alt, Shift or Win plus a letter, digit or F key");
 			}
-			y += S(132);
-			Caption(x, y, L"Change shortcuts and UI scale in powder.pref (Overlay.*) for now.", 0x6D6D6D);
+			y += S(148);
+			top = Group(x, y, w, S(52), L"Size");
+			wchar_t scale[32];
+			swprintf(scale, 32, L"UI scale %g\u00D7", uiScale);
+			Caption(x + S(12), top, scale);
+			auto setScale = [](float v) {
+				uiScale = std::clamp(v, 1.f, 4.f);
+				GlobalPrefs::Ref().Set("Overlay.UIScale", uiScale);
+				rebuildPalette = true;
+			};
+			PushButton(x + S(200), top, S(40), L"\u2212", [setScale] { setScale(uiScale - 0.25f); }, L"Smaller windows and text");
+			PushButton(x + S(246), top, S(40), L"+", [setScale] { setScale(uiScale + 0.25f); }, L"Bigger windows and text");
 		}
 
 		void Paint() override
@@ -2065,6 +2084,8 @@ void OverlayWindows::Init(void *mainHwnd)
 	AddTrayIcon();
 }
 
+static void TickRecording();
+
 void OverlayWindows::Tick()
 {
 	if (!mainWindow || !&GameController::Ref())
@@ -2098,6 +2119,50 @@ void OverlayWindows::Tick()
 	}
 	SyncHosts();
 	TickMenu();
+	TickRecording();
+	if (rebuildPalette)
+	{
+		rebuildPalette = false;
+		reopenTab = palette ? palette->tab : -1;
+		palette.reset();
+		text->SetScale();
+		TogglePalette();
+	}
+}
+
+bool OverlayWindows::RecordingKey()
+{
+	return !recording.empty();
+}
+
+// While the Overlay tab records a shortcut: the first letter, digit or F key pressed with the modifiers held.
+static void TickRecording()
+{
+	if (recording.empty()) return;
+	auto down = [](int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; };
+	if (down(VK_ESCAPE))
+	{
+		recording.clear();
+		if (palette) palette->dirty = true;
+		return;
+	}
+	int key = 0;
+	for (int vk = '0'; vk <= 'Z' && !key; vk++)
+		if ((vk <= '9' || vk >= 'A') && down(vk)) key = vk;
+	for (int vk = VK_F1; vk <= VK_F24 && !key; vk++)
+		if (down(vk)) key = vk;
+	bool ctrl = down(VK_CONTROL), alt = down(VK_MENU), shift = down(VK_SHIFT), win = down(VK_LWIN) || down(VK_RWIN);
+	if (!key || (key < VK_F1 && !ctrl && !alt && !win)) return; // a bare letter would fire while typing
+	ByteString combo;
+	if (ctrl) combo += "Ctrl+";
+	if (alt) combo += "Alt+";
+	if (shift) combo += "Shift+";
+	if (win) combo += "Win+";
+	combo += key >= VK_F1 ? ByteString::Build("F", key - VK_F1 + 1) : ByteString(1, char(key));
+	GlobalPrefs::Ref().Set("Overlay.Keys." + recording, combo);
+	recording.clear();
+	OverlayLoadKeys();
+	if (palette) palette->dirty = true;
 }
 
 void OverlayWindows::TogglePalette()

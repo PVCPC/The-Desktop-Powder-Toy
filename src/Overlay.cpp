@@ -92,6 +92,17 @@ void OverlaySetInput(OverlayInput newInput)
 #endif
 }
 
+void OverlayLoadKeys()
+{
+#ifdef _WIN32
+	auto &prefs = GlobalPrefs::Ref();
+	cycleInput = Hotkey::Parse(prefs.Get("Overlay.Keys.CycleInput", ByteString("Ctrl+Alt+O")));
+	passThroughKey = Hotkey::Parse(prefs.Get("Overlay.Keys.PassThrough", ByteString("Ctrl+Alt+P")));
+	lockedKey = Hotkey::Parse(prefs.Get("Overlay.Keys.Locked", ByteString("Ctrl+Alt+L")));
+	paletteKey = Hotkey::Parse(prefs.Get("Overlay.Keys.Palette", ByteString("Ctrl+Alt+E")));
+#endif
+}
+
 OverlayInput OverlayGetInput()
 {
 #ifdef _WIN32
@@ -115,10 +126,7 @@ void ApplyOverlay(SDL_Window *window)
 	// SDL_WINDOW_ALWAYS_ON_TOP alone doesn't stick once the style changes above; set it on the window itself.
 	SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 	auto &prefs = GlobalPrefs::Ref();
-	cycleInput = Hotkey::Parse(prefs.Get("Overlay.Keys.CycleInput", ByteString("Ctrl+Alt+O")));
-	passThroughKey = Hotkey::Parse(prefs.Get("Overlay.Keys.PassThrough", ByteString("Ctrl+Alt+P")));
-	lockedKey = Hotkey::Parse(prefs.Get("Overlay.Keys.Locked", ByteString("Ctrl+Alt+L")));
-	paletteKey = Hotkey::Parse(prefs.Get("Overlay.Keys.Palette", ByteString("Ctrl+Alt+E")));
+	OverlayLoadKeys();
 	OverlayWindows::Init(hwnd);
 	SetInput(prefs.Get("Overlay.Input", OverlayInput::Count, OverlayInput::Auto), false);
 #else
@@ -133,19 +141,23 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 	{
 		return;
 	}
-	if (cycleInput.Pressed())
+	if (OverlayWindows::RecordingKey())
+	{
+		// the keys being recorded must not also fire
+	}
+	else if (cycleInput.Pressed())
 	{
 		SetInput(OverlayInput((int(input) + 1) % int(OverlayInput::Count)));
 	}
-	if (passThroughKey.Pressed())
+	else if (passThroughKey.Pressed())
 	{
 		SetInput(input == OverlayInput::PassThrough ? OverlayInput::Auto : OverlayInput::PassThrough);
 	}
-	if (lockedKey.Pressed())
+	else if (lockedKey.Pressed())
 	{
 		SetInput(input == OverlayInput::Locked ? OverlayInput::Auto : OverlayInput::Locked);
 	}
-	if (paletteKey.Pressed())
+	else if (paletteKey.Pressed())
 	{
 		OverlayWindows::TogglePalette();
 	}

@@ -174,6 +174,19 @@ Assessment, in the order I'd do it (effort: S = an hour or two, M = a session, L
 Dropped: a Kingsway-style taskbar and start button. The tray icon plus the side window cover launching. Vista
 tray menu: the tray menu stays native on purpose.
 
+## Rough edges (user request 2026-10-30: fix and polish all of them; tick each off as it's fixed)
+
+- [ ] Vista skin: rows half-scrolled out of a scroll panel vanish instead of being clipped
+- [ ] Vista skin: the text caret is always at the end; no selection highlight
+- [ ] Typing into a hosted dialog's text field is untested
+- [ ] Hosted dialogs don't resize (TPT dialogs are fixed size; a resize remakes the window)
+- [ ] Render options (drawn in place) sits partly under the taskbar
+- [ ] Tools tab sits after Welcome; it belongs next to Elements
+- [ ] Shortcut recording is untested with real key presses (tests can't press keys on this PC)
+- [ ] Changing the UI scale keeps the side window's pixel size
+- [ ] The Saves tab doesn't show the open save's name, votes or tags (the hidden bottom row did)
+- [ ] Remade windows leave a ghost of the old title for a moment (DWM fade)
+
 ## Ideas
 
 - **Menu inspiration: Kingsway** (2017), whose whole UI is a fake retro desktop. Every TPT panel would be its own
