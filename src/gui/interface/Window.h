@@ -81,6 +81,11 @@ namespace ui
 
 		void* UserData;
 
+		// For the overlay, which shows each window in its own OS window: its title bar text, and false for popups
+		// (menus, drop-down lists) that get no frame.
+		String Title;
+		bool Framed = true;
+
 		enum OkayMethod { Enter, OkayButton };
 		enum ExitMethod { MouseOutside, Escape, ExitButton };
 

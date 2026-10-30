@@ -21,6 +21,7 @@ TaskWindow::TaskWindow(String title_, Task * task_, bool closeOnDone):
 	closeOnDone(closeOnDone),
 	progressStatus("0%")
 {
+	Title = title_;
 
 	ui::Label * tempLabel = new ui::Label(ui::Point(4, 5), ui::Point(Size.X-8, 15), title);
 	tempLabel->Appearance.HorizontalAlign = ui::Appearance::AlignLeft;

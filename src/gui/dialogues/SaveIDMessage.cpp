@@ -10,6 +10,7 @@
 SaveIDMessage::SaveIDMessage(int id):
 	ui::Window(ui::Point((XRES-244)/2, (YRES-90)/2), ui::Point(244, 90))
 {
+	Title = "Save uploaded";
 	int textWidth = Graphics::TextSize("Save ID").X - 1;
 	ui::Label * titleLabel = new ui::Label(ui::Point(4, 5), ui::Point(textWidth+20, 16), "Save ID");
 	titleLabel->SetTextColour(style::Colour::InformationTitle);

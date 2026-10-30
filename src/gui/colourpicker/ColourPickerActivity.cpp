@@ -20,6 +20,7 @@ ColourPickerActivity::ColourPickerActivity(ui::Colour initialColour, OnPicked on
 	mouseDown(false),
 	onPicked(onPicked_)
 {
+	Title = "Colour picker";
 	auto colourChange = [this] {
 		int r, g, b, alpha;
 		r = rValue->GetText().ToNumber<int>(true);

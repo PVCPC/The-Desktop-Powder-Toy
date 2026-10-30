@@ -29,6 +29,7 @@ ElementSearchActivity::ElementSearchActivity(GameController * gameController, st
 	isToolTipFadingIn(false),
 	exit(false)
 {
+	Title = "Element search";
 	ui::Label * title = new ui::Label(ui::Point(4, 5), ui::Point(Size.X-8, 15), "Element Search");
 	title->SetTextColour(style::Colour::InformationTitle);
 	title->Appearance.HorizontalAlign = ui::Appearance::AlignLeft;

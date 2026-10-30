@@ -97,6 +97,12 @@ overlay, and TPT only runs the top screen, so **the sim freezes while any dialog
    own surface, mouse and keys routed back with the offset, title from the dialog, close = the dialog's own
    cancel. This moves *all* of TPT's UI (and Lua scripts' windows) off the overlay at once. They keep TPT's look
    inside our frame and scale by whole pixels.
+   - [x] Done (2026-10-30): Engine::Hosted cuts every window above the game out of each frame; OverlayWindows
+     hosts each in a Vista-framed window owned by the side window (frameless for menus and drop-downs, placed over
+     the window they came from), at TPT's scale or the largest whole scale that fits the monitor. Mouse goes back
+     with the offset; a click on the sim layer counts as a click outside the window. Close = the dialog's own exit
+     (Escape). Titles come from ui::Window::Title (set in each dialog; RTTI is off). Left: typing into a hosted
+     dialog's text field is untested (clicking a host gives TPT's window the keyboard); hosts don't resize.
 4. **Native replacements, most used first** (M each): screens rebuilt in our own controls, laid out for the
    window size: element search, property tool, sign tool, deco colour picker, local saves and stamps (a real file
    list with thumbnails, drag and drop), options, render options, the Lua console. Rare or online screens (login,

@@ -63,6 +63,7 @@ ServerSaveActivity::ServerSaveActivity(std::unique_ptr<SaveInfo> newSave, OnUplo
 	onUploaded(onUploaded_),
 	saveUploadTask(nullptr)
 {
+	Title = "Upload save";
 	titleLabel = new ui::Label(ui::Point(4, 5), ui::Point((Size.X/2)-8, 16), "");
 	titleLabel->SetTextColour(style::Colour::InformationTitle);
 	titleLabel->Appearance.HorizontalAlign = ui::Appearance::AlignLeft;
@@ -161,6 +162,7 @@ ServerSaveActivity::ServerSaveActivity(std::unique_ptr<SaveInfo> newSave, bool s
 	onUploaded(onUploaded_),
 	saveUploadTask(nullptr)
 {
+	Title = "Upload save";
 	ui::Label * titleLabel = new ui::Label(ui::Point(0, 0), Size, "Saving to server...");
 	titleLabel->SetTextColour(style::Colour::InformationTitle);
 	titleLabel->Appearance.HorizontalAlign = ui::Appearance::AlignCentre;

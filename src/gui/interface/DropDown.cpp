@@ -20,6 +20,7 @@ public:
 		dropDown(dropDown),
 		appearance(dropDown->Appearance)
 	{
+		Framed = false;
 		int currentY = 1;
 		for (size_t i = 0; i < dropDown->options.size(); i++)
 		{

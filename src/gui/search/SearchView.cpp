@@ -27,6 +27,7 @@ SearchView::SearchView():
 	pageCount(0),
 	publishButtonShown(false)
 {
+	Title = "Online saves";
 
 	Client::Ref().AddListener(this);
 

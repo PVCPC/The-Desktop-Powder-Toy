@@ -49,6 +49,7 @@ PreviewView::PreviewView(std::unique_ptr<VideoBuffer> newSavePreview):
 	commentBoxHeight(20),
 	commentHelpText(false)
 {
+	Title = "Save preview";
 	if (newSavePreview)
 	{
 		newSavePreview->Resize(RES / 2, true);

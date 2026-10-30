@@ -364,6 +364,10 @@ static void EventProcess(const SDL_Event &event)
 		break;
 	case SDL_MOUSEWHEEL:
 	{
+		if (!engine.Hosted.empty())
+		{
+			break; // the overlay's dialog windows have the mouse
+		}
 		// int x = event.wheel.x;
 		int y = event.wheel.y;
 		if (event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED)
@@ -378,7 +382,10 @@ static void EventProcess(const SDL_Event &event)
 	case SDL_MOUSEMOTION:
 		mousex = event.motion.x;
 		mousey = event.motion.y;
-		engine.onMouseMove(mousex, mousey);
+		if (engine.Hosted.empty())
+		{
+			engine.onMouseMove(mousex, mousey);
+		}
 
 		hasMouseMoved = true;
 		break;
@@ -394,6 +401,11 @@ static void EventProcess(const SDL_Event &event)
 			mousey = event.button.y;
 		}
 		mouseButton = event.button.button;
+		if (!engine.Hosted.empty())
+		{
+			engine.onMouseDown(-(1 << 20), -(1 << 20), mouseButton); // outside every window
+			break;
+		}
 		engine.onMouseDown(mousex, mousey, mouseButton);
 
 		mouseDown = true;
@@ -410,6 +422,10 @@ static void EventProcess(const SDL_Event &event)
 			mousey = event.button.y;
 		}
 		mouseButton = event.button.button;
+		if (!engine.Hosted.empty() && !mouseDown)
+		{
+			break;
+		}
 		engine.onMouseUp(mousex, mousey, mouseButton);
 
 		mouseDown = false;

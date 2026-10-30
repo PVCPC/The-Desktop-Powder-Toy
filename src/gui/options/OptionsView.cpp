@@ -56,6 +56,7 @@ public:
 		done(newDone),
 		direction(new ui::DirectionSelector(ui::Point(10, 32), scale, radius, radius / 4, 2, 5))
 	{
+		Framed = false;
 		ui::Label * tempLabel = new ui::Label(ui::Point(4, 1), ui::Point(Size.X - 8, 22), label);
 		tempLabel->SetTextColour(style::Colour::InformationTitle);
 		tempLabel->Appearance.HorizontalAlign = ui::Appearance::AlignLeft;
@@ -109,6 +110,7 @@ namespace
 
 OptionsView::OptionsView() : ui::Window(ui::Point(-1, -1), ui::Point(320, 340))
 {
+	Title = "Settings";
 	auto autoWidth = [this](ui::Component *c, int extra) {
 		c->Size.X = Size.X - c->Position.X - 12 - extra;
 	};

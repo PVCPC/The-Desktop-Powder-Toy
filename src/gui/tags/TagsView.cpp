@@ -19,6 +19,7 @@
 TagsView::TagsView():
 	ui::Window(ui::Point(-1, -1), ui::Point(195, 250))
 {
+	Title = "Tags";
 	closeButton = new ui::Button(ui::Point(0, Size.Y-16), ui::Point(195, 16), "Close");
 	closeButton->Appearance.HorizontalAlign = ui::Appearance::AlignLeft;
 	closeButton->Appearance.VerticalAlign = ui::Appearance::AlignMiddle;

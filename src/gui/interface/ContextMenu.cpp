@@ -10,6 +10,7 @@ ContextMenu::ContextMenu(Component * source):
 		source(source),
 		Appearance(source->Appearance)
 {
+	Framed = false;
 }
 
 void ContextMenu::Show(ui::Point position)

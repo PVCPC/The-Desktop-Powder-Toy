@@ -208,13 +208,36 @@ void Engine::SimTick()
 
 void Engine::Draw()
 {
+	Hosted.clear();
 	if (LiveBackground && !windows.empty())
 	{
 		g->Clear();
-		for (auto *window : windows)
+		windows.front()->DoDraw(); // the game
+		std::vector<Window *> above(windows.begin() + 1, windows.end());
+		if (state_)
+			above.push_back(state_);
+		auto stride = g->Size().X;
+		for (auto *window : above)
+		{
+			auto rect = RectSized(window->Position, window->Size) & g->Size().OriginRect();
+			std::vector<pixel> under(size_t(rect.size.X) * rect.size.Y), drawn(under.size());
+			for (int y = 0; y < rect.size.Y; y++)
+				std::copy_n(g->Data() + (rect.pos.Y + y) * stride + rect.pos.X, rect.size.X, under.data() + y * rect.size.X);
 			window->DoDraw();
+			for (int y = 0; y < rect.size.Y; y++)
+			{
+				auto *row = g->Data() + (rect.pos.Y + y) * stride + rect.pos.X;
+				std::copy_n(row, rect.size.X, drawn.data() + y * rect.size.X);
+				std::copy_n(under.data() + y * rect.size.X, rect.size.X, row);
+			}
+			Hosted.push_back({ window, rect.pos, rect.size, std::move(drawn) });
+		}
+		g->Finalise();
+		FrameIndex++;
+		FrameIndex %= 7200;
+		return;
 	}
-	else if (!frozenGraphics.empty() && !(state_ && RectSized(state_->Position, state_->Size) == g->Size().OriginRect()))
+	if (!frozenGraphics.empty() && !(state_ && RectSized(state_->Position, state_->Size) == g->Size().OriginRect()))
 	{
 		auto &frozen = frozenGraphics.top();
 		std::copy_n(frozen.screen.get(), g->Size().X * g->Size().Y, g->Data());

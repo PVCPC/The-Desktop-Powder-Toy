@@ -13,6 +13,7 @@ TextPrompt::TextPrompt(String title, String message, String text, String placeho
 	ui::Window(ui::Point(-1, -1), ui::Point(200, 65)),
 	callback(callback_)
 {
+	Title = title;
 	if(multiline)
 		Size.X += 100;
 

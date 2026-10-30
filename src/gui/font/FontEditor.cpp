@@ -257,6 +257,7 @@ FontEditor::FontEditor(ByteString _dataFile):
 	grid(1),
 	rulers(1)
 {
+	Title = "Font editor";
 	ReadDataFile(dataFile);
 	UnpackData(fontWidths, fontPixels, fontData, fontPtrs, fontRanges);
 	font_data = fontData.data();
@@ -439,6 +440,7 @@ FontEditor::FontEditor(ByteString _dataFile):
 FontEditor::FontEditor(ByteString target, ByteString source):
 	ui::Window(ui::Point(0, 0), ui::Point(WINDOWW, WINDOWH))
 {
+	Title = "Font editor";
 	ReadDataFile(target);
 	std::map<String::value_type, unsigned char> tgtFontWidths, srcFontWidths;
 	std::map<String::value_type, std::array<std::array<char, MAX_WIDTH>, FONT_H> > tgtFontPixels, srcFontPixels;

@@ -12,6 +12,7 @@ InformationMessage::InformationMessage(String title, String message, bool large,
 	ui::Window(ui::Point(-1, -1), ui::Point(200, 35)),
 	callback(callback_)
 {
+	Title = title;
 	if (large) //Maybe also use this large mode for changelogs eventually, or have it as a customizable size?
 	{
 		Size.X += 200;

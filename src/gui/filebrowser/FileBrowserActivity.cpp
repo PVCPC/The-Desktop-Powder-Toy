@@ -75,6 +75,7 @@ FileBrowserActivity::FileBrowserActivity(ByteString directory, OnSelected onSele
 	hasQueuedSearch(false),
 	totalFiles(0)
 {
+	Title = "Open file";
 
 	ui::Label * titleLabel = new ui::Label(ui::Point(4, 5), ui::Point(Size.X-8, 18), "Save Browser");
 	titleLabel->SetTextColour(style::Colour::WarningTitle);

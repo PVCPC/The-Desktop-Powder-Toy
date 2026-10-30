@@ -17,6 +17,7 @@
 Credits::Credits():
 	ui::Window(ui::Point(-1, -1), ui::Point(WINDOWW, WINDOWH))
 {
+	Title = "Credits";
 	Json::Value root;
 	Json::Reader reader;
 	auto credits = credits_json.AsCharSpan();

@@ -59,7 +59,10 @@ LuaWindow::LuaWindow(lua_State *L)
 	{
 		LuaWindow * luaWindow;
 	public:
-		DrawnWindow(ui::Point position, ui::Point size, LuaWindow * luaWindow) : ui::Window(position, size), luaWindow(luaWindow) {}
+		DrawnWindow(ui::Point position, ui::Point size, LuaWindow * luaWindow) : ui::Window(position, size), luaWindow(luaWindow)
+		{
+			Title = "Script window";
+		}
 		void OnDraw() override
 		{
 			Graphics * g = ui::Engine::Ref().g;

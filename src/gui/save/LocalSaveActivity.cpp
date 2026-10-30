@@ -22,6 +22,7 @@ LocalSaveActivity::LocalSaveActivity(std::unique_ptr<SaveFile> newSave, OnSaved 
 	thumbnailRenderer(nullptr),
 	onSaved(onSaved_)
 {
+	Title = "Save";
 	ui::Label * titleLabel = new ui::Label(ui::Point(4, 5), ui::Point(Size.X-8, 16), "Save to computer:");
 	titleLabel->SetTextColour(style::Colour::InformationTitle);
 	titleLabel->Appearance.HorizontalAlign = ui::Appearance::AlignLeft;

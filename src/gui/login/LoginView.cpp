@@ -23,6 +23,7 @@ LoginView::LoginView():
 	usernameField(new ui::Textbox(ui::Point(8, 25), ui::Point(200-16, 17), "", "[username]")),
 	passwordField(new ui::Textbox(ui::Point(8, 46), ui::Point(200-16, 17), "", "[password]"))
 {
+	Title = "Sign in";
 	if (auto user = Client::Ref().GetAuthUser())
 	{
 		usernameField->SetText(user->Username.FromUtf8());

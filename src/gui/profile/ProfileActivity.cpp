@@ -19,6 +19,7 @@ ProfileActivity::ProfileActivity(ByteString username) :
 	doError(false),
 	doErrorMessage("")
 {
+	Title = "Profile";
 	auto user = Client::Ref().GetAuthUser();
 	editable = user && user->Username == username;
 

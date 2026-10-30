@@ -42,6 +42,7 @@ GOLWindow::GOLWindow(GameModel &gameModel_, int toolSelection, int rule, RGB col
 	gameModel(gameModel_),
 	toolSelection(toolSelection)
 {
+	Title = "Game of Life";
 	highColour.Alpha = 255;
 	lowColour.Alpha = 255;
 	ui::Label * messageLabel = new ui::Label(ui::Point(4, 5), ui::Point(Size.X-8, 14), "Edit custom GOL type");

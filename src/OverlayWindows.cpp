@@ -15,6 +15,9 @@
 #include "common/platform/Platform.h"
 #include "graphics/Renderer.h"
 #include "gui/game/RenderPreset.h"
+#include "gui/interface/Engine.h"
+#include "graphics/Graphics.h"
+#include "gui/interface/Window.h"
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -313,6 +316,7 @@ namespace
 		bool appWindow = false;
 		int grip = 0; // resize border width
 		Vec2<int> minSize{ 0, 0 };
+		HWND owner = nullptr; // an owned window: no taskbar button, normal z-order, minimises with its owner
 
 		virtual ~Panel() = default;
 		virtual void Paint() = 0;
@@ -334,10 +338,10 @@ namespace
 			}
 			cv.Resize(w, h);
 			// NOACTIVATE either way: the keyboard stays with TPT. ponytail: windows with text fields will need focus.
-			DWORD ex = WS_EX_LAYERED | WS_EX_NOACTIVATE | (appWindow ? WS_EX_APPWINDOW : WS_EX_TOOLWINDOW | WS_EX_TOPMOST);
+			DWORD ex = WS_EX_LAYERED | WS_EX_NOACTIVATE | (appWindow ? WS_EX_APPWINDOW : owner ? 0 : WS_EX_TOOLWINDOW | WS_EX_TOPMOST);
 			DWORD style = WS_POPUP | (appWindow ? WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU | WS_THICKFRAME : 0);
 			hwnd = CreateWindowExW(ex, L"TPTOverlayPanel", title.empty() ? Platform::WinWiden(name).c_str() : title.c_str(), style, x, y, w, h,
-			                       nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+			                       owner, nullptr, GetModuleHandleW(nullptr), nullptr);
 			SetWindowLongPtrW(hwnd, GWLP_USERDATA, LONG_PTR(this));
 			if (appWindow)
 			{
@@ -471,6 +475,7 @@ namespace
 				case WM_RBUTTONDOWN:
 				case WM_RBUTTONUP:
 				case WM_MBUTTONDOWN:
+				case WM_MBUTTONUP:
 					self->Mouse(msg, GET_X_LPARAM(lp), GET_Y_LPARAM(lp), wp);
 					return 0;
 				case WM_MOUSEWHEEL:
@@ -1078,6 +1083,178 @@ namespace
 	std::unique_ptr<Toast> toast;
 	bool passThrough = false;
 
+	// A TPT window (dialog, browser, menu) in its own app window. TPT still draws it (Engine::Hosted, every frame);
+	// we show it at a whole-pixel scale in a Vista frame and send the mouse back. Menus get no frame.
+	struct HostWindow : Panel
+	{
+		ui::Window *window;
+		bool framed;
+		int scale = 1, titleH = 0, border = 0;
+		ui::Point pos{ 0, 0 }, size{ 0, 0 };
+		std::vector<pixel> pixels;
+		bool hoverClose = false;
+
+		HostWindow(ui::Window *window) : window(window)
+		{
+			framed = window->Framed;
+			name = "Host";
+			title = window->Title.empty() ? L"The Powder Toy" : Wide(window->Title);
+			if (framed)
+			{
+				titleH = S(28);
+				border = S(6);
+			}
+		}
+		~HostWindow() override
+		{
+			SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+			DestroyWindow(hwnd);
+		}
+
+		ui::Point ClientOrigin() { return { border, titleH }; }
+		RECT CloseRect() { return { cv.w - border - S(43), 1, cv.w - border, 1 + S(18) }; }
+		bool OnTop() { return ui::Engine::Ref().GetWindow() == window; }
+
+		void Paint() override
+		{
+			if (framed)
+			{
+				vista::Frame(cv, titleH, border, title);
+				vista::CaptionButton(cv, CloseRect(), hoverClose, vista::CaptionClose);
+			}
+			for (int y = 0; y < size.Y * scale && titleH + y < cv.h; y++)
+			{
+				auto *src = pixels.data() + size_t(y / scale) * size.X;
+				auto *dst = cv.px.data() + size_t(titleH + y) * cv.w + border;
+				for (int x = 0; x < size.X * scale && border + x < cv.w; x++)
+					dst[x] = src[x / scale] | 0xFF000000;
+			}
+		}
+
+		LRESULT HitTest(int x, int y) override
+		{
+			return framed && y < titleH && !Inside(CloseRect(), x, y) ? HTCAPTION : HTCLIENT;
+		}
+
+		void Mouse(UINT msg, int x, int y, WPARAM wp) override
+		{
+			bool overClose = framed && msg != WM_MOUSELEAVE && Inside(CloseRect(), x, y);
+			if (overClose != hoverClose)
+			{
+				hoverClose = overClose;
+				dirty = true;
+				Present();
+			}
+			if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN)
+			{
+				SetForegroundWindow(mainWindow); // TPT's window has the keyboard, and the dialog gets its keys from it
+			}
+			auto &engine = ui::Engine::Ref();
+			if (!OnTop() || msg == WM_MOUSELEAVE)
+			{
+				return; // modal, as in TPT: only the top window takes input
+			}
+			if (overClose)
+			{
+				if (msg == WM_LBUTTONUP)
+				{
+					// The dialog's own way out (cancel), as if Escape was pressed.
+					engine.onKeyPress(SDLK_ESCAPE, SDL_SCANCODE_ESCAPE, false, false, false, false);
+					engine.onKeyRelease(SDLK_ESCAPE, SDL_SCANCODE_ESCAPE, false, false, false, false);
+				}
+				return;
+			}
+			auto origin = ClientOrigin();
+			int ex = pos.X + (x - origin.X) / scale, ey = pos.Y + (y - origin.Y) / scale;
+			switch (msg)
+			{
+			case WM_MOUSEMOVE: engine.onMouseMove(ex, ey); break;
+			case WM_LBUTTONDOWN: SetCapture(hwnd); engine.onMouseDown(ex, ey, SDL_BUTTON_LEFT); break;
+			case WM_RBUTTONDOWN: SetCapture(hwnd); engine.onMouseDown(ex, ey, SDL_BUTTON_RIGHT); break;
+			case WM_MBUTTONDOWN: SetCapture(hwnd); engine.onMouseDown(ex, ey, SDL_BUTTON_MIDDLE); break;
+			case WM_LBUTTONUP: ReleaseCapture(); engine.onMouseUp(ex, ey, SDL_BUTTON_LEFT); break;
+			case WM_RBUTTONUP: ReleaseCapture(); engine.onMouseUp(ex, ey, SDL_BUTTON_RIGHT); break;
+			case WM_MBUTTONUP: ReleaseCapture(); engine.onMouseUp(ex, ey, SDL_BUTTON_MIDDLE); break;
+			case WM_MOUSEWHEEL: engine.onMouseWheel(ex, ey, GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA); break;
+			}
+		}
+	};
+	std::vector<std::unique_ptr<HostWindow>> hosts;
+
+	// One host per TPT window above the game: made when the window opens, gone when it closes, repainted when its
+	// picture changes.
+	void SyncHosts()
+	{
+		auto &engine = ui::Engine::Ref();
+		std::vector<std::unique_ptr<HostWindow>> kept;
+		HostWindow *below = nullptr;
+		for (auto &hosted : engine.Hosted)
+		{
+			auto it = std::find_if(hosts.begin(), hosts.end(), [&](auto &h) { return h && h->window == hosted.window; });
+			std::unique_ptr<HostWindow> host;
+			if (it != hosts.end())
+			{
+				host = std::move(*it);
+			}
+			if (host && host->size != hosted.size)
+			{
+				host.reset(); // ponytail: a window that changes size is remade (and re-placed)
+			}
+			if (!host)
+			{
+				host = std::make_unique<HostWindow>(hosted.window);
+				host->size = hosted.size;
+				host->owner = palette ? palette->hwnd : nullptr;
+				// Where TPT would have drawn it: over the window below it, or on the sim layer.
+				RECT sr;
+				GetWindowRect(mainWindow, &sr);
+				auto screen = engine.g->Size();
+				int anchorScale = below ? below->scale : std::max(1, int((sr.right - sr.left) / screen.X));
+				POINT at = below ? POINT{ 0, 0 } : POINT{ sr.left, sr.top };
+				if (below)
+				{
+					RECT br;
+					GetWindowRect(below->hwnd, &br);
+					at = { br.left + below->border + (hosted.pos.X - below->pos.X) * anchorScale,
+					       br.top + below->titleH + (hosted.pos.Y - below->pos.Y) * anchorScale };
+				}
+				else
+				{
+					at = { sr.left + hosted.pos.X * anchorScale, sr.top + hosted.pos.Y * anchorScale };
+				}
+				MONITORINFO mi{ sizeof(mi) };
+				GetMonitorInfoW(MonitorFromPoint(at, MONITOR_DEFAULTTONEAREST), &mi);
+				auto work = mi.rcWork;
+				int chromeW = 2 * host->border, chromeH = host->titleH + host->border;
+				host->scale = std::max(1, std::min({ engine.GetScale(), int(work.right - work.left - chromeW) / std::max(1, hosted.size.X),
+				                                      int(work.bottom - work.top - chromeH) / std::max(1, hosted.size.Y) }));
+				int w = hosted.size.X * host->scale + chromeW, h = hosted.size.Y * host->scale + chromeH;
+				int x = at.x - host->border, y = at.y - host->titleH;
+				if (host->framed && !below)
+				{
+					// A dialog that TPT centres on its screen: centre it on the monitor instead, the sim layer's
+					// scale can differ from the dialog's.
+					x = (work.left + work.right - w) / 2;
+					y = (work.top + work.bottom - h) / 2;
+				}
+				x = std::clamp(x, int(work.left), std::max(int(work.left), int(work.right) - w));
+				y = std::clamp(y, int(work.top), std::max(int(work.top), int(work.bottom) - h));
+				host->Create(x, y, w, h);
+				ShowWindow(host->hwnd, SW_SHOWNOACTIVATE);
+			}
+			host->pos = hosted.pos;
+			if (host->pixels != hosted.pixels)
+			{
+				host->pixels = hosted.pixels;
+				host->dirty = true;
+				host->Present();
+			}
+			below = host.get();
+			kept.push_back(std::move(host));
+		}
+		hosts = std::move(kept); // the rest close
+	}
+
 	// The notification-area (tray) icon: left click shows or hides the Elements window, right click opens a menu.
 	NOTIFYICONDATAW tray{};
 	constexpr UINT trayMessage = WM_APP + 1;
@@ -1234,6 +1411,7 @@ void OverlayWindows::Tick()
 	{
 		toast->Tick();
 	}
+	SyncHosts();
 }
 
 void OverlayWindows::TogglePalette()
@@ -1343,19 +1521,31 @@ void OverlayWindows::ApplySimMasks(uint32_t *argb, int w)
 void OverlayWindows::ClearUnderWindows(uint32_t *argb, int w, int h, int ww, int wh)
 {
 	// ponytail: also clears where another app's window covers ours; walk the z-order if that ever matters.
-	if (!palette || !IsWindowVisible(palette->hwnd) || IsIconic(palette->hwnd) || ww <= 0 || wh <= 0)
+	if (ww <= 0 || wh <= 0)
 	{
 		return;
 	}
-	RECT pr, sr;
-	GetWindowRect(palette->hwnd, &pr);
+	RECT sr;
 	GetWindowRect(mainWindow, &sr);
 	auto map = [](long v, int n, int nw, bool up) { return int(std::clamp((v * n + (up ? nw - 1 : 0)) / nw, 0L, long(n))); };
-	int x0 = map(pr.left - sr.left, w, ww, false), x1 = map(pr.right - sr.left, w, ww, true);
-	int y0 = map(pr.top - sr.top, h, wh, false), y1 = map(pr.bottom - sr.top, h, wh, true);
-	for (int y = y0; y < y1; y++)
+	auto clear = [&](HWND hwnd) {
+		if (!hwnd || !IsWindowVisible(hwnd) || IsIconic(hwnd))
+		{
+			return;
+		}
+		RECT pr;
+		GetWindowRect(hwnd, &pr);
+		int x0 = map(pr.left - sr.left, w, ww, false), x1 = map(pr.right - sr.left, w, ww, true);
+		int y0 = map(pr.top - sr.top, h, wh, false), y1 = map(pr.bottom - sr.top, h, wh, true);
+		for (int y = y0; y < y1; y++)
+		{
+			std::fill(argb + size_t(y) * w + x0, argb + size_t(y) * w + x1, 0);
+		}
+	};
+	clear(palette ? palette->hwnd : nullptr);
+	for (auto &host : hosts)
 	{
-		std::fill(argb + size_t(y) * w + x0, argb + size_t(y) * w + x1, 0);
+		clear(host->hwnd);
 	}
 }
 

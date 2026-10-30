@@ -3,6 +3,7 @@
 #include <optional>
 #include <stack>
 #include <variant>
+#include <vector>
 #include "common/String.h"
 #include "common/ExplicitSingleton.h"
 #include "graphics/Pixel.h"
@@ -136,6 +137,15 @@ namespace ui
 	public:
 		// Windows under the top one keep simulating and drawing (the overlay: the sim never stops for a dialog).
 		bool LiveBackground = false;
+		// With LiveBackground: this frame's picture of every window above the game, bottom first, cut out of the
+		// screen so the overlay can show each in its own OS window.
+		struct HostedWindow
+		{
+			Window *window;
+			Point pos, size;
+			std::vector<pixel> pixels;
+		};
+		std::vector<HostedWindow> Hosted;
 		bool MomentumScroll = true;
 		bool ShowAvatars = true;
 		bool TouchUI = false;
