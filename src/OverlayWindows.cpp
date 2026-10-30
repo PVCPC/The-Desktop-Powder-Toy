@@ -21,6 +21,9 @@
 #include "graphics/Graphics.h"
 #include "gui/interface/Window.h"
 #include <algorithm>
+#include <atomic>
+#include <thread>
+#include <tuple>
 #include <cmath>
 #include <functional>
 #include <map>
@@ -895,7 +898,17 @@ namespace
 			PushButton(x + S(12), top + S(29), bw, L"Stamps\u2026", [] { GameController::Ref().OpenStamps(); }, L"Saved selections (K)");
 			PushButton(x + S(12) + bw + S(6), top + S(29), bw, L"Reload", [] { GameController::Ref().ReloadSim(); }, L"Back to the last loaded save (F5)");
 			y += S(104);
+			// What TPT's bottom button row had (it's hidden while the side window is open).
+			top = Group(x, y, w, S(125), L"Online");
+			PushButton(x + S(12), top, bw, L"Browse\u2026", [] { GameController::Ref().OpenSearch(""); }, L"Saves on powdertoy.co.uk");
+			PushButton(x + S(12) + bw + S(6), top, bw, L"Upload\u2026", [] { GameController::Ref().OpenSaveWindow(); }, L"Save to powdertoy.co.uk");
+			PushButton(x + S(12), top + S(29), bw, L"\u25B2 Vote up", [] { GameController::Ref().Vote(1); }, L"Vote for the save you opened");
+			PushButton(x + S(12) + bw + S(6), top + S(29), bw, L"\u25BC Vote down", [] { GameController::Ref().Vote(-1); }, L"Vote against the save you opened");
+			PushButton(x + S(12), top + S(58), bw, L"Tags\u2026", [] { GameController::Ref().OpenTags(); }, L"The open save's tags");
+			PushButton(x + S(12) + bw + S(6), top + S(58), bw, L"Sign in\u2026", [] { GameController::Ref().OpenLogin(); }, L"Your powdertoy.co.uk account");
+			y += S(133);
 			top = Group(x, y, w, S(52), L"TPT");
+			PushButton(x + S(12) + bw + S(6), top, bw, L"Render options\u2026", [] { GameController::Ref().OpenRenderOptions(); }, L"TPT's view and render settings");
 			PushButton(x + S(12), top, bw, L"Options\u2026", [] { GameController::Ref().OpenOptions(); }, L"TPT's own settings window");
 		}
 
@@ -1424,6 +1437,67 @@ namespace
 	};
 	std::vector<std::unique_ptr<HostWindow>> hosts;
 
+	// A TPT drop-down list or context menu, shown as a real Windows menu. TrackPopupMenu runs its own message loop,
+	// so it runs on a thread of its own (with its own hidden owner window) and the sim keeps going meanwhile.
+	struct NativeMenu
+	{
+		ui::Window *window = nullptr;
+		std::thread thread;
+		std::atomic<int> picked{ -1 }; // -1 = still open, 0 = cancelled, n = item n - 1
+		~NativeMenu()
+		{
+			if (thread.joinable()) thread.join();
+		}
+	};
+	std::unique_ptr<NativeMenu> menu;
+
+	void OpenMenu(ui::Window *window, POINT at)
+	{
+		menu = std::make_unique<NativeMenu>();
+		menu->window = window;
+		std::vector<std::tuple<std::wstring, bool, bool>> items;
+		for (auto &it : window->MenuItems) items.push_back({ Wide(it.text), it.enabled, it.checked });
+		menu->thread = std::thread([m = menu.get(), items = std::move(items), at] {
+			HWND owner = CreateWindowExW(WS_EX_TOOLWINDOW, L"STATIC", L"", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, nullptr, nullptr);
+			HMENU popup = CreatePopupMenu();
+			for (size_t i = 0; i < items.size(); i++)
+			{
+				auto &[text, enabled, checked] = items[i];
+				AppendMenuW(popup, MF_STRING | (enabled ? 0 : MF_GRAYED) | (checked ? MF_CHECKED : 0), i + 1, text.c_str());
+				if (checked)
+				{
+					CheckMenuRadioItem(popup, UINT(i + 1), UINT(i + 1), UINT(i + 1), MF_BYCOMMAND);
+				}
+			}
+			SetForegroundWindow(owner); // or the menu won't close on a click elsewhere
+			int cmd = TrackPopupMenu(popup, TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTALIGN | TPM_TOPALIGN, at.x, at.y, 0, owner, nullptr);
+			DestroyMenu(popup);
+			DestroyWindow(owner);
+			m->picked = cmd;
+		});
+	}
+
+	// Called each tick: hands a picked item (or a cancel) back to TPT on its own thread.
+	void TickMenu()
+	{
+		if (!menu || menu->picked < 0) return;
+		int picked = menu->picked;
+		auto *window = menu->window;
+		menu.reset();
+		auto &engine = ui::Engine::Ref();
+		if (engine.GetWindow() != window) return;
+		if (picked > 0 && picked <= int(window->MenuItems.size()))
+		{
+			auto pick = window->MenuItems[picked - 1].pick;
+			pick();
+		}
+		else
+		{
+			engine.onMouseDown(-(1 << 20), -(1 << 20), 1); // a click outside closes it
+			engine.onMouseUp(-(1 << 20), -(1 << 20), 1);
+		}
+	}
+
 	// One host per TPT window above the game: made when the window opens, gone when it closes, repainted when its
 	// picture changes.
 	void SyncHosts()
@@ -1433,6 +1507,29 @@ namespace
 		HostWindow *below = nullptr;
 		for (auto &hosted : engine.Hosted)
 		{
+			if (!hosted.window->MenuItems.empty())
+			{
+				if (!menu || menu->window != hosted.window)
+				{
+					RECT sr;
+					GetWindowRect(mainWindow, &sr);
+					POINT at;
+					if (below)
+					{
+						RECT br;
+						GetWindowRect(below->hwnd, &br);
+						at = { br.left + below->border + (hosted.window->MenuAt.X - below->pos.X) * below->scale,
+						       br.top + below->titleH + (hosted.window->MenuAt.Y - below->pos.Y) * below->scale };
+					}
+					else
+					{
+						int scale = std::max(1, int((sr.right - sr.left) / engine.g->Size().X));
+						at = { sr.left + hosted.window->MenuAt.X * scale, sr.top + hosted.window->MenuAt.Y * scale };
+					}
+					OpenMenu(hosted.window, at);
+				}
+				continue;
+			}
 			auto it = std::find_if(hosts.begin(), hosts.end(), [&](auto &h) { return h && h->window == hosted.window; });
 			std::unique_ptr<HostWindow> host;
 			if (it != hosts.end())
@@ -1656,6 +1753,7 @@ void OverlayWindows::Tick()
 		toast->Tick();
 	}
 	SyncHosts();
+	TickMenu();
 }
 
 void OverlayWindows::TogglePalette()

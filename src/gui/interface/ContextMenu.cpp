@@ -45,6 +45,12 @@ void ContextMenu::Show(ui::Point position)
 		AddComponent(tempButton);
 		currentY += 15;
 	}
+	MenuItems.clear();
+	for (auto &it : items)
+	{
+		MenuItems.push_back({ it.Text, it.Enabled, false, [this, id = it.ID] { ActionCallbackItem(nullptr, id); } });
+	}
+	MenuAt = position;
 
 	MakeActiveWindow();
 }

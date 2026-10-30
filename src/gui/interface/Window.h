@@ -85,6 +85,14 @@ namespace ui
 		// (menus, drop-down lists) that get no frame.
 		String Title;
 		bool Framed = true;
+		struct MenuItem
+		{
+			String text;
+			bool enabled = true, checked = false;
+			std::function<void()> pick;
+		};
+		std::vector<MenuItem> MenuItems; // non-empty: a drop-down list or context menu
+		Point MenuAt{ 0, 0 };       // where it opens, in screen (engine) coordinates
 
 		enum OkayMethod { Enter, OkayButton };
 		enum ExitMethod { MouseOutside, Escape, ExitButton };

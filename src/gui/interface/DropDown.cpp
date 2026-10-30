@@ -36,7 +36,13 @@ public:
 			} });
 			AddComponent(tempButton);
 			currentY += 16;
+			MenuItems.push_back({ option, true, int(i) == dropDown->optionIndex, [this, option] {
+				CloseActiveWindow();
+				setOption(option);
+				SelfDestruct();
+			} });
 		}
+		MenuAt = dropDown->GetScreenPos() + ui::Point(0, dropDown->Size.Y);
 	}
 	void OnDraw() override
 	{

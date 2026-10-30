@@ -109,6 +109,9 @@ overlay, and TPT only runs the top screen, so **the sim freezes while any dialog
    tags, online browser, profile) stay re-hosted until someone needs them native.
    - [ ] Real Vista-style menus, drop-downs and dialogs (user request 2026-10-30): today the hosted ones are TPT's
      pixel UI inside a Vista frame. First: Settings, drop-down lists, context menus.
+     - [x] Drop-down lists and context menus are real Windows menus (ui::Window::MenuItems; TrackPopupMenu on its
+       own thread so the sim keeps running)
+     - [ ] Dialogs: a Vista skin drawn from TPT's components (labels, buttons, checkboxes, text boxes)
 5. **Notifications** (S): startup notices, update news and errors to toasts and a list in the main window.
 6. **Sim layer position setting** (S-M): on top / under windows / behind the desktop icons.
 7. **Themes** (M each): the frame and controls as a theme interface, then XP, 7, 10/11, Mac, Linux.
@@ -137,7 +140,7 @@ Assessment, in the order I'd do it (effort: S = an hour or two, M = a session, L
    - [ ] Tear tabs off into their own windows; dock the window to a screen edge
    - [ ] Play area: drag its edges on the desktop instead of +/- buttons; loop edges wrap at the area edge
    - [x] Bottom button row hidden with the rest (2026-10-30); its save name, vote and tags have no side-window
-     home yet (Saves tab opens the browsers)
+     home yet; the Saves tab's Online group has browse, upload, vote, tags and sign in
    - [x] Welcome tab (2026-10-30): TPT's startup text, rewritten as a Vista start page (headers, keycaps, tip
      bar, links) instead of drawn over the game; the side window opens on it
 2. [ ] **Desktop UI** (L, user request 2026-10-30): see "Desktop UI design" above. Steps: window foundation; sim
