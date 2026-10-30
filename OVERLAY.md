@@ -52,6 +52,57 @@ drawn in software with per-pixel alpha, styled like Windows Vista Aero. They don
 - Black particles stay visible and clickable (the sim's particle map decides, not the colour). Not inside the
   zoom window yet.
 
+## Desktop UI design (2026-10-30)
+
+The overlay puts TPT on the desktop, so its UI has to behave like a desktop app, not a game screen. Today it
+doesn't: TPT's ~25 dialogs (plus any window a Lua script makes) are drawn inside the full-screen, always-on-top
+overlay, and TPT only runs the top screen, so **the sim freezes while any dialog is open**.
+
+### Rules
+
+1. **Two layers.** The *sim layer* is the full-screen, see-through overlay: particles only, never a dialog or menu.
+   Everything else is an *app window*.
+2. **App windows behave like normal windows**: not always on top (other apps can cover them), a title bar, minimise,
+   maximise where it makes sense, close, resize by dragging any edge, Aero Snap, Alt+Tab, remembered position and
+   size per window, moved to the right monitor and DPI.
+3. **One app on the taskbar.** The main window (today's side window) has the taskbar button and the tray icon.
+   Other windows are owned by it: they minimise and restore with it and don't clutter the taskbar.
+4. **The sim never stops for UI.** Dialogs are modal only to the window they came from (e.g. the save browser is
+   modal to the main window), never to the sim. Pausing is the user's choice.
+5. **Windows take the keyboard when they need it** (search, save names, the console), and give it back.
+   TPT's single-key shortcuts work when the sim layer or the main window is active; a few global hotkeys
+   (Ctrl+Alt+...) work everywhere.
+6. **Nothing pops up over your work uninvited.** Startup notices, update news and errors become toasts or a
+   notifications list in the main window; only things that need an answer open a window.
+7. **Scales with the window and the monitor**: the content of a resized window lays out again (native windows) or
+   scales (re-hosted TPT dialogs). Per-monitor DPI.
+8. **Themes are skins on top of real window behaviour**: the frame is ours (Vista now, other OSes later), but
+   hit testing, snapping, minimise and the taskbar are Windows' own, so a theme can't break them.
+9. **Where the sim layer sits is a setting**: on top of everything (now), under app windows, or on the desktop
+   behind the icons.
+
+### How to get there (in order)
+
+1. **Window foundation** (M): turn our Panel into a real top-level window: normal z-order, owner = main window,
+   taskbar button on the main window, WM_NCHITTEST frame for resize and snap, minimise/maximise/close, saved
+   size, keyboard focus on demand. The side window becomes the main window.
+2. **Sim keeps running under dialogs** (S-M): in overlay mode, tick and draw the game every frame even when a
+   dialog is on top of TPT's window stack.
+3. **Re-host every TPT dialog** (M): any TPT window other than the game opens in its own app window: drawn from its
+   own surface, mouse and keys routed back with the offset, title from the dialog, close = the dialog's own
+   cancel. This moves *all* of TPT's UI (and Lua scripts' windows) off the overlay at once. They keep TPT's look
+   inside our frame and scale by whole pixels.
+4. **Native replacements, most used first** (M each): screens rebuilt in our own controls, laid out for the
+   window size: element search, property tool, sign tool, deco colour picker, local saves and stamps (a real file
+   list with thumbnails, drag and drop), options, render options, the Lua console. Rare or online screens (login,
+   tags, online browser, profile) stay re-hosted until someone needs them native.
+5. **Notifications** (S): startup notices, update news and errors to toasts and a list in the main window.
+6. **Sim layer position setting** (S-M): on top / under windows / behind the desktop icons.
+7. **Themes** (M each): the frame and controls as a theme interface, then XP, 7, 10/11, Mac, Linux.
+
+Open questions: whether some windows (the element palette, a tool strip) should dock to screen edges like the
+taskbar; whether to let tabs tear off into their own windows (the Kingsway feel), which falls out of step 1 cheaply.
+
 ## To-do
 
 Done (2026-10-30): overlay window; per-pixel alpha; input modes and global hotkeys; mode notices; Elements window
@@ -73,16 +124,9 @@ Assessment, in the order I'd do it (effort: S = an hour or two, M = a session, L
    - [ ] Tear tabs off into their own windows; dock the window to a screen edge
    - [ ] Play area: drag its edges on the desktop instead of +/- buttons; loop edges wrap at the area edge
    - [ ] Once these cover the bottom button row, hide it too
-2. [ ] **Every UI in its own normal window** (L, user request 2026-10-30): TPT's dialogs (options, save browser,
-   save/stamp windows, error and confirm boxes, the startup notices, the Lua console) are drawn inside the
-   full-screen overlay today, so they float over everything. Instead:
-   - [ ] Each open TPT dialog gets its own Vista window: drawn from the engine's surface, mouse and keys routed back
-     with the offset, title from the dialog.
-   - [ ] Minimise (to the taskbar) and close (= the dialog's own cancel/close) on every window.
-   - [ ] Resizable: drag the frame to scale the window; the content scales with it (UI scale per window).
-   - [ ] Not always on top: our windows join the normal window order, so other apps can cover them. Only the sim
-     layer stays on top (and that is a setting too: on top / under windows / on the desktop).
-   - [ ] The side window gets the same treatment (taskbar button, resizable).
+2. [ ] **Desktop UI** (L, user request 2026-10-30): see "Desktop UI design" above. Steps: window foundation; sim
+   keeps running under dialogs; re-host every TPT dialog; native replacements; notifications; sim layer position;
+   themes (= item 6).
 3. [x] **Full-screen sim** (M): pick RES at build time (a meson option sized to the screen at the chosen pixel
    size). The windows already scale on their own, so the old "separate UI scale" item is no longer needed. RES at
    runtime (every static XRES/YRES array) stays a later L job, only if switching screens without a rebuild matters.
