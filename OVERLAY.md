@@ -77,6 +77,12 @@ Assessment, in the order I'd do it (effort: S = an hour or two, M = a session, L
    size). The windows already scale on their own, so the old "separate UI scale" item is no longer needed. RES at
    runtime (every static XRES/YRES array) stays a later L job, only if switching screens without a rebuild matters.
    Caveat: saves bigger than 612x384 won't open in stock TPT.
+   - [ ] **Sim size at runtime** (L, in progress on branch `runtime-size`): the sim sizes itself to the screen at
+     startup, no rebuild per monitor.
+   - [ ] **Sim scale slider** (M, needs the item above): how big one sim pixel is on screen (1x, 2x, 3x...). A
+     smaller scale gives a bigger sim with finer pixels; a larger one, a smaller sim with chunkier pixels. The sim
+     is rebuilt at the new size and the current scene carried over (clipped if it no longer fits).
+   - [ ] Loop edges wrap at the play-area edge.
 3. [ ] **Particles collide with open windows** (M, needs 2): the visible windows' rectangles as walls, refreshed a
    few times a second. Then react to the active window (e.g. it shakes off sand when moved). Desktop icons (S-M,
    read from Explorer's icon list view). Files: undecided, needs a concrete idea first.
