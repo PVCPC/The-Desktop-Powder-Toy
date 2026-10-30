@@ -91,6 +91,8 @@ overlay, and TPT only runs the top screen, so **the sim freezes while any dialog
      clicks reach it. Left for later: owned windows (none exist until step 3) and keyboard focus on demand.
 2. **Sim keeps running under dialogs** (S-M): in overlay mode, tick and draw the game every frame even when a
    dialog is on top of TPT's window stack.
+   - [x] Done (2026-10-30): Engine::LiveBackground (on in overlay mode) sim-ticks and redraws the windows under
+     the top one instead of showing a frozen, faded copy. Only the top window gets input.
 3. **Re-host every TPT dialog** (M): any TPT window other than the game opens in its own app window: drawn from its
    own surface, mouse and keys routed back with the offset, title from the dialog, close = the dialog's own
    cancel. This moves *all* of TPT's UI (and Lua scripts' windows) off the overlay at once. They keep TPT's look

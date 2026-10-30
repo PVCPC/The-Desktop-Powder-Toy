@@ -134,6 +134,8 @@ namespace ui
 		String textEditingBuf;
 
 	public:
+		// Windows under the top one keep simulating and drawing (the overlay: the sim never stops for a dialog).
+		bool LiveBackground = false;
 		bool MomentumScroll = true;
 		bool ShowAvatars = true;
 		bool TouchUI = false;

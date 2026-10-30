@@ -195,6 +195,11 @@ void Engine::Tick()
 
 void Engine::SimTick()
 {
+	if (LiveBackground)
+	{
+		for (auto *window : windows)
+			window->DoSimTick();
+	}
 	if (state_)
 	{
 		state_->DoSimTick();
@@ -203,7 +208,13 @@ void Engine::SimTick()
 
 void Engine::Draw()
 {
-	if (!frozenGraphics.empty() && !(state_ && RectSized(state_->Position, state_->Size) == g->Size().OriginRect()))
+	if (LiveBackground && !windows.empty())
+	{
+		g->Clear();
+		for (auto *window : windows)
+			window->DoDraw();
+	}
+	else if (!frozenGraphics.empty() && !(state_ && RectSized(state_->Position, state_->Size) == g->Size().OriginRect()))
 	{
 		auto &frozen = frozenGraphics.top();
 		std::copy_n(frozen.screen.get(), g->Size().X * g->Size().Y, g->Data());

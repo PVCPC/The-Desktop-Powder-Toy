@@ -449,6 +449,7 @@ int Main(int argc, char *argv[])
 	engine.g = new Graphics();
 	engine.GraveExitsConsole = graveExitsConsole;
 	engine.MomentumScroll = momentumScroll;
+	engine.LiveBackground = overlayMode;
 	engine.ShowAvatars = showAvatars;
 	engine.Begin();
 	engine.SetFastQuit(prefs.Get("FastQuit", true));
