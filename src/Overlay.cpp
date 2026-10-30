@@ -181,8 +181,9 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 		OverlayWindows::ApplySimMasks(argb.data(), w);
 		if (OverlayWindows::HideTPTMenus())
 		{
-			// The side bar (x >= XRES) and the tool strip under the sim; the bottom button row stays.
-			for (int y = 0; y < WINDOWH - 16; y++)
+			// The side bar (x >= XRES), the tool strip under the sim and the bottom button row (which would sit on the
+			// taskbar): all of them are in the side window.
+			for (int y = 0; y < WINDOWH; y++)
 				for (int x = y < YRES ? XRES : 0; x < w; x++) argb[y * w + x] = 0;
 		}
 	}

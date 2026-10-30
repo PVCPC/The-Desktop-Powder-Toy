@@ -5,6 +5,7 @@
 #include "Overlay.h"
 #include "gui/game/GameController.h"
 #include "gui/game/GameModel.h"
+#include "gui/game/GameView.h"
 #include "graphics/VideoBuffer.h"
 #include "simulation/Simulation.h"
 #include "simulation/Air.h"
@@ -15,12 +16,14 @@
 #include "common/platform/Platform.h"
 #include "graphics/Renderer.h"
 #include "gui/game/RenderPreset.h"
+#include "gui/game/IntroText.h"
 #include "gui/interface/Engine.h"
 #include "graphics/Graphics.h"
 #include "gui/interface/Window.h"
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <map>
 #include <memory>
 #include <vector>
 #define WIN32_LEAN_AND_MEAN
@@ -128,11 +131,14 @@ namespace
 	{
 		HDC dc = CreateCompatibleDC(nullptr);
 		HFONT font = nullptr, bold = nullptr;
+		std::map<int, HFONT> styled;
 
 		void SetScale()
 		{
 			if (font) DeleteObject(font);
 			if (bold) DeleteObject(bold);
+			for (auto &[key, f] : styled) DeleteObject(f);
+			styled.clear();
 			font = CreateFontW(-S(12), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, ANTIALIASED_QUALITY, 0, L"Segoe UI");
 			bold = CreateFontW(-S(12), 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0, ANTIALIASED_QUALITY, 0, L"Segoe UI");
 		}
@@ -143,6 +149,38 @@ namespace
 			SIZE size{};
 			GetTextExtentPoint32W(dc, s.c_str(), int(s.size()), &size);
 			return size;
+		}
+
+		// Segoe UI at size (12 = the normal UI text, before UI scale), weight FW_*, italic, underline.
+		struct Style
+		{
+			int size = 12, weight = FW_NORMAL;
+			bool italic = false, underline = false;
+			uint32_t rgb = 0x000000;
+		};
+		HFONT Font(const Style &st)
+		{
+			auto &f = styled[st.size * 10000 + st.weight * 4 + st.italic * 2 + st.underline];
+			if (!f)
+			{
+				f = CreateFontW(-S(float(st.size)), 0, 0, 0, st.weight, st.italic, st.underline, 0, DEFAULT_CHARSET, 0, 0, ANTIALIASED_QUALITY, 0, L"Segoe UI");
+			}
+			return f;
+		}
+		SIZE Measure(const std::wstring &s, const Style &st)
+		{
+			auto normal = font;
+			font = Font(st);
+			auto size = Measure(s);
+			font = normal;
+			return size;
+		}
+		void Draw(Canvas &cv, int x, int y, const std::wstring &s, const Style &st)
+		{
+			auto normal = font;
+			font = Font(st);
+			Draw(cv, x, y, s, st.rgb);
+			font = normal;
 		}
 
 		// Draws s with its top-left at (x, y), clipped to maxW. glow > 0 adds Vista's soft white halo behind it.
@@ -343,6 +381,9 @@ namespace
 			hwnd = CreateWindowExW(ex, L"TPTOverlayPanel", title.empty() ? Platform::WinWiden(name).c_str() : title.c_str(), style, x, y, w, h,
 			                       owner, nullptr, GetModuleHandleW(nullptr), nullptr);
 			SetWindowLongPtrW(hwnd, GWLP_USERDATA, LONG_PTR(this));
+			// Creation measured the client area before Proc could say "no frame"; measure again, or the canvas
+			// comes out smaller than the window.
+			SetWindowPos(hwnd, nullptr, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 			if (appWindow)
 			{
 				wchar_t exe[MAX_PATH];
@@ -513,13 +554,15 @@ namespace
 		int tab = 0, section = 0, scroll = 0;
 		int titleH, border, tabH, navW, statusH, tileW, tileH, gap;
 		uint64_t shownState = 0;
-		static constexpr const wchar_t *tabNames[] = { L"Elements", L"Simulation", L"Display", L"Saves", L"Overlay" };
+		static constexpr const wchar_t *tabNames[] = { L"Elements", L"Simulation", L"Display", L"Saves", L"Overlay", L"Welcome" };
+		static constexpr int welcomeTab = 5;
 
 		SideWindow()
 		{
 			name = "Palette"; // keeps the saved position of the old Elements window
 			title = L"The Powder Toy";
 			appWindow = true;
+			tab = welcomeTab; // the overlay's start page, in place of TPT's text over the game
 			titleH = S(28), border = S(6), tabH = S(24), navW = S(118), statusH = S(22), tileW = S(92), tileH = S(24), gap = S(4);
 		}
 
@@ -856,6 +899,198 @@ namespace
 			PushButton(x + S(12), top, bw, L"Options\u2026", [] { GameController::Ref().OpenOptions(); }, L"TPT's own settings window");
 		}
 
+		// The start page, in place of TPT's text over the game at startup: the same help, laid out like a Vista
+		// welcome page. Drawn on its own canvas, then the visible part is copied in (it scrolls).
+		int welcomeH = 0;
+		void PaintWelcome()
+		{
+			using Style = Text::Style;
+			auto c = Content();
+			int pw = c.right - c.left, ph = S(1700);
+			Canvas page;
+			page.Resize(pw, ph);
+			page.RoundRect(0, 0, pw, ph, 0, 0xFFFFFF, 0xFFFFFF, 255);
+			std::swap(cv, page);
+			std::vector<std::pair<RECT, std::wstring>> links;
+
+			int x0 = S(18), x1 = pw - S(18), y = S(14);
+			const Style title{ 22, FW_LIGHT, false, false, 0x1E395B }, subtitle{ 12, FW_NORMAL, true, false, 0x6D6D6D },
+			            link{ 12, FW_NORMAL, false, true, 0x0066CC }, body{ 12, FW_NORMAL, false, false, 0x1A1A1A },
+			            note{ 11, FW_NORMAL, true, false, 0x6D6D6D }, footer{ 10, FW_NORMAL, false, false, 0x8A8A8A };
+			// Words wrapped to [x, x1); returns the y after the last line.
+			auto para = [&](int x, int y, int right, const std::wstring &s, const Style &st) {
+				int cx = x, lineH = text->Measure(L"Ag", st).cy, space = text->Measure(L" ", st).cx;
+				size_t at = 0;
+				while (at < s.size())
+				{
+					auto end = s.find(L' ', at);
+					auto word = s.substr(at, end == s.npos ? s.npos : end - at);
+					at = end == s.npos ? s.size() : end + 1;
+					int ww = text->Measure(word, st).cx;
+					if (cx > x && cx + ww > right)
+					{
+						cx = x;
+						y += lineH;
+					}
+					text->Draw(cv, cx, y, word, st);
+					cx += ww + space;
+				}
+				return y + lineH;
+			};
+
+			text->Draw(cv, x0, y, L"Welcome to The Powder Toy", title);
+			y += text->Measure(L"Ag", title).cy + S(2);
+			text->Draw(cv, x0, y, L"Version " + std::to_wstring(DISPLAY_VERSION[0]) + L"." + std::to_wstring(DISPLAY_VERSION[1]) +
+			                          L"  ·  running on your desktop", subtitle);
+			y += text->Measure(L"Ag", subtitle).cy + S(8);
+			int lx = x0;
+			for (auto [label, url] : { std::pair{ L"powdertoy.co.uk", L"https://powdertoy.co.uk" },
+			                           std::pair{ L"Discord", L"https://tpt.io/discord" },
+			                           std::pair{ L"Create an account", L"https://powdertoy.co.uk/Register.html" } })
+			{
+				auto size = text->Measure(label, link);
+				text->Draw(cv, lx, y, label, link);
+				links.push_back({ RECT{ lx, y, lx + int(size.cx), y + int(size.cy) }, url });
+				lx += size.cx + S(18);
+			}
+			y += S(30);
+
+			// Headers: H1 is the title, H2 a part of the page (with a rule), H3 a group of shortcuts.
+			auto header = [&](const wchar_t *name) {
+				const Style h2{ 17, FW_SEMIBOLD, false, false, 0x1E395B };
+				text->Draw(cv, x0, y, name, h2);
+				y += text->Measure(L"Ag", h2).cy + S(3);
+				for (int i = x0; i < x1; i++) cv.Blend(i, y, 0xB9CDE5, 255);
+				y += S(12);
+			};
+
+			header(L"Getting started");
+			// The tip: a Vista information bar.
+			{
+				int top = y, tx = x0 + S(30);
+				int bottom = para(tx + S(32), top + S(8), x1 - S(10),
+				                  L"Pick a material in the Elements tab, then draw anywhere on your desktop. Ctrl+Alt+E shows or hides this window.", body) + S(8);
+				cv.RoundRect(x0, top, x1 - x0, bottom - top, S(3), 0xFFFBE5, 0xFFF4C4, 255);
+				cv.RoundFrame(x0, top, x1 - x0, bottom - top, S(3), 0xE5C365, 255);
+				cv.RoundRect(x0 + S(10), top + S(9), S(16), S(16), S(8), 0x3C8DDE, 0x1E5FAA, 255);
+				text->Draw(cv, x0 + S(16), top + S(9), L"i", Style{ 11, FW_BOLD, true, false, 0xFFFFFF });
+				text->Draw(cv, tx, top + S(8), L"Tip", Style{ 12, FW_BOLD, false, false, 0x7A5B00 });
+				para(tx + S(32), top + S(8), x1 - S(10),
+				     L"Pick a material in the Elements tab, then draw anywhere on your desktop. Ctrl+Alt+E shows or hides this window.", body);
+				y = bottom + S(18);
+			}
+
+			// Shortcut sections: a coloured heading and rule, then keycaps and what they do. "|" separates
+			// alternatives, "+" keys pressed together.
+			struct Row { const wchar_t *keys, *what, *aside; };
+			auto section = [&](const wchar_t *name, uint32_t accent, std::initializer_list<Row> rows) {
+				// An accent block, then the name in the accent colour.
+				const Style h3{ 14, FW_SEMIBOLD, false, false, accent };
+				int hh = text->Measure(L"Ag", h3).cy;
+				cv.RoundRect(x0, y + S(3), S(4), hh - S(6), 0, accent, accent, 255);
+				text->Draw(cv, x0 + S(10), y, name, h3);
+				y += hh + S(6);
+				int keyW = S(200);
+				for (auto &row : rows)
+				{
+					int kx = x0 + S(4), ky = y;
+					std::wstring keys = row.keys;
+					size_t at = 0;
+					bool first = true;
+					while (at <= keys.size())
+					{
+						auto end = keys.find(L'|', at);
+						auto alt = keys.substr(at, end == keys.npos ? keys.npos : end - at);
+						at = end == keys.npos ? keys.size() + 1 : end + 1;
+						if (!first)
+						{
+							text->Draw(cv, kx, ky + S(2), L"or", note);
+							kx += text->Measure(L"or", note).cx + S(5);
+						}
+						first = false;
+						size_t k = 0;
+						bool firstKey = true;
+						while (k <= alt.size())
+						{
+							auto plus = alt.find(L'+', k);
+							auto key = alt.substr(k, plus == alt.npos ? alt.npos : plus - k);
+							k = plus == alt.npos ? alt.size() + 1 : plus + 1;
+							if (!firstKey)
+							{
+								text->Draw(cv, kx, ky + S(2), L"+", Style{ 12, FW_NORMAL, false, false, 0x8A8A8A });
+								kx += text->Measure(L"+").cx + S(3);
+							}
+							firstKey = false;
+							const Style cap{ 11, FW_SEMIBOLD, false, false, 0x2B2B2B };
+							int cw = text->Measure(key, cap).cx + S(12), ch = S(20);
+							cv.RoundRect(kx, ky, cw, ch, S(3), 0xFDFDFD, 0xE4E7EB, 255);
+							cv.RoundFrame(kx, ky, cw, ch, S(3), 0xA9AFB8, 255);
+							for (int i = kx + S(2); i < kx + cw - S(2); i++) cv.Blend(i, ky + ch - 2, 0x8E959E, 120);
+							text->Draw(cv, kx + S(6), ky + (ch - text->Measure(key, cap).cy) / 2, key, cap);
+							kx += cw + S(3);
+						}
+						kx += S(4);
+					}
+					int dx = std::max(x0 + keyW, kx + S(8));
+					int end = para(dx, y + S(1), x1, row.what, body);
+					if (row.aside)
+					{
+						end = para(dx, end, x1, row.aside, note);
+					}
+					y = std::max(end, y + S(20)) + S(7);
+				}
+				y += S(14);
+			};
+			header(L"Keyboard and mouse");
+			section(L"Drawing", 0x2E7D32, {
+				{ L"Left drag|Right drag", L"Draw with the left or right material", nullptr },
+				{ L"Shift+drag", L"A straight line", L"Add Alt for horizontal, vertical or diagonal only" },
+				{ L"Ctrl+drag", L"A filled rectangle", L"Add Alt for a square" },
+				{ L"Ctrl+Shift+click", L"Flood-fill a closed area", nullptr },
+				{ L"Middle click|Alt+click", L"Sample: pick up the material under the mouse", nullptr },
+				{ L"Wheel|[|]", L"Brush size", nullptr },
+				{ L"Tab", L"Brush shape", nullptr },
+			});
+			section(L"Editing", 0x6A1B9A, {
+				{ L"Ctrl+C|Ctrl+X|Ctrl+V", L"Copy, cut and paste", nullptr },
+				{ L"R", L"Rotate while pasting", L"Shift+R and Shift+Ctrl+R mirror it" },
+				{ L"Ctrl+Z", L"Undo", nullptr },
+				{ L"Ctrl+Y|Ctrl+Shift+Z", L"Redo", nullptr },
+				{ L"S", L"Save part of the screen as a stamp", nullptr },
+				{ L"L|K", L"Load the last stamp, or open the stamp library", nullptr },
+			});
+			section(L"Simulation", 0xC25100, {
+				{ L"Space", L"Pause and resume", nullptr },
+				{ L"F", L"Step one frame", nullptr },
+				{ L"F5", L"Reload the simulation", nullptr },
+			});
+			section(L"View", 0x00796B, {
+				{ L"0 – 9", L"View modes", nullptr },
+				{ L"H|D", L"Show the HUD, or debug details in it", nullptr },
+				{ L"Z", L"Zoom", L"Click to keep the zoom window; the wheel changes its strength" },
+				{ L"Ctrl+F", L"Highlight the selected element", nullptr },
+			});
+			text->Draw(cv, x0, y, Wide(VersionInfo().FromUtf8()), footer);
+			y += S(30);
+
+			std::swap(cv, page);
+			welcomeH = y;
+			int viewH = c.bottom - c.top - 1;
+			scroll = std::clamp(scroll, 0, std::max(0, welcomeH - viewH));
+			for (int row = 0; row < viewH && row + scroll < ph; row++)
+			{
+				std::copy_n(page.px.data() + size_t(row + scroll) * pw, pw, cv.px.data() + size_t(c.top + 1 + row) * cv.w + c.left);
+			}
+			for (auto &[rc, url] : links)
+			{
+				RECT on{ rc.left + c.left, rc.top + c.top + 1 - scroll, rc.right + c.left, rc.bottom + c.top + 1 - scroll };
+				if (on.top >= c.top && on.bottom <= c.bottom)
+				{
+					Add(on, [url = url] { ShellExecuteW(nullptr, L"open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL); }, url);
+				}
+			}
+		}
+
 		void PaintOverlay()
 		{
 			auto c = Content();
@@ -935,6 +1170,7 @@ namespace
 			case 2: PaintDisplay(); break;
 			case 3: PaintSaves(); break;
 			case 4: PaintOverlay(); break;
+			case welcomeTab: PaintWelcome(); break;
 			}
 
 			// The status bar: what the hovered control does.
@@ -975,6 +1211,13 @@ namespace
 			{
 				auto action = hits[at].right;
 				action();
+				dirty = true;
+			}
+			if (msg == WM_MOUSEWHEEL && tab == welcomeTab)
+			{
+				auto c = Content();
+				int maxScroll = std::max(0, welcomeH - int(c.bottom - c.top));
+				scroll = std::clamp(scroll - GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA * S(51), 0, maxScroll);
 				dirty = true;
 			}
 			if (msg == WM_MOUSEWHEEL && tab == 0)
@@ -1394,6 +1637,7 @@ void OverlayWindows::Tick()
 		SetPlayArea(prefs.Get("Overlay.PlayArea.X", 0), prefs.Get("Overlay.PlayArea.Y", 0),
 		            prefs.Get("Overlay.PlayArea.W", CELLS.X), prefs.Get("Overlay.PlayArea.H", CELLS.Y));
 		areaRestored = true;
+		GameController::Ref().GetView()->SkipIntroText(); // it's in the side window's Welcome tab
 	}
 	if (!palette && GlobalPrefs::Ref().Get("Overlay.Windows.Palette.Open", true))
 	{
@@ -1451,6 +1695,14 @@ void OverlayWindows::TogglePalette()
 		}
 		w = std::max(prefs.Get("Overlay.Windows.Palette.W", w), S(360));
 		h = std::max(prefs.Get("Overlay.Windows.Palette.H", h), S(300));
+		// The whole window on its monitor's work area (a saved spot can hang off the edge).
+		MONITORINFO mi{ sizeof(mi) };
+		GetMonitorInfoW(MonitorFromPoint({ x + w / 2, y + S(10) }, MONITOR_DEFAULTTONEAREST), &mi);
+		auto work = mi.rcWork;
+		w = std::min(w, int(work.right - work.left));
+		h = std::min(h, int(work.bottom - work.top));
+		x = std::clamp(x, int(work.left), int(work.right) - w);
+		y = std::clamp(y, int(work.top), int(work.bottom) - h);
 		palette->grip = palette->border;
 		palette->minSize = { S(360), S(300) };
 		palette->Create(x, y, w, h);

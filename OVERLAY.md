@@ -36,7 +36,7 @@ drawn in software with per-pixel alpha, styled like Windows Vista Aero. They don
 - Buttons show TPT's own icons (walls, tools) where it has them, colour swatches otherwise.
 - **Minimise** and close both hide a window to the tray icon.
 - While the side window is open, TPT's own side bar and tool strip are hidden (see-through, click-through);
-  the bottom button row stays. The tray menu's "Show TPT's own menus" brings them back (`Overlay.ShowTPTMenus`).
+  so is the bottom button row (it would sit on the taskbar). The tray menu's "Show TPT's own menus" brings them back (`Overlay.ShowTPTMenus`).
 - **Tray icon** (notification area, bottom right): a plain Windows menu on purpose. It holds settings and opens
   the Vista windows. Left click shows or hides the Elements window; right click: Elements window, the three input
   modes, Show TPT's own menus, Exit. Removed on exit and on a crash, re-added if Explorer restarts. A forced kill
@@ -107,6 +107,8 @@ overlay, and TPT only runs the top screen, so **the sim freezes while any dialog
    window size: element search, property tool, sign tool, deco colour picker, local saves and stamps (a real file
    list with thumbnails, drag and drop), options, render options, the Lua console. Rare or online screens (login,
    tags, online browser, profile) stay re-hosted until someone needs them native.
+   - [ ] Real Vista-style menus, drop-downs and dialogs (user request 2026-10-30): today the hosted ones are TPT's
+     pixel UI inside a Vista frame. First: Settings, drop-down lists, context menus.
 5. **Notifications** (S): startup notices, update news and errors to toasts and a list in the main window.
 6. **Sim layer position setting** (S-M): on top / under windows / behind the desktop icons.
 7. **Themes** (M each): the frame and controls as a theme interface, then XP, 7, 10/11, Mac, Linux.
@@ -134,7 +136,10 @@ Assessment, in the order I'd do it (effort: S = an hour or two, M = a session, L
    - [ ] Hotkey recording and UI scale in the Overlay tab (still powder.pref)
    - [ ] Tear tabs off into their own windows; dock the window to a screen edge
    - [ ] Play area: drag its edges on the desktop instead of +/- buttons; loop edges wrap at the area edge
-   - [ ] Once these cover the bottom button row, hide it too
+   - [x] Bottom button row hidden with the rest (2026-10-30); its save name, vote and tags have no side-window
+     home yet (Saves tab opens the browsers)
+   - [x] Welcome tab (2026-10-30): TPT's startup text, rewritten as a Vista start page (headers, keycaps, tip
+     bar, links) instead of drawn over the game; the side window opens on it
 2. [ ] **Desktop UI** (L, user request 2026-10-30): see "Desktop UI design" above. Steps: window foundation; sim
    keeps running under dialogs; re-host every TPT dialog; native replacements; notifications; sim layer position;
    themes (= item 6).
