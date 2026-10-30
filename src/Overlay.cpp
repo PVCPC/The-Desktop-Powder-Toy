@@ -186,6 +186,7 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 				for (int x = y < YRES ? XRES : 0; x < w; x++) argb[y * w + x] = 0;
 		}
 	}
+	OverlayWindows::ClearUnderWindows(argb.data(), w, h, ww, wh);
 	for (int y = 0; y < wh; y++)
 	{
 		auto *src = argb.data() + (y * h / wh) * w;

@@ -86,6 +86,9 @@ overlay, and TPT only runs the top screen, so **the sim freezes while any dialog
 1. **Window foundation** (M): turn our Panel into a real top-level window: normal z-order, owner = main window,
    taskbar button on the main window, WM_NCHITTEST frame for resize and snap, minimise/maximise/close, saved
    size, keyboard focus on demand. The side window becomes the main window.
+   - [x] Done (2026-10-30): the side window is the main app window (taskbar button, not on top, resize by any
+     edge, snap, minimise/maximise/close, saved size); the sim layer is cleared under it so sand stays off it and
+     clicks reach it. Left for later: owned windows (none exist until step 3) and keyboard focus on demand.
 2. **Sim keeps running under dialogs** (S-M): in overlay mode, tick and draw the game every frame even when a
    dialog is on top of TPT's window stack.
 3. **Re-host every TPT dialog** (M): any TPT window other than the game opens in its own app window: drawn from its

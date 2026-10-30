@@ -236,8 +236,10 @@ namespace
 		}
 
 		// A caption button: Vista's glossy red close pill, or the light glass minimise button. hover brightens it.
-		void CaptionButton(Canvas &cv, RECT rc, bool hover, bool close)
+		enum CaptionKind { CaptionMin, CaptionMax, CaptionClose };
+		void CaptionButton(Canvas &cv, RECT rc, bool hover, CaptionKind kind)
 		{
+			bool close = kind == CaptionClose;
 			int w = rc.right - rc.left, h = rc.bottom - rc.top;
 			uint32_t top = close ? (hover ? 0xF3A08A : 0xE0907C) : (hover ? 0xF0F7FF : 0xE3ECF6);
 			uint32_t bottom = close ? (hover ? 0xD8341A : 0xC1361D) : (hover ? 0x5FA3E8 : 0x9AB5D3);
@@ -255,6 +257,14 @@ namespace
 						cv.Blend(cx + i + t, cy + i, 0xFFFFFF, 255);
 						cv.Blend(cx + i + t, cy - i, 0xFFFFFF, 255);
 					}
+			}
+			else if (kind == CaptionMax)
+			{
+				// A white window outline with a thick top, outlined dark.
+				int bw = S(9), bh = S(7), bx = cx - bw / 2, by = cy - bh / 2;
+				cv.RoundFrame(bx - 1, by - 1, bw + 2, bh + 2, 0, 0x1F3B5A, 200);
+				cv.RoundFrame(bx, by, bw, bh, 0, 0xFFFFFF, 255);
+				cv.RoundRect(bx, by, bw, S(2), 0, 0xFFFFFF, 0xFFFFFF, 255);
 			}
 			else
 			{
@@ -295,8 +305,14 @@ namespace
 		HWND hwnd = nullptr;
 		Canvas cv;
 		ByteString name;
+		std::wstring title;
 		bool dirty = true;
 		int opacity = 255;
+		// An app window: taskbar button, normal z-order, resizable, minimise/maximise. Otherwise a small on-top popup
+		// (notifications).
+		bool appWindow = false;
+		int grip = 0; // resize border width
+		Vec2<int> minSize{ 0, 0 };
 
 		virtual ~Panel() = default;
 		virtual void Paint() = 0;
@@ -317,9 +333,21 @@ namespace
 				registered = true;
 			}
 			cv.Resize(w, h);
-			hwnd = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE, L"TPTOverlayPanel",
-			                       Platform::WinWiden(name).c_str(), WS_POPUP, x, y, w, h, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+			// NOACTIVATE either way: the keyboard stays with TPT. ponytail: windows with text fields will need focus.
+			DWORD ex = WS_EX_LAYERED | WS_EX_NOACTIVATE | (appWindow ? WS_EX_APPWINDOW : WS_EX_TOOLWINDOW | WS_EX_TOPMOST);
+			DWORD style = WS_POPUP | (appWindow ? WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU | WS_THICKFRAME : 0);
+			hwnd = CreateWindowExW(ex, L"TPTOverlayPanel", title.empty() ? Platform::WinWiden(name).c_str() : title.c_str(), style, x, y, w, h,
+			                       nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
 			SetWindowLongPtrW(hwnd, GWLP_USERDATA, LONG_PTR(this));
+			if (appWindow)
+			{
+				wchar_t exe[MAX_PATH];
+				GetModuleFileNameW(nullptr, exe, MAX_PATH);
+				HICON big = nullptr, small = nullptr;
+				ExtractIconExW(exe, 0, &big, &small, 1);
+				if (big) SendMessageW(hwnd, WM_SETICON, ICON_BIG, LPARAM(big));
+				if (small) SendMessageW(hwnd, WM_SETICON, ICON_SMALL, LPARAM(small));
+			}
 		}
 
 		void Present()
@@ -349,11 +377,35 @@ namespace
 
 		void SavePosition()
 		{
+			if (IsIconic(hwnd) || IsZoomed(hwnd))
+			{
+				return;
+			}
 			RECT rc;
 			GetWindowRect(hwnd, &rc);
 			auto &prefs = GlobalPrefs::Ref();
 			prefs.Set("Overlay.Windows." + name + ".X", int(rc.left));
 			prefs.Set("Overlay.Windows." + name + ".Y", int(rc.top));
+			prefs.Set("Overlay.Windows." + name + ".W", int(rc.right - rc.left));
+			prefs.Set("Overlay.Windows." + name + ".H", int(rc.bottom - rc.top));
+		}
+
+		// Resize borders and corners, then the window's own areas.
+		LRESULT FrameHitTest(int x, int y)
+		{
+			if (appWindow && !IsZoomed(hwnd))
+			{
+				bool l = x < grip, r = x >= cv.w - grip, t = y < grip, b = y >= cv.h - grip;
+				if (t && l) return HTTOPLEFT;
+				if (t && r) return HTTOPRIGHT;
+				if (b && l) return HTBOTTOMLEFT;
+				if (b && r) return HTBOTTOMRIGHT;
+				if (l) return HTLEFT;
+				if (r) return HTRIGHT;
+				if (t) return HTTOP;
+				if (b) return HTBOTTOM;
+			}
+			return HitTest(x, y);
 		}
 
 		static LRESULT CALLBACK Proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
@@ -367,10 +419,42 @@ namespace
 				{
 					POINT p{ GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
 					ScreenToClient(hwnd, &p);
-					return self->HitTest(p.x, p.y);
+					return self->FrameHitTest(p.x, p.y);
+				}
+				case WM_NCCALCSIZE:
+					if (self->appWindow && wp)
+					{
+						return 0; // we draw the whole window, frame included
+					}
+					break;
+				case WM_SIZE:
+					if (wp != SIZE_MINIMIZED && (LOWORD(lp) != self->cv.w || HIWORD(lp) != self->cv.h))
+					{
+						self->cv.Resize(LOWORD(lp), HIWORD(lp));
+						self->dirty = true;
+						self->Present();
+					}
+					return 0;
+				case WM_GETMINMAXINFO:
+				{
+					auto *mm = (MINMAXINFO *)lp;
+					mm->ptMinTrackSize = { self->minSize.X, self->minSize.Y };
+					// Maximised = the monitor's work area, not over the taskbar.
+					MONITORINFO mi{ sizeof(mi) };
+					if (GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi))
+					{
+						mm->ptMaxPosition = { mi.rcWork.left - mi.rcMonitor.left, mi.rcWork.top - mi.rcMonitor.top };
+						mm->ptMaxSize = { mi.rcWork.right - mi.rcWork.left, mi.rcWork.bottom - mi.rcWork.top };
+					}
+					return 0;
 				}
 				case WM_MOUSEACTIVATE:
-					return MA_NOACTIVATE; // keep keyboard focus on TPT
+					if (self->appWindow)
+					{
+						// Come to the front like any window, without taking the keyboard from TPT.
+						SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+					}
+					return MA_NOACTIVATE;
 				case WM_EXITSIZEMOVE:
 					self->SavePosition();
 					return 0;
@@ -385,6 +469,7 @@ namespace
 				case WM_LBUTTONDOWN:
 				case WM_LBUTTONUP:
 				case WM_RBUTTONDOWN:
+				case WM_RBUTTONUP:
 				case WM_MBUTTONDOWN:
 					self->Mouse(msg, GET_X_LPARAM(lp), GET_Y_LPARAM(lp), wp);
 					return 0;
@@ -428,6 +513,8 @@ namespace
 		SideWindow()
 		{
 			name = "Palette"; // keeps the saved position of the old Elements window
+			title = L"The Powder Toy";
+			appWindow = true;
 			titleH = S(28), border = S(6), tabH = S(24), navW = S(118), statusH = S(22), tileW = S(92), tileH = S(24), gap = S(4);
 		}
 
@@ -465,10 +552,15 @@ namespace
 		{
 			return { cv.w - border - S(43), 1, cv.w - border, 1 + S(18) };
 		}
-		RECT MinRect()
+		RECT MaxRect()
 		{
 			auto close = CloseRect();
 			return { close.left - S(27), close.top, close.left, close.bottom };
+		}
+		RECT MinRect()
+		{
+			auto max = MaxRect();
+			return { max.left - S(27), max.top, max.left, max.bottom };
 		}
 		// Below the tabs, above the status bar.
 		RECT Content()
@@ -800,10 +892,12 @@ namespace
 		{
 			hits.clear();
 			vista::Frame(cv, titleH, border, L"The Powder Toy");
-			vista::CaptionButton(cv, MinRect(), Hovered(MinRect()), false);
-			vista::CaptionButton(cv, CloseRect(), Hovered(CloseRect()), true);
-			Add(MinRect(), [] { OverlayWindows::TogglePalette(); }, L"Minimise to the tray");
-			Add(CloseRect(), [] { OverlayWindows::TogglePalette(); }, L"Close (the tray icon brings it back)");
+			vista::CaptionButton(cv, MinRect(), Hovered(MinRect()), vista::CaptionMin);
+			vista::CaptionButton(cv, MaxRect(), Hovered(MaxRect()), vista::CaptionMax);
+			vista::CaptionButton(cv, CloseRect(), Hovered(CloseRect()), vista::CaptionClose);
+			Add(MinRect(), [this] { ShowWindow(hwnd, SW_MINIMIZE); }, L"Minimise to the taskbar");
+			Add(MaxRect(), [this] { ShowWindow(hwnd, IsZoomed(hwnd) ? SW_RESTORE : SW_MAXIMIZE); }, IsZoomed(hwnd) ? L"Restore" : L"Maximise");
+			Add(CloseRect(), [] { OverlayWindows::TogglePalette(); }, L"Close (the tray icon or Ctrl+Alt+E brings it back)");
 
 			// The tab strip: grey tabs on the glass, the selected one white and joined to the page.
 			int tx = border + S(4);
@@ -850,7 +944,7 @@ namespace
 
 		LRESULT HitTest(int x, int y) override
 		{
-			return y < titleH && !Inside(CloseRect(), x, y) && !Inside(MinRect(), x, y) ? HTCAPTION : HTCLIENT;
+			return y < titleH && !Inside(CloseRect(), x, y) && !Inside(MaxRect(), x, y) && !Inside(MinRect(), x, y) ? HTCAPTION : HTCLIENT;
 		}
 
 		void Mouse(UINT msg, int x, int y, WPARAM wp) override
@@ -1148,7 +1242,7 @@ void OverlayWindows::TogglePalette()
 	{
 		return; // the tray icon exists before the game does
 	}
-	bool open = !palette || !IsWindowVisible(palette->hwnd);
+	bool open = !palette || !IsWindowVisible(palette->hwnd) || IsIconic(palette->hwnd);
 	GlobalPrefs::Ref().Set("Overlay.Windows.Palette.Open", open);
 	if (!open)
 	{
@@ -1177,6 +1271,10 @@ void OverlayWindows::TogglePalette()
 			x = saved.x;
 			y = saved.y;
 		}
+		w = std::max(prefs.Get("Overlay.Windows.Palette.W", w), S(360));
+		h = std::max(prefs.Get("Overlay.Windows.Palette.H", h), S(300));
+		palette->grip = palette->border;
+		palette->minSize = { S(360), S(300) };
 		palette->Create(x, y, w, h);
 	}
 	palette->dirty = true;
@@ -1242,6 +1340,25 @@ void OverlayWindows::ApplySimMasks(uint32_t *argb, int w)
 	}
 }
 
+void OverlayWindows::ClearUnderWindows(uint32_t *argb, int w, int h, int ww, int wh)
+{
+	// ponytail: also clears where another app's window covers ours; walk the z-order if that ever matters.
+	if (!palette || !IsWindowVisible(palette->hwnd) || IsIconic(palette->hwnd) || ww <= 0 || wh <= 0)
+	{
+		return;
+	}
+	RECT pr, sr;
+	GetWindowRect(palette->hwnd, &pr);
+	GetWindowRect(mainWindow, &sr);
+	auto map = [](long v, int n, int nw, bool up) { return int(std::clamp((v * n + (up ? nw - 1 : 0)) / nw, 0L, long(n))); };
+	int x0 = map(pr.left - sr.left, w, ww, false), x1 = map(pr.right - sr.left, w, ww, true);
+	int y0 = map(pr.top - sr.top, h, wh, false), y1 = map(pr.bottom - sr.top, h, wh, true);
+	for (int y = y0; y < y1; y++)
+	{
+		std::fill(argb + size_t(y) * w + x0, argb + size_t(y) * w + x1, 0);
+	}
+}
+
 void OverlayWindows::SetPlayArea(int x, int y, int w, int h)
 {
 	if (!&GameController::Ref())
@@ -1269,5 +1386,6 @@ void OverlayWindows::SetPassThrough(bool) {}
 void OverlayWindows::Notify(const char *) {}
 bool OverlayWindows::HideTPTMenus() { return false; }
 void OverlayWindows::ApplySimMasks(uint32_t *, int) {}
+void OverlayWindows::ClearUnderWindows(uint32_t *, int, int, int, int) {}
 void OverlayWindows::SetPlayArea(int, int, int, int) {}
 #endif
