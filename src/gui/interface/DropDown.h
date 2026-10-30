@@ -22,6 +22,7 @@ class DropDown : public ui::Component
 	std::vector<std::pair<String, int> > options;
 	
 public:
+	Kind GetKind() const override { return Kind::DropDown; }
 	DropDown(Point position, Point size);
 	virtual ~DropDown() = default;
 

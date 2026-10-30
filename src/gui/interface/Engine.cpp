@@ -219,6 +219,11 @@ void Engine::Draw()
 		auto stride = g->Size().X;
 		for (auto *window : above)
 		{
+			if (window->InPlace)
+			{
+				window->DoDraw();
+				continue;
+			}
 			auto rect = RectSized(window->Position, window->Size) & g->Size().OriginRect();
 			std::vector<pixel> under(size_t(rect.size.X) * rect.size.Y), drawn(under.size());
 			for (int y = 0; y < rect.size.Y; y++)

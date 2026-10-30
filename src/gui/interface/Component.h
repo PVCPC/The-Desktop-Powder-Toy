@@ -47,6 +47,8 @@ namespace ui
 		bool MouseDownInside;
 
 		ui::Appearance Appearance;
+		enum class Kind { Other, Panel, Label, Textbox, Button, Checkbox, DropDown, Separator, Slider, ProgressBar };
+		virtual Kind GetKind() const { return Kind::Other; }
 		//virtual void SetAppearance(ui::Appearance);
 		//ui::Appearance GetAppearance();
 		virtual void TextPosition(String);

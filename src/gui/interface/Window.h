@@ -85,13 +85,16 @@ namespace ui
 		// (menus, drop-down lists) that get no frame.
 		String Title;
 		bool Framed = true;
+		bool InPlace = false; // a whole-screen view over the game (render options): drawn on the sim layer, not hosted
 		struct MenuItem
 		{
 			String text;
 			bool enabled = true, checked = false;
 			std::function<void()> pick;
 		};
-		std::vector<MenuItem> MenuItems; // non-empty: a drop-down list or context menu
+		const std::vector<Component *> &GetComponents() const { return Components; }
+		std::vector<MenuItem> MenuItems;
+		std::vector<std::pair<Point, Point>> RawAreas; // window-relative (pos, size) a skin must keep as drawn: thumbnails // non-empty: a drop-down list or context menu
 		Point MenuAt{ 0, 0 };       // where it opens, in screen (engine) coordinates
 
 		enum OkayMethod { Enter, OkayButton };

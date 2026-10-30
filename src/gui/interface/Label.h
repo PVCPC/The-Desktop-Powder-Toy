@@ -39,6 +39,9 @@ namespace ui
 
 		void copySelection();
 	public:
+	Kind GetKind() const override { return Kind::Label; }
+	Colour GetTextColour() const { return textColour; }
+	bool GetMultiline() const { return multiline; }
 		//Label(Window* parent_state, String labelText);
 		Label(Point position, Point size, String labelText);
 		//Label(String labelText);

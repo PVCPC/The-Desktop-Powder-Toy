@@ -17,6 +17,7 @@ class Checkbox: public ui::Component {
 	CheckboxAction actionCallback;
 
 public:
+	Kind GetKind() const override { return Kind::Checkbox; }
 	Checkbox(ui::Point position, ui::Point size, String text, String toolTip);
 	virtual ~Checkbox() = default;
 	

@@ -10,6 +10,7 @@ namespace ui
 		float intermediatePos;
 		String progressStatus;
 	public:
+	Kind GetKind() const override { return Kind::ProgressBar; }
 	ProgressBar(Point position, Point size, int startProgress = 0, String startStatus = String());
 		void SetProgress(int progress);
 		int GetProgress();

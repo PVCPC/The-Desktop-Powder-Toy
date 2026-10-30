@@ -111,7 +111,12 @@ overlay, and TPT only runs the top screen, so **the sim freezes while any dialog
      pixel UI inside a Vista frame. First: Settings, drop-down lists, context menus.
      - [x] Drop-down lists and context menus are real Windows menus (ui::Window::MenuItems; TrackPopupMenu on its
        own thread so the sim keeps running)
-     - [ ] Dialogs: a Vista skin drawn from TPT's components (labels, buttons, checkboxes, text boxes)
+     - [x] Dialogs: a Vista skin drawn from TPT's components (2026-10-30). Component::GetKind says what each
+       control is; SyncHosts snapshots them (SkinItem) every frame and HostWindow::PaintSkin draws labels, buttons,
+       checkboxes, text boxes, drop-downs, sliders, progress bars and scroll bars in Vista colours and Segoe UI.
+       Icon buttons, colour swatches, unknown controls and Window::RawAreas (save thumbnails) keep TPT's pixels.
+       Render options is a whole-screen view: Window::InPlace draws it on the sim layer instead of hosting it.
+       Left: half-scrolled rows vanish instead of clipping; text caret is always at the end
 5. **Notifications** (S): startup notices, update news and errors to toasts and a list in the main window.
 6. **Sim layer position setting** (S-M): on top / under windows / behind the desktop icons.
 7. **Themes** (M each): the frame and controls as a theme interface, then XP, 7, 10/11, Mac, Linux.

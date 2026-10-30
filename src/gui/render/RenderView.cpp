@@ -24,7 +24,8 @@ RenderView::RenderView():
 	ren(nullptr),
 	toolTip(""),
 	isToolTipFadingIn(false)
-{
+{	InPlace = true;
+
 	Title = "Render options";
 	auto addPresetButton = [this](int index, Icon icon, ui::Point offset, String tooltip) {
 		auto *presetButton = new ui::Button(ui::Point(XRES, YRES) + offset, ui::Point(30, 13), "", tooltip);

@@ -339,6 +339,7 @@ void PreviewView::OnDraw()
 	if (savePreview)
 	{
 		g->BlendImage(savePreview->Data(), 0xFF, RectSized(Position + Vec2(1, 1) + (RES / 2 - savePreview->Size()) / 2, savePreview->Size()));
+		RawAreas = { { Vec2(1, 1) + (RES / 2 - savePreview->Size()) / 2, savePreview->Size() } };
 	}
 	g->BlendRect(RectSized(Position, RES / 2 + Vec2{ 1, 1 }), 0xFFFFFF_rgb .WithAlpha(100));
 	g->DrawLine(Position + Vec2{ XRES/2, 1 }, Position + Vec2{ XRES/2, Size.Y-2 }, 0xC8C8C8_rgb);

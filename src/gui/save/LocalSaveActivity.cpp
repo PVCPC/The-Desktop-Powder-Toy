@@ -145,6 +145,7 @@ void LocalSaveActivity::OnDraw()
 	{
 		auto rect = RectSized(Position + Vec2((Size.X - thumbnail->Size().X) / 2, 45), thumbnail->Size());
 		g->BlendImage(thumbnail->Data(), 0xFF, rect);
+		RawAreas = { { rect.pos - Position, rect.size } };
 		g->DrawRect(rect, 0xB4B4B4_rgb);
 	}
 }

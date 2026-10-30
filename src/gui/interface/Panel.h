@@ -20,6 +20,7 @@ namespace ui
 	class Panel : public Component
 	{
 	public:
+	Kind GetKind() const override { return Kind::Panel; }
 		friend class Component;
 
 		ui::Point InnerSize;

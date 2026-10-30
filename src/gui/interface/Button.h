@@ -14,6 +14,7 @@ class Button : public Component
 	};
 	
 public:
+	Kind GetKind() const override { return Kind::Button; }
 	Button(Point position = Point(0, 0), Point size = Point(0, 0), String buttonText = String(), String toolTip = String());
 	virtual ~Button() = default;
 

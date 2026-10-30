@@ -2,6 +2,8 @@
 #include "OverlayWindows.h"
 #include "SimulationConfig.h"
 #include "prefs/GlobalPrefs.h"
+#include "gui/interface/Engine.h"
+#include "gui/interface/Window.h"
 #include <vector>
 #ifdef _WIN32
 # include <SDL_syswm.h>
@@ -179,7 +181,8 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 	if (w == WINDOWW && h == WINDOWH)
 	{
 		OverlayWindows::ApplySimMasks(argb.data(), w);
-		if (OverlayWindows::HideTPTMenus())
+		auto *top = ui::Engine::Ref().GetWindow();
+		if (OverlayWindows::HideTPTMenus() && !(top && top->InPlace))
 		{
 			// The side bar (x >= XRES), the tool strip under the sim and the bottom button row (which would sit on the
 			// taskbar): all of them are in the side window.

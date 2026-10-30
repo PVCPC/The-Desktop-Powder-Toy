@@ -23,6 +23,7 @@ class Textbox : public Label
 	void StopTextEditing();
 
 public:
+	Kind GetKind() const override { return Kind::Textbox; }
 	bool ReadOnly;
 	enum ValidInput { All, Multiline, Numeric, Number }; // Numeric doesn't delete trailing 0's
 	Textbox(Point position, Point size, String textboxText = String(), String textboxPlaceholder = String());

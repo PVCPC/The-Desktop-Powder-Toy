@@ -21,6 +21,7 @@ class Slider : public ui::Component
 	Colour col1, col2;
 	void updatePosition(int position);
 public:
+	Kind GetKind() const override { return Kind::Slider; }
 	Slider(Point position, Point size, int steps);
 	virtual ~Slider() = default;
 

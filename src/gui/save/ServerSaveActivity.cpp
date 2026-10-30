@@ -408,6 +408,7 @@ void ServerSaveActivity::OnDraw()
 	{
 		auto rect = RectSized(Position + Vec2(Size.X / 2 + (Size.X / 2 - thumbnail->Size().X) / 2, 25), thumbnail->Size());
 		g->BlendImage(thumbnail->Data(), 0xFF, rect);
+		RawAreas = { { rect.pos - Position, rect.size } };
 		g->DrawRect(rect, 0xB4B4B4_rgb);
 	}
 }
