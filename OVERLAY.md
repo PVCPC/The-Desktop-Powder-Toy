@@ -73,7 +73,17 @@ Assessment, in the order I'd do it (effort: S = an hour or two, M = a session, L
    - [ ] Tear tabs off into their own windows; dock the window to a screen edge
    - [ ] Play area: drag its edges on the desktop instead of +/- buttons; loop edges wrap at the area edge
    - [ ] Once these cover the bottom button row, hide it too
-2. [x] **Full-screen sim** (M): pick RES at build time (a meson option sized to the screen at the chosen pixel
+2. [ ] **Every UI in its own normal window** (L, user request 2026-10-30): TPT's dialogs (options, save browser,
+   save/stamp windows, error and confirm boxes, the startup notices, the Lua console) are drawn inside the
+   full-screen overlay today, so they float over everything. Instead:
+   - [ ] Each open TPT dialog gets its own Vista window: drawn from the engine's surface, mouse and keys routed back
+     with the offset, title from the dialog.
+   - [ ] Minimise (to the taskbar) and close (= the dialog's own cancel/close) on every window.
+   - [ ] Resizable: drag the frame to scale the window; the content scales with it (UI scale per window).
+   - [ ] Not always on top: our windows join the normal window order, so other apps can cover them. Only the sim
+     layer stays on top (and that is a setting too: on top / under windows / on the desktop).
+   - [ ] The side window gets the same treatment (taskbar button, resizable).
+3. [x] **Full-screen sim** (M): pick RES at build time (a meson option sized to the screen at the chosen pixel
    size). The windows already scale on their own, so the old "separate UI scale" item is no longer needed. RES at
    runtime (every static XRES/YRES array) stays a later L job, only if switching screens without a rebuild matters.
    Caveat: saves bigger than 612x384 won't open in stock TPT.
@@ -83,14 +93,14 @@ Assessment, in the order I'd do it (effort: S = an hour or two, M = a session, L
      smaller scale gives a bigger sim with finer pixels; a larger one, a smaller sim with chunkier pixels. The sim
      is rebuilt at the new size and the current scene carried over (clipped if it no longer fits).
    - [ ] Loop edges wrap at the play-area edge.
-3. [ ] **Particles collide with open windows** (M, needs 2): the visible windows' rectangles as walls, refreshed a
+4. [ ] **Particles collide with open windows** (M, needs 3): the visible windows' rectangles as walls, refreshed a
    few times a second. Then react to the active window (e.g. it shakes off sand when moved). Desktop icons (S-M,
    read from Explorer's icon list view). Files: undecided, needs a concrete idea first.
-4. [ ] **Auto pass-through while a game or full-screen app has focus** (S).
-5. [ ] **More OS themes** (M each): XP, 7, 10/11, classic Mac OS, macOS, Linux. Start by turning the `vista::`
+5. [ ] **Auto pass-through while a game or full-screen app has focus** (S).
+6. [ ] **More OS themes** (M each): XP, 7, 10/11, classic Mac OS, macOS, Linux. Start by turning the `vista::`
    drawing into a theme interface when the second theme starts. Theme choice in Overlay settings.
-6. [ ] Black particles inside the zoom window (S); menus fade when unused (S).
-7. [ ] Other platforms: X11 / Wayland input regions, macOS (L; only if someone needs them).
+7. [ ] Black particles inside the zoom window (S); menus fade when unused (S).
+8. [ ] Other platforms: X11 / Wayland input regions, macOS (L; only if someone needs them).
 
 Dropped: a Kingsway-style taskbar and start button. The tray icon plus the side window cover launching. Vista
 tray menu: the tray menu stays native on purpose.
