@@ -136,7 +136,8 @@ Assessment, in the order I'd do it (effort: S = an hour or two, M = a session, L
 1. **One large Vista side window with tabs for all of TPT's menus** (M per tab), docked to a screen edge, with
    tabs that can be torn off into their own windows (the Kingsway feel). The Elements window becomes its first
    tab. Then:
-   - [ ] Tools and brush: brush shape and size, replace mode, deco colour picker
+   - [x] Tools and brush (2026-10-30, Tools tab): brush shape and size, replace mode / specific delete, decorations
+     and the deco colour (opens TPT's colour picker)
    - [x] Display: view modes, HUD, decorations, gravity field, link to TPT's render options
    - [x] Simulation: play area, pause/step/reload/clear, edges, gravity, air, ambient heat
    - [x] Saves and stamps: buttons that open TPT's own browsers (a native Vista save list is a later step)

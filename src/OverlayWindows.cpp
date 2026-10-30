@@ -9,8 +9,10 @@
 #include "graphics/VideoBuffer.h"
 #include "simulation/Simulation.h"
 #include "simulation/Air.h"
+#include "simulation/SimulationData.h"
 #include "SimulationConfig.h"
 #include "gui/game/Menu.h"
+#include "gui/game/Brush.h"
 #include "gui/game/tool/Tool.h"
 #include "prefs/GlobalPrefs.h"
 #include "common/platform/Platform.h"
@@ -566,8 +568,8 @@ namespace
 		int tab = 0, section = 0, scroll = 0;
 		int titleH, border, tabH, navW, statusH, tileW, tileH, gap;
 		uint64_t shownState = 0;
-		static constexpr const wchar_t *tabNames[] = { L"Elements", L"Simulation", L"Display", L"Saves", L"Overlay", L"Welcome" };
-		static constexpr int welcomeTab = 5;
+		static constexpr const wchar_t *tabNames[] = { L"Elements", L"Simulation", L"Display", L"Saves", L"Overlay", L"Welcome", L"Tools" };
+		static constexpr int welcomeTab = 5, toolsTab = 6;
 
 		SideWindow()
 		{
@@ -895,6 +897,50 @@ namespace
 			PushButton(x, y, S(200), L"More render options\u2026", [] { GameController::Ref().OpenRenderOptions(); }, L"TPT's full render settings");
 		}
 
+		// Brush, replace mode and decoration colour (TPT keeps them in its tool strip and keys).
+		void PaintTools()
+		{
+			auto c = Content();
+			auto &gc = GameController::Ref();
+			auto *model = gc.GetModel();
+			int x = c.left + S(10), w = c.right - c.left - S(20), y = c.top + S(8);
+			int n = model->BrushListSize(), rows = (n + 2) / 3;
+			int top = Group(x, y, w, S(56) + rows * S(29), L"Brush");
+			int bw = (w - S(24) - 2 * S(6)) / 3;
+			for (int i = 0; i < n; i++)
+			{
+				std::wstring name = i == 0 ? L"Circle" : i == 1 ? L"Square" : i == 2 ? L"Triangle" : L"Custom " + std::to_wstring(i - 2);
+				PushButton(x + S(12) + (i % 3) * (bw + S(6)), top + (i / 3) * S(29), bw, name,
+				           [i] { GameController::Ref().GetModel()->SetBrushID(i); }, L"Tab cycles the shapes", model->GetBrushID() == i);
+			}
+			int sy = top + rows * S(29) + S(4);
+			auto r = model->GetBrush().GetRadius();
+			Caption(x + S(12), sy, L"Size " + std::to_wstring(r.X) + L" \u00D7 " + std::to_wstring(r.Y));
+			PushButton(x + S(12) + bw + S(6), sy, S(40), L"\u2212", [] { GameController::Ref().AdjustBrushSize(-1); }, L"Smaller ([ or the wheel)");
+			PushButton(x + S(12) + bw + S(52), sy, S(40), L"+", [] { GameController::Ref().AdjustBrushSize(1); }, L"Bigger (] or the wheel)");
+			y += S(64) + rows * S(29);
+
+			top = Group(x, y, w, S(76), L"Drawing over particles");
+			int flags = gc.GetReplaceModeFlags();
+			Toggle(x + S(12), top, L"Replace mode", flags & REPLACE_MODE, false, [] {
+				auto &g = GameController::Ref();
+				g.SetReplaceModeFlags((g.GetReplaceModeFlags() ^ REPLACE_MODE) & ~SPECIFIC_DELETE);
+			}, L"Draw over particles instead of only empty space (Insert)");
+			Toggle(x + S(12), top + S(24), L"Erase only the right-click material", flags & SPECIFIC_DELETE, false, [] {
+				auto &g = GameController::Ref();
+				g.SetReplaceModeFlags((g.GetReplaceModeFlags() ^ SPECIFIC_DELETE) & ~REPLACE_MODE);
+			}, L"Specific delete (Delete)");
+			y += S(84);
+
+			top = Group(x, y, w, S(84), L"Decoration");
+			Toggle(x + S(12), top, L"Show decorations", model->GetDecoration(), false, [] { GameController::Ref().SetDecoration(); }, L"Ctrl+B");
+			auto col = model->GetColourSelectorColour();
+			uint32_t rgb = (col.Red << 16) | (col.Green << 8) | col.Blue;
+			cv.RoundRect(x + S(12), top + S(28), S(40), S(22), S(3), rgb, rgb, 255);
+			cv.RoundFrame(x + S(12), top + S(28), S(40), S(22), S(3), 0x707070, 255);
+			PushButton(x + S(60), top + S(26), S(140), L"Pick colour\u2026", [] { GameController::Ref().OpenColourPicker(); }, L"The colour the deco tools paint with");
+		}
+
 		void PaintSaves()
 		{
 			auto c = Content();
@@ -1193,6 +1239,7 @@ namespace
 			case 3: PaintSaves(); break;
 			case 4: PaintOverlay(); break;
 			case welcomeTab: PaintWelcome(); break;
+			case toolsTab: PaintTools(); break;
 			}
 
 			// The status bar: what the hovered control does.
