@@ -107,7 +107,7 @@ overlay, and TPT only runs the top screen, so **the sim freezes while any dialog
    window size: element search, property tool, sign tool, deco colour picker, local saves and stamps (a real file
    list with thumbnails, drag and drop), options, render options, the Lua console. Rare or online screens (login,
    tags, online browser, profile) stay re-hosted until someone needs them native.
-   - [ ] Real Vista-style menus, drop-downs and dialogs (user request 2026-10-30): today the hosted ones are TPT's
+   - [x] Real Vista-style menus, drop-downs and dialogs (user request 2026-10-30): today the hosted ones are TPT's
      pixel UI inside a Vista frame. First: Settings, drop-down lists, context menus.
      - [x] Drop-down lists and context menus are real Windows menus (ui::Window::MenuItems; TrackPopupMenu on its
        own thread so the sim keeps running)
@@ -116,7 +116,7 @@ overlay, and TPT only runs the top screen, so **the sim freezes while any dialog
        checkboxes, text boxes, drop-downs, sliders, progress bars and scroll bars in Vista colours and Segoe UI.
        Icon buttons, colour swatches, unknown controls and Window::RawAreas (save thumbnails) keep TPT's pixels.
        Render options is a whole-screen view: Window::InPlace draws it on the sim layer instead of hosting it.
-       Left: half-scrolled rows vanish instead of clipping; text caret is always at the end
+       Half-scrolled rows clip and the caret follows the cursor (b4fb719).
 5. **Notifications** (S): startup notices, update news and errors to toasts and a list in the main window.
    - [x] Done 2026-10-30: TPT's notifications (update news, server notices) are a toast each and a yellow row at the
      top of the Welcome tab (Open, Dismiss) instead of buttons over the desktop. Errors stay TPT's own dialogs (hosted).
