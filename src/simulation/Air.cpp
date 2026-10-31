@@ -2,6 +2,7 @@
 #include "Simulation.h"
 #include "ElementClasses.h"
 #include "common/tpt-rand.h"
+#include "common/Parallel.h"
 #include <cmath>
 #include <algorithm>
 
@@ -314,8 +315,10 @@ void Air::update_air(void)
 			}
 		}
 
-		for (auto y=1; y<YCELLS-1; y++) //pressure adjustments from velocity
+		// these passes and the next each write only their own cell from maps they don't write: rows on all cores
+		OverlayParallel(YCELLS-2, [&](int row) //pressure adjustments from velocity
 		{
+			auto y = row + 1;
 			for (auto x=1; x<XCELLS-1; x++)
 			{
 				auto dp = 0.0f;
@@ -324,10 +327,11 @@ void Air::update_air(void)
 				pv[y][x] = Mix(edgePressure, pv[y][x], AIR_PLOSS);
 				pv[y][x] += dp*AIR_TSTEPP * 0.5f;;
 			}
-		}
+		});
 
-		for (auto y=1; y<YCELLS-1; y++) //velocity adjustments from pressure
+		OverlayParallel(YCELLS-2, [&](int row) //velocity adjustments from pressure
 		{
+			auto y = row + 1;
 			for (auto x=1; x<XCELLS-1; x++)
 			{
 				auto dx = 0.0f;
@@ -343,9 +347,9 @@ void Air::update_air(void)
 				if (bmap_blockair[y-1][x] || bmap_blockair[y][x] || bmap_blockair[y+1][x])
 					vy[y][x] = 0;
 			}
-		}
+		});
 
-		for (auto y=0; y<YCELLS; y++) //update velocity and pressure
+		OverlayParallel(YCELLS, [&](int y) //update velocity and pressure
 		{
 			for (auto x=0; x<XCELLS; x++)
 			{
@@ -489,7 +493,7 @@ void Air::update_air(void)
 				ovy[y][x] = dy;
 				opv[y][x] = dp;
 			}
-		}
+		});
 		vx.data = ovx.data;
 		vy.data = ovy.data;
 		pv.data = opv.data;
