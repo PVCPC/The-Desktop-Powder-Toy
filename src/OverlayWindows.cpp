@@ -2616,7 +2616,7 @@ namespace
 			struct FunSlider { const wchar_t *name, *tip; float *v; float hi; const char *pref; bool count; };
 			FunSlider funSliders[] = {
 				{ L"Pets", L"Stick figures that wander your windows and taskbar (how many). Fire and long falls can kill them; new ones drop in", &fun.pets, 10, "Pets", true },
-				{ L"Weather", L"Snow, rain or leaves falling from the top of the screen (how heavy). It melts or fades after a while", &fun.weather, 3, "Weather", false },
+				{ L"Weather", L"Snow, rain (with lightning) or leaves falling from the top of the screen (how heavy). It melts or fades after a while", &fun.weather, 3, "Weather", false },
 				{ L"Music bounce", L"Sand hops and fire flares to the beat of whatever your PC is playing (only the sound level is read)", &fun.music, 3, "Music", false },
 			};
 			int sy = top + int(std::size(funToggles)) * S(26);
@@ -5564,6 +5564,8 @@ static void TickFun(Simulation *sim)
 			if (kind == 3) p.dcolour = autumn[sim->rng.between(0, 4)], p.vx = (sim->rng.uniform01() - 0.5f) * 2;
 			fallen.push_back({ i, type, sim->currentTick + (kind == 1 ? 5400 : kind == 2 ? 300 : 3600) });
 		}
+		if (kind == 2 && sim->rng.uniform01() < fun.weather / 1200) // a storm: now and then a bolt from the top
+			sim->create_part(-1, sim->rng.between(XRES / 20, XRES * 19 / 20), CELL, PT_LIGH, 20);
 	}
 	while (!fallen.empty() && std::get<2>(fallen.front()) <= sim->currentTick)
 	{
