@@ -50,6 +50,7 @@
 #include "gui/interface/Slider.h"
 #include "gui/interface/Textbox.h"
 #include <algorithm>
+#include <cstring>
 #include <cwctype>
 #include <atomic>
 #include <thread>
@@ -5114,29 +5115,34 @@ void OverlayWindows::ApplySimMasks(uint32_t *argb, int w, const uint8_t *occupie
 	// The zoom window is a magnifier: opaque, its frame included, black particles and all.
 	auto zoom = RectSized(model->GetZoomWindowPosition() - Vec2{ 2, 2 }, Vec2{ 1, 1 } * (model->GetZoomSize() * model->GetZoomFactor() + 4));
 	bool zoomOn = model->GetZoomEnabled();
-	OverlayBands(YRES, [&](int y0, int y1) {
-	for (int y = y0; y < y1; y++)
-		for (int x = 0; x < XRES; x++)
+	// a row at a time (the play area and zoom box are spans of it), so the inner loop is plain enough to vectorise
+	auto ab = area.BottomRight(), zb = zoom.BottomRight();
+	for (int y = 0; y < YRES; y++)
+	{
+		auto *row = argb + size_t(y) * w;
+		auto *occ = occupied + size_t(y) * XRES;
+		bool inZoom = zoomOn && y >= zoom.pos.Y && y <= zb.Y;
+		int zx0 = inZoom ? std::clamp(zoom.pos.X, 0, XRES) : 0, zx1 = inZoom ? std::clamp(zb.X + 1, 0, XRES) : 0;
+		static std::vector<uint32_t> saved;
+		int zn = std::max(0, zx1 - zx0);
+		saved.assign(row + zx0, row + zx0 + zn); // the magnifier is drawn as it is
+		if (y < area.pos.Y || y > ab.Y)
+			std::fill(row, row + XRES, 0u);
+		else
 		{
-			auto &p = argb[y * w + x];
-			if (zoomOn && zoom.Contains({ x, y }))
+			int ax0 = std::clamp(area.pos.X, 0, XRES), ax1 = std::clamp(ab.X + 1, 0, XRES);
+			std::fill(row, row + ax0, 0u);
+			std::fill(row + ax1, row + XRES, 0u);
+			for (int x = ax0; x < ax1; x++)
 			{
-				p |= 0xFF000000;
-			}
-			else if (occupied[y * XRES + x] & 2) // the walls as of the frame: the live ones may have moved since
-			{
-				p = 0; // a window's wall: the window shows through
-			}
-			else if (!area.Contains({ x, y }))
-			{
-				p = 0;
-			}
-			else if (!(p & 0xFFFFFF) && (occupied[y * XRES + x] & 1)) // a black particle: solid
-			{
-				p = 0xFF000000;
+				uint32_t p = row[x];
+				uint8_t o = occ[x];
+				// a window's wall (as of the frame: the live ones may have moved since) shows the window; a black particle is solid
+				row[x] = (o & 2) ? 0u : (!(p & 0xFFFFFF) && (o & 1)) ? 0xFF000000u : p;
 			}
 		}
-	});
+		for (int i = 0; i < zn; i++) row[zx0 + i] = saved[i] | 0xFF000000;
+	}
 	const uint32_t *backdrop = nullptr;
 	if (std::any_of(sim->windowMarks.begin(), sim->windowMarks.end(), [](auto &m) { return m.second.any[Simulation::MarkHole]; }))
 	{
@@ -5486,12 +5492,13 @@ static void TickWindowWalls()
 	struct Ctx { std::vector<OverlayWall> *wins; std::map<HWND, RECT> *now; RECT sr; int sw, sh; } ctx{ &wins, &now, sr, sw, sh };
 	if (doWindows) EnumWindows([](HWND hwnd, LPARAM lp) -> BOOL {
 		auto &c = *(Ctx *)lp;
+		if (hwnd == mainWindow || !IsWindowVisible(hwnd) || IsIconic(hwnd)) return TRUE; // most windows: cheap checks first
 		auto ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
 		BOOL cloaked = FALSE;
 		DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof(cloaked));
 		wchar_t cls[32];
 		GetClassNameW(hwnd, cls, 32);
-		if (hwnd == mainWindow || !IsWindowVisible(hwnd) || IsIconic(hwnd) || cloaked || (ex & WS_EX_TRANSPARENT) ||
+		if (cloaked || (ex & WS_EX_TRANSPARENT) ||
 		    ((ex & WS_EX_TOOLWINDOW) && GetWindowThreadProcessId(hwnd, nullptr) != GetCurrentThreadId() &&
 		     wcscmp(cls, L"Shell_TrayWnd") && wcscmp(cls, L"Shell_SecondaryTrayWnd")) || // the taskbar is a floor
 		    !wcscmp(cls, L"Progman") || !wcscmp(cls, L"WorkerW"))

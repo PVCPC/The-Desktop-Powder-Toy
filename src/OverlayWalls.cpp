@@ -296,8 +296,14 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 		}
 	}
 	lastMoves = std::move(moves);
+	// a window that sat still at the same size since the last tick has nothing new under it to shove
+	static std::map<uintptr_t, std::array<int, 4>> lastRects;
+	std::map<uintptr_t, std::array<int, 4>> rects;
 	for (auto &w : walls)
 	{
+		std::array<int, 4> rect{ w.x0, w.y0, w.x1, w.y1 };
+		if (w.id) rects[w.id] = rect;
+		if (auto it = lastRects.find(w.id); w.id && !w.mx && !w.my && it != lastRects.end() && it->second == rect) continue;
 		int mx = w.mx, my = w.my;
 		if (!mx && !my) my = -1;
 		float len = std::hypot(float(mx), float(my)), sx = mx / len, sy = my / len;
@@ -327,6 +333,7 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 				}
 			}
 	}
+	lastRects = std::move(rects);
 	// What touches a window marks it, marks that move with it: fire and lava scorch, ice and cryo frost, acid etches
 	// pits, water streaks. Frost melts and water dries; scorch and pits stay until the sim is cleared.
 	// ponytail: marks are kept from the visible top-left, so a window half off screen shifts them; keep the full rect if it matters.

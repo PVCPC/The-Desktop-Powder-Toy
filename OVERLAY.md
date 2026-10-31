@@ -310,8 +310,11 @@ tray menu: the tray menu stays native on purpose.
   wallpaper); Hole opacity 0 = fully see-through, up = the broken part fades back in. `MarkHole` in
   `Simulation::windowMarks`, taken out of the sim's walls; holes show the wallpaper (IDesktopWallpaper + WIC, per
   monitor, drawn as fill). Overlay only, cleared with the sim. Tested on my test window with acid and real C-4 (PLEX).
-- [ ] Explosions shake nearby windows a few pixels (moves other apps' windows: off by default, a switch to enable).
-- [ ] Falling-sand CPU (~1 core with lots of sand moving): profile TPT's own update and trim what the overlay adds.
+- [x] Explosions shake nearby windows (2026-10-31: "Explosion shake" slider, off by default; jolt that dies away, then back home; not maximised; a grab cancels).
+- [x] Falling-sand CPU (2026-10-31): timed with ~95k grains raining: TPT's own UpdateParticles ~11-13 ms/tick (the bulk,
+  single-threaded, left alone), its renderer ~2.7 ms; the overlay's per-frame work went 6.4 -> 3.3 ms (frame mask pass
+  row spans instead of per-pixel rect tests 2.1 -> 0.5; window scan does cheap checks before DWM calls; windows that
+  didn't move or resize skip the push scan 0.7 -> 0.2). Lots of sand still fills a core: that is TPT's sim.
 
 ## Ideas
 
