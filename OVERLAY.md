@@ -281,7 +281,9 @@ tray menu: the tray menu stays native on purpose.
   close, a start-button style launcher and taskbar reopen them, and items can be dragged between windows (e.g. an
   element from the palette onto a quick-bar window). Combine with the Vista theme first, then other OS themes.
 - Smart menu behaviour: menus fade when unused, then come back on hover or a hotkey.
-- Per-app rules: pass-through automatically while a game or full-screen app is focused.
+- [x] Per-app rules (2026-10-31): Overlay tab list "Pass clicks through while these apps are in front"
+  (Overlay.PassApps, exe names; Add a running app picks from open windows). Tested: python.exe in front ->
+  pass-through notice, closed -> back to normal.
 
 ## Related
 

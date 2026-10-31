@@ -577,8 +577,13 @@ float4 PartPs(V i) : SV_Target { return i.col; }
 		static int frames = 0;
 		if (++frames % 30) return;
 		bool now = false;
+		// an app on the Overlay tab's list in front: pass-through whether it's full screen or not
+		static ByteString app;
+		auto was = app;
+		app = OverlayWindows::PassApp(GetForegroundWindow());
 		QUERY_USER_NOTIFICATION_STATE state;
-		if (overlayAutoPass && SHQueryUserNotificationState(&state) == S_OK)
+		if (app.size()) now = true;
+		else if (overlayAutoPass && SHQueryUserNotificationState(&state) == S_OK)
 		{
 			DWORD pid = 0;
 			HWND fg = GetForegroundWindow();
@@ -600,7 +605,8 @@ float4 PartPs(V i) : SV_Target { return i.col; }
 		if (now == fullScreenApp) return;
 		fullScreenApp = now;
 		ApplyPassThrough();
-		OverlayWindows::Notify(now ? "Full-screen app: clicks pass through" : "Full-screen app closed: clicks back to normal");
+		if (app.size()) OverlayWindows::Notify((app + " in front: clicks pass through").c_str());
+		else OverlayWindows::Notify(now ? "Full-screen app: clicks pass through" : was.size() ? (was + " left: clicks back to normal").c_str() : "Full-screen app closed: clicks back to normal");
 	}
 
 	// A top-down 32-bit DIB the frame is scaled into, then handed to UpdateLayeredWindow.

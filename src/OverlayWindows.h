@@ -37,6 +37,8 @@ namespace OverlayWindows
 	// True if the mouse is busy with an edge, so TPT shouldn't draw.
 	bool AreaMouse(int x, int y, int what);
 	bool RecordingKey(); // the Overlay tab is waiting for a new shortcut: global hotkeys are off
+	// The app owning window hwnd (its exe name) when it's on the Overlay tab's pass-through list, else empty.
+	ByteString PassApp(void *hwnd);
 	// A native Windows dialog: a drop-down (options, choice) over a text field (text), then OK, Cancel and the extra
 	// buttons. valid(choice, text) false greys out OK. 1 OK, 0 Cancel, 2 + i extra button i; -1 when the overlay
 	// isn't running (use TPT's own window).

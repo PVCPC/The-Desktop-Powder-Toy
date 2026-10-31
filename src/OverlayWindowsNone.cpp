@@ -10,6 +10,7 @@ bool OverlayWindows::HideTPTMenus() { return false; }
 void OverlayWindows::ApplySimMasks(uint32_t *, int, const uint8_t *) {}
 void OverlayWindows::FrameWalls(std::vector<uint8_t> &, uint8_t) {}
 std::vector<OverlayWindows::WindowShift> OverlayWindows::WindowShifts() { return {}; }
+ByteString OverlayWindows::PassApp(void *) { return {}; }
 void OverlayWindows::ClearUnderWindows(uint32_t *, int, int, int, int) {}
 void OverlayWindows::SetPlayArea(int, int, int, int) {}
 bool OverlayWindows::AreaMouse(int, int, int) { return false; }

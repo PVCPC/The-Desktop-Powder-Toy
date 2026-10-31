@@ -72,6 +72,10 @@
 #pragma comment(lib, "oleaut32.lib")
 #include <d3d11.h>
 #include <dxgi1_2.h>
+// the Overlay tab's pass-through apps (Overlay.PassApps)
+static std::vector<ByteString> PassApps();
+static void SetPassApps(const std::vector<ByteString> &apps);
+static std::vector<ByteString> RunningApps();
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
 #undef small       // rpcndr.h, via dwmapi.h
@@ -3001,6 +3005,43 @@ namespace
 				GlobalPrefs::Ref().Set("Overlay.AutoPassThrough", overlayAutoPass);
 			});
 			y += S(76);
+			// Apps that always get the clicks while they're in front (Overlay.PassApps: exe names, ';'-separated)
+			auto apps = PassApps();
+			int ah = S(50) + int(apps.size()) * S(26);
+			top = Group(x, y, w, ah, L"Pass clicks through while these apps are in front");
+			for (int i = 0; i < int(apps.size()); i++)
+			{
+				int ry = top + i * S(26);
+				Caption(x + S(12), ry, Platform::WinWiden(apps[i]));
+				PushButton(x + w - S(100), ry, S(88), L"Remove", [apps, i]() mutable {
+					apps.erase(apps.begin() + i);
+					SetPassApps(apps);
+				}, L"Clicks go back to the overlay's input mode while it's in front");
+			}
+			{
+				int by = top + int(apps.size()) * S(26), bx = x + S(12), bw = S(220);
+				PushButton(bx, by, bw, L"Add a running app\u2026", [this, bx, by, bw] {
+					later = [this, rc = RECT{ bx, by, bx + bw, by + S(23) }] {
+						auto running = RunningApps();
+						HMENU m = CreatePopupMenu();
+						for (int i = 0; i < int(running.size()); i++) AppendMenuW(m, MF_STRING, UINT(i + 1), Platform::WinWiden(running[i]).c_str());
+						if (running.empty()) AppendMenuW(m, MF_STRING | MF_GRAYED, 0, L"No other apps have windows open");
+						POINT p{ rc.left, rc.bottom };
+						ClientToScreen(hwnd, &p);
+						int cmd = TrackPopupMenu(m, TPM_RETURNCMD | TPM_NONOTIFY, p.x, p.y, 0, hwnd, nullptr);
+						DestroyMenu(m);
+						if (cmd > 0)
+						{
+							auto list = PassApps();
+							if (std::find(list.begin(), list.end(), running[cmd - 1]) == list.end()) list.push_back(running[cmd - 1]);
+							SetPassApps(list);
+						}
+						dirty = true;
+					};
+				}, L"An app with a window open now");
+				for (int i = 0, k = S(4), ax = bx + bw - S(20), ay = by + S(10); i <= k; i++) Line(cv, ax + i, ay + i, 2 * (k - i) + 1, 1, theme->ink); // the arrow
+			}
+			y += ah + S(8);
 			top = Group(x, y, w, S(140), L"Shortcuts (any app)");
 			std::wstring rows[][2] = {
 				{ L"Next input mode", key("CycleInput", "Ctrl+Alt+O") },
@@ -4784,6 +4825,71 @@ std::vector<OverlayWindows::WindowShift> OverlayWindows::WindowShifts()
 		                float(double(r.top - at.top) * WINDOWH / sh) });
 	}
 	return out;
+}
+
+// The exe name (lower case) of the app owning a window
+static ByteString ExeName(HWND hwnd)
+{
+	DWORD pid = 0;
+	GetWindowThreadProcessId(hwnd, &pid);
+	HANDLE proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+	if (!proc) return {};
+	wchar_t path[MAX_PATH];
+	DWORD n = MAX_PATH;
+	bool ok = QueryFullProcessImageNameW(proc, 0, path, &n);
+	CloseHandle(proc);
+	if (!ok) return {};
+	std::wstring name(path, n);
+	name = name.substr(name.find_last_of(L"\\/") + 1);
+	CharLowerW(name.data());
+	return Platform::WinNarrow(name);
+}
+
+static std::vector<ByteString> PassApps()
+{
+	std::vector<ByteString> out;
+	for (auto &s : GlobalPrefs::Ref().Get("Overlay.PassApps", ByteString("")).PartitionBy(';'))
+		if (s.size()) out.push_back(s);
+	return out;
+}
+
+static void SetPassApps(const std::vector<ByteString> &apps)
+{
+	ByteString s;
+	for (auto &a : apps) s += (s.size() ? ";" : "") + a;
+	GlobalPrefs::Ref().Set("Overlay.PassApps", s);
+}
+
+// Apps with a normal window open now, but not us
+static std::vector<ByteString> RunningApps()
+{
+	std::vector<ByteString> out;
+	EnumWindows([](HWND hwnd, LPARAM lp) -> BOOL {
+		BOOL cloaked = FALSE;
+		DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof(cloaked));
+		DWORD pid = 0;
+		GetWindowThreadProcessId(hwnd, &pid);
+		if (!IsWindowVisible(hwnd) || cloaked || GetWindow(hwnd, GW_OWNER) || (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) ||
+		    !GetWindowTextLengthW(hwnd) || pid == GetCurrentProcessId())
+		{
+			return TRUE;
+		}
+		auto &out = *(std::vector<ByteString> *)lp;
+		auto name = ExeName(hwnd);
+		if (name.size() && std::find(out.begin(), out.end(), name) == out.end()) out.push_back(name);
+		return TRUE;
+	}, LPARAM(&out));
+	std::sort(out.begin(), out.end());
+	return out;
+}
+
+ByteString OverlayWindows::PassApp(void *hwnd)
+{
+	if (!hwnd) return {};
+	auto apps = PassApps();
+	if (apps.empty()) return {};
+	auto name = ExeName(HWND(hwnd));
+	return std::find(apps.begin(), apps.end(), name) != apps.end() ? name : ByteString();
 }
 
 static void TickWindowWalls()
