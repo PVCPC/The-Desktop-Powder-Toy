@@ -320,7 +320,10 @@ tray menu: the tray menu stays native on purpose.
 - [x] Multi-core sim (2026-10-31): plain particles (no update function or ChangeType, not energy, slow) update in 32 px
   blocks, nine passes 64 px apart, per-block RNGs (`SimRNG`), create/kill/change-type locked (`parallelLock`); the
   rest after, one at a time. Air passes split by rows. Sand rain ~190k grains: 30 -> 53 ticks/s; same results as the
-  one-core order. Left single-core: render_parts (~5 ms, order-dependent effects) and RecalcFreeParticles (pmap order).
+  one-core order. Left single-core: RecalcFreeParticles (pmap order).
+- [x] Multi-core drawing (2026-10-31): render_parts draws plain particles (cached look, one flat pixel) on all cores
+  first, highest index winning a shared pixel (atomic max per pixel); effects follow in order, now always over them.
+  409k plain particles: 6.2 -> 1.4 ms, same picture (hash, old and new alternating in one run).
 
 - [x] Every monitor (2026-10-31): sim sized to the virtual screen, overlay at its corner; where no monitor is
   (beside a shorter one) is a wall (gap rects, TickWindowWalls). Untested on a real second monitor.

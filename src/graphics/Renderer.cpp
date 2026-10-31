@@ -12,7 +12,9 @@
 #include "simulation/gravity/Gravity.h"
 #include "simulation/orbitalparts.h"
 #include "simulation/elements/SOAP.h"
+#include "common/Parallel.h"
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <numbers>
 
@@ -279,7 +281,71 @@ void Renderer::render_parts()
 		}
 	}
 	stats.foundParticles = 0;
+	// Plain particles (cached look, drawn as one flat pixel) go first, on all cores; the rest follow one at a time as
+	// before. Where several plain ones share a pixel the highest index wins, as in order. Effects drawn later now always
+	// land over plain particles instead of under the later-numbered ones.
+	static std::vector<uint32_t> flatColour; // per plain particle: its pixel
+	static std::vector<uint8_t> flat;        // per particle: 1 when plain, 0 when drawn the old way
+	static std::vector<int> owner;     // per pixel: the highest plain particle on it
+	int active = sim->parts.active;
+	bool fast = !findingElement && colorMode == COLOUR_DEFAULT;
+	if (fast)
+	{
+		flat.assign(active, 0);
+		flatColour.resize(active);
+		owner.resize(size_t(XRES) * YRES);
+		constexpr int chunk = 4096;
+		OverlayParallel(YRES, [&](int y) { std::fill_n(owner.begin() + size_t(y) * XRES, XRES, -1); });
+		OverlayParallel((active + chunk - 1) / chunk, [&](int c) {
+			for (int i = c * chunk; i < std::min(active, c * chunk + chunk); i++)
+			{
+				auto &p = sim->parts[i];
+				int t = p.type;
+				if (t <= 0 || t >= PT_NUM || !graphicscache[t].isready) continue;
+				int nx = int(p.x + 0.5f), ny = int(p.y + 0.5f);
+				if (nx >= XRES || nx < 0 || ny >= YRES || ny < 0) continue;
+				if (TYP(sim->photons[ny][nx]) && !(elements[t].Properties & TYPE_ENERGY) && t != PT_STKM && t != PT_STKM2 && t != PT_FIGH) continue;
+				if ((elements[t].Properties & PROP_HOT_GLOW) && p.temp > elements[t].HighTemperature - 800.0f) continue;
+				auto &gc = graphicscache[t];
+				int pm = gc.pixel_mode; // the same mode changes as below
+				if ((pm & FIRE_ADD) && !(renderMode & FIRE_ADD)) pm |= PMODE_GLOW;
+				if ((pm & FIRE_BLEND) && !(renderMode & FIRE_BLEND)) pm |= PMODE_BLUR;
+				if ((pm & PMODE_BLUR) && !(renderMode & PMODE_BLUR)) pm |= PMODE_FLAT;
+				if ((pm & PMODE_GLOW) && !(renderMode & PMODE_GLOW)) pm |= PMODE_BLEND;
+				if (renderMode & PMODE_BLOB) pm |= PMODE_BLOB;
+				pm &= renderMode;
+				if (pm != PMODE_FLAT) continue;
+				int r = gc.colr, g = gc.colg, b = gc.colb;
+				int da = (p.dcolour >> 24) & 0xFF, dr = (p.dcolour >> 16) & 0xFF, dg = (p.dcolour >> 8) & 0xFF, db = p.dcolour & 0xFF;
+				if (decorationLevel == decorationAntiClickbait)
+				{
+					if (da < 250 || dr > 5 || dg > 5 || db > 5) da = 0;
+					else da = 255, dr = dg = db = 0;
+				}
+				if (decorationLevel != decorationDisabled && da)
+				{
+					da++;
+					r = (da * dr + (256 - da) * r) >> 8;
+					g = (da * dg + (256 - da) * g) >> 8;
+					b = (da * db + (256 - da) * b) >> 8;
+				}
+				flatColour[i] = RGB(std::clamp(r, 0, 255), std::clamp(g, 0, 255), std::clamp(b, 0, 255)).Pack();
+				flat[i] = 1;
+				std::atomic_ref<int> o(owner[size_t(ny) * XRES + nx]);
+				for (int was = o.load(std::memory_order_relaxed); was < i && !o.compare_exchange_weak(was, i, std::memory_order_relaxed);) {}
+			}
+		});
+		OverlayParallel((active + chunk - 1) / chunk, [&](int c) {
+			for (int i = c * chunk; i < std::min(active, c * chunk + chunk); i++)
+			{
+				if (!flat[i]) continue;
+				int nx = int(sim->parts[i].x + 0.5f), ny = int(sim->parts[i].y + 0.5f);
+				if (owner[size_t(ny) * XRES + nx] == i) video[{ nx, ny }] = flatColour[i];
+			}
+		});
+	}
 	for(i = 0; i < sim->parts.active; i++) {
+		if (fast && flat[i]) continue;
 		if (sim->parts[i].type && sim->parts[i].type >= 0 && sim->parts[i].type < PT_NUM) {
 			t = sim->parts[i].type;
 

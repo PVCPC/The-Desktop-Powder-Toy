@@ -39,7 +39,8 @@ What's new
   is broken: clearing the sim mends everything.
 - **Your sand stays**: the scene is saved when you quit and comes back next time.
 - **Light on the CPU**: when nothing moves it drops to a few frames a second (about a quarter of one core).
-- **Uses every core**: plain particles (sand, water and the like) and the air update run across all CPU cores, so
+- **Uses every core**: plain particles (sand, water and the like) update and are drawn across all CPU cores, and so
+  does the air, so
   big piles stay smooth (about 53 ticks a second with 190k falling grains, from 30).
 - **Desktop-style menus**: TPT's side bar and tool strip move into real Windows windows (Elements, Simulation,
   Display, Saves, Overlay tabs) that can be dragged, docked, torn into separate windows and hidden to the tray
