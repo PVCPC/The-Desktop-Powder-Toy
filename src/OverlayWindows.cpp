@@ -512,6 +512,7 @@ namespace
 		{
 			DesktopGrab grab;
 			std::vector<uint32_t> px, scratch, small; // small: px at half size, blurred (what the glass samples)
+			std::vector<uint32_t> probe; // some of the small pixels seen through the glass
 			int w = 0, h = 0;
 		};
 		std::vector<Shape> shapes;
@@ -1474,11 +1475,13 @@ namespace
 			}
 			// two box blurs each way (about a gaussian): shapes show through, fine detail like text goes soft
 			for (int pass = 0; pass < 2; pass++) Blur(half, bd.scratch, hw, hh, std::max(1, S(2)));
-			// light or dark: the mean luma behind the window, with some hysteresis
+			// light or dark: the mean luma of what's seen through the glass, with some hysteresis
 			// ponytail: one look per window; macOS decides per bar
 			int64_t sum = 0, n = 0;
-			for (size_t i = 0; i < half.size(); i += 7, n++) sum += Luma(half[i]);
-			int mean = int(sum / std::max<int64_t>(1, n));
+			for (uint32_t i : bd.probe)
+				if (i < half.size()) sum += Luma(half[i]), n++;
+			if (!n) return false;
+			int mean = int(sum / n);
 			bool was = dark;
 			if (mean < 100) dark = true;
 			else if (mean > 125) dark = false;
@@ -1556,7 +1559,6 @@ namespace
 
 		void Bake(Backdrop &bd, const Canvas &ui, std::vector<Baked> &out) override
 		{
-			(void)bd;
 			int m = S(24), hw = (ui.w + 2 * m) / 2, hh = (ui.h + 2 * m) / 2;
 			float band = float(S(26));
 			auto at = [&](float x, float y) { // a pixel of the half-size backdrop
@@ -1577,6 +1579,8 @@ namespace
 						{ at(x - nx * bend * 1.18f, y - ny * bend * 1.18f), at(x - nx * bend, y - ny * bend), at(x - nx * bend * 0.82f, y - ny * bend * 0.82f) }, // red bends most, blue least
 						s.tint, uint8_t(255 * cover), uint8_t(255 * s.frost), uint8_t(255 * dark), uint8_t(255 * white) });
 				});
+			bd.probe.clear();
+			for (size_t i = 0; i < out.size(); i += 7) bd.probe.push_back(out[i].src[1]);
 		}
 
 		void Underlay(Backdrop &bd, Canvas &cv, const Canvas &ui, const std::vector<Baked> &baked) override

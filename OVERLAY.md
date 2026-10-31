@@ -196,7 +196,7 @@ Assessment, in the order I'd do it (effort: S = an hour or two, M = a session, L
      desktop duplication (the GPU halves it), blurred, luminosity pulled into a band labels read over, lens and
      specular rim at the edges; light or dark (white labels) by the brightness behind. A thread recomposes it every
      display refresh. The window is kept out of screen captures and recordings while macOS 26 is on (else it would
-     see itself). Open: light/dark per bar rather than per window.
+     see itself). Light or dark is judged from what shows through the glass; per bar (as macOS) not done.
 7. [x] Black particles inside the zoom window (S); menus fade when unused (S). Done 2026-10-30: the zoom box is opaque
    (a magnifier); TPT's own menus, when shown, fade out after 3 s without the mouse over them.
 8. [-] Other platforms: X11 / Wayland input regions, macOS (L; only if someone needs them). Deferred by the
