@@ -30,7 +30,12 @@ What's new
   Locked, with global hotkeys (Ctrl+Alt+O / P / L, customisable). Full-screen apps and games are detected and the
   overlay steps aside. Ctrl+Alt+C clears the screen.
 - **Windows you can throw sand with**: sand rides a window you drag and flies off when you stop or shake it;
-  fire and lava scorch windows; your mouse blows sand like a breeze. Sliders in the Simulation tab tune all of it.
+  fire and lava scorch windows, ice frosts them, acid pits them and water streaks them; desktop icons carry their
+  pile when you drop them; your mouse blows sand like a breeze. Sliders in the Simulation tab tune all of it.
+- **Destructible windows** (a switch, off by default): acid eats holes in windows and icons, explosions blow chunks
+  out that fly off in the window's colour, DEST and black holes chew through, and you see what's really behind
+  through the holes. Explosions can even shake your real windows (its own slider, off by default). Only the overlay
+  is broken: clearing the sim mends everything.
 - **Your sand stays**: the scene is saved when you quit and comes back next time.
 - **Light on the CPU**: when nothing moves it drops to a few frames a second (about a quarter of one core).
 - **Desktop-style menus**: TPT's side bar and tool strip move into real Windows windows (Elements, Simulation,
