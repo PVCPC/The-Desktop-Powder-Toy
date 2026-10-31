@@ -1752,6 +1752,7 @@ namespace
 		{
 			vsyncRun = true;
 			vsync = std::thread([this] {
+				SetThreadDescription(GetCurrentThread(), L"overlay side window vsync");
 				// the vertical blank of the screen the window is on; DwmFlush if there's none
 				// ponytail: picked once, so a window dragged to a screen with another refresh rate keeps the first's
 				IDXGIOutput *screen = nullptr;
@@ -4875,16 +4876,13 @@ struct DeskIcon
 };
 // Null (a plain square for now) when not cached yet and this pass's budget of new pictures is spent: a desktop can
 // hold hundreds of icons, and fetching them all at once takes seconds.
-static std::shared_ptr<const std::vector<uint8_t>> IconShape(IShellFolder *folder, PCUITEMID_CHILD child, int size, int &budget)
+static std::shared_ptr<const std::vector<uint8_t>> IconShape(PCUITEMID_CHILD child, int size, int &budget)
 {
-	static std::map<std::wstring, std::shared_ptr<const std::vector<uint8_t>>> cache;
-	IShellItem *item = nullptr;
-	if (FAILED(SHCreateItemWithParent(nullptr, folder, child, IID_PPV_ARGS(&item)))) return nullptr;
-	std::wstring key = std::to_wstring(size) + L"|";
-	wchar_t *name = nullptr;
-	if (SUCCEEDED(item->GetDisplayName(SIGDN_DESKTOPABSOLUTEPARSING, &name))) key += name, CoTaskMemFree(name);
-	if (auto it = cache.find(key); it != cache.end()) return item->Release(), it->second;
-	if (budget-- <= 0) return item->Release(), nullptr;
+	// keyed by the item's ID bytes (a name lookup per icon per read cost more than the rest of the read)
+	static std::map<std::string, std::shared_ptr<const std::vector<uint8_t>>> cache;
+	std::string key = std::to_string(size) + "|" + std::string((const char *)child, ILGetSize(child));
+	if (auto it = cache.find(key); it != cache.end()) return it->second;
+	if (budget-- <= 0) return nullptr;
 	auto shape = std::make_shared<std::vector<uint8_t>>(size_t(size) * size, 1); // a square if the picture fails
 	// The shell's own cached icon list, drawn at the desktop's size: ~1 ms an icon, where IShellItemImageFactory took ~30
 	// (a full desktop sat as squares for 15 s). The desktop is the namespace root, so the child ID is an absolute one.
@@ -4915,7 +4913,6 @@ static std::shared_ptr<const std::vector<uint8_t>> IconShape(IShellFolder *folde
 		DestroyIcon(icon);
 	}
 	if (images) images->Release();
-	item->Release();
 	return cache[key] = shape;
 }
 static std::vector<DeskIcon> ReadDesktopIcons(IFolderView2 *&view, HWND &list)
@@ -4949,11 +4946,9 @@ static std::vector<DeskIcon> ReadDesktopIcons(IFolderView2 *&view, HWND &list)
 	int size = 0;
 	POINT spacing{};
 	IEnumIDList *items = nullptr;
-	IShellFolder *folder = nullptr;
 	if (FAILED(view->GetViewModeAndIconSize(&mode, &size)) || FAILED(view->GetSpacing(&spacing)) ||
-	    FAILED(view->GetFolder(IID_PPV_ARGS(&folder))) || FAILED(view->Items(SVGIO_ALLVIEW, IID_PPV_ARGS(&items))))
+	    FAILED(view->Items(SVGIO_ALLVIEW, IID_PPV_ARGS(&items))))
 	{
-		if (folder) folder->Release();
 		view->Release(), view = nullptr; // Explorer restarted: find it again
 		return icons;
 	}
@@ -4970,13 +4965,12 @@ static std::vector<DeskIcon> ReadDesktopIcons(IFolderView2 *&view, HWND &list)
 			{
 				ClientToScreen(list, &p);
 				int x = p.x, y = p.y + 6; // matched by eye against sand resting on icons
-				icons.push_back({ { x, y, x + size, y + size }, IconShape(folder, item, size, budget) });
+				icons.push_back({ { x, y, x + size, y + size }, IconShape(item, size, budget) });
 			}
 			CoTaskMemFree(item);
 		}
 	}
 	items->Release();
-	folder->Release();
 	return icons;
 }
 static std::vector<DeskIcon> DesktopIcons()
@@ -4987,9 +4981,11 @@ static std::vector<DeskIcon> DesktopIcons()
 	wanted = 0;
 	static bool started = [] {
 		std::thread([] {
+			SetThreadDescription(GetCurrentThread(), L"overlay desktop icons");
 			CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 			IFolderView2 *view = nullptr;
 			HWND list = nullptr;
+			int still = 0; // reads since the icons last changed
 			while (true)
 			{
 				if (wanted++ > 10)
@@ -5001,9 +4997,22 @@ static std::vector<DeskIcon> DesktopIcons()
 				auto icons = ReadDesktopIcons(view, list);
 				{
 					std::lock_guard g(lock);
+					bool same = std::equal(icons.begin(), icons.end(), latest.begin(), latest.end(), [](auto &a, auto &b) {
+						return EqualRect(&a.r, &b.r) && a.shape == b.shape;
+					});
+					still = same ? still + 1 : 0;
 					latest = std::move(icons);
 				}
-				Sleep(view ? 8 : had ? 0 : 1000); // looking for Explorer: once a second
+				// A read is ~20 ms of round trips to Explorer: fast only while icons may be moving (they just changed, or
+				// a button is held on the desktop), otherwise twice a second.
+				auto dragging = [] {
+					wchar_t cls[16]{};
+					GetClassNameW(GetForegroundWindow(), cls, 16);
+					return (GetAsyncKeyState(VK_LBUTTON) & 0x8000) && (!wcscmp(cls, L"Progman") || !wcscmp(cls, L"WorkerW"));
+				};
+				if (!view) Sleep(had ? 0 : 1000); // looking for Explorer: once a second
+				else if (still < 25 || dragging()) Sleep(8);
+				else for (int i = 0; i < 20 && !dragging(); i++) Sleep(25);
 			}
 		}).detach();
 		return true;

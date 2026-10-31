@@ -43,6 +43,7 @@ namespace
 
 bool overlayMode = false;
 bool overlayWindowed = false;
+bool overlayIdle = false;
 bool overlayAutoPass = true;
 
 #ifdef _WIN32
@@ -138,6 +139,7 @@ namespace
 	enum : uint8_t { OnParticle = 1, OnWall = 2, Moves = 4 };
 	std::vector<uint8_t> frameOccupied;
 	double framePeriod = 1 / 60.0, frameAt = 0; // seconds between sim frames, and when the newest came
+	DrawLimit busyLimit = DrawLimitExplicit{ 60 }; // the draw rate while something moves (GPU frames: the screen's)
 
 	// Frames on the GPU: a click-through window just over ours shows a screen-sized swap chain (DirectComposition):
 	// the frame goes up sim-sized and the GPU scales it (nearest pixel), with the moving particles taken out and drawn
@@ -284,7 +286,7 @@ float4 PartPs(V i) : SV_Target { return i.col; }
 			tried = true;
 			gpu = MakeGpu();
 			// draw at the screen's rate; the sim keeps its own (FpsLimit) and the frames between slide the particles
-			if (gpu) ui::Engine::Ref().SetDrawingFrequencyLimit(DrawLimitDisplay{});
+			if (gpu) busyLimit = DrawLimitDisplay{};
 		}
 		if (!gpu) return false;
 		auto &g = *gpu;
@@ -843,6 +845,7 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 	bool catchEmpty = input == OverlayInput::Locked || (input == OverlayInput::Auto && fg == GetCurrentProcessId());
 	uint32_t empty = catchEmpty ? 0x01000000 : 0;
 	argb.resize(size_t(w) * h);
+	float fade = 1; // TPT's menus
 	OverlayBands(h, [&](int y0, int y1) {
 		for (int i = y0 * w; i < y1 * w; i++)
 		{
@@ -862,7 +865,6 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 		bool shown = !(OverlayWindows::HideTPTMenus() && !(top && top->InPlace));
 		if (shown && !wasShown) lastUse = SDL_GetTicks(); // just turned on: start visible
 		wasShown = shown;
-		float fade = 1;
 		if (OverlayWindows::HideTPTMenus() && !(top && top->InPlace))
 		{
 			fade = 0; // all of them are in the side window
@@ -891,6 +893,13 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 		}
 	}
 	OverlayWindows::ClearUnderWindows(argb.data(), w, h, ww, wh);
+	// Drawing at the screen's rate only pays while something moves: particles, a window, the menus fading, or TPT in
+	// use. Idle, a few frames a second keep up with slow changes and spot the next move, for a fraction of the CPU.
+	static double busyUntil = 0;
+	if (!moving.empty() || catchEmpty || !cursorMiss || (fade > 0 && fade < 1) || !OverlayWindows::WindowShifts().empty())
+		busyUntil = Now() + 1;
+	overlayIdle = Now() >= busyUntil;
+	ui::Engine::Ref().SetDrawingFrequencyLimit(overlayIdle ? DrawLimit(DrawLimitExplicit{ 15 }) : busyLimit);
 	if (GpuPresent(argb.data(), w, h, ww, wh, empty)) return;
 	bool keyed = GetParent(hwnd);
 	if (keyed)

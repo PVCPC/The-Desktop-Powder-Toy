@@ -501,6 +501,11 @@ std::optional<uint64_t> EngineProcess()
 	auto effectiveDrawLimit = engine.GetEffectiveDrawCap();
 	auto doDraw = !effectiveDrawLimit || drawSchedule.HasElapsed(nowNs);
 	auto fpsLimit = ui::Engine::Ref().GetFpsLimit();
+	if (auto *explicitLimit = std::get_if<FpsLimitExplicit>(&fpsLimit); explicitLimit && overlayIdle)
+	{
+		// a settled pile still costs a full update per tick; slow invisible changes (heat, timers) can wait
+		explicitLimit->value = std::min(explicitLimit->value, 20.f);
+	}
 	auto doSimTick = true;
 	if (std::holds_alternative<FpsLimitExplicit>(fpsLimit))
 	{
@@ -533,13 +538,20 @@ std::optional<uint64_t> EngineProcess()
 		SDLSetScreen();
 		blit(engine.g->Data());
 	}
+	// Until the next frame is due, from now: Arm's own return is from the previous due time, 0 on every pass that
+	// didn't draw or tick, and the loop then woke every millisecond to find nothing to do.
+	auto untilMs = [doneNs = GetNowNs()](uint64_t dueNs) {
+		return dueNs > doneNs ? (dueNs - doneNs + UINT64_C(999'999)) / UINT64_C(1'000'000) : UINT64_C(0);
+	};
 	if (effectiveDrawLimit)
 	{
-		delay = drawSchedule.Arm(float(*effectiveDrawLimit)) / UINT64_C(1'000'000);
+		drawSchedule.Arm(float(*effectiveDrawLimit));
+		delay = untilMs(drawSchedule.GetNow());
 	}
 	if (auto *fpsLimitExplicit = std::get_if<FpsLimitExplicit>(&fpsLimit))
 	{
-		auto simDelay = tickSchedule.Arm(fpsLimitExplicit->value) / UINT64_C(1'000'000);
+		tickSchedule.Arm(fpsLimitExplicit->value);
+		auto simDelay = untilMs(tickSchedule.GetNow());
 		if (delay.has_value() && simDelay < *delay)
 		{
 			delay = simDelay;

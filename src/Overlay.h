@@ -28,11 +28,13 @@ void OverlayParallel(int n, F f)
 #endif
 }
 
-// f(y0, y1) for rows [0, h) in 32 bands, on all cores
+// f(y0, y1) for rows [0, h): in 32 bands on all cores when there are many; a smaller frame costs the thread pool more
+// than it saves (1704x480: a quarter of a core)
 template<class F>
 void OverlayBands(int h, F f)
 {
 	constexpr int bands = 32;
+	if (h < 1000) return f(0, h);
 	OverlayParallel(bands, [&](int b) { f(h * b / bands, h * (b + 1) / bands); });
 }
 
@@ -41,6 +43,8 @@ void OverlayBands(int h, F f)
 extern bool overlayMode;
 // overlay:window: TPT's normal window (its own background and menus), still with the overlay's side windows and tray.
 extern bool overlayWindowed;
+// Nothing moving on the overlay and TPT not in use: it draws a few frames a second and the sim ticks at most 20 times.
+extern bool overlayIdle;
 // The side windows, tray and hotkeys, once per frame (the windowed mode's part of OverlayPresent).
 void OverlayTickUI();
 

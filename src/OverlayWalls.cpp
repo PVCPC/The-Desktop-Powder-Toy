@@ -56,8 +56,9 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 		for (int y = w.y0; y < w.y1; y++)
 			for (int x = w.x0; x < w.x1; x++)
 			{
+				if (!mask[size_t(y) * XRES + x] || (!old.empty() && old[size_t(y) * XRES + x])) continue; // only what the window just moved onto
 				int r = sim->pmap[y][x];
-				if (!r || !mask[size_t(y) * XRES + x] || (!old.empty() && old[size_t(y) * XRES + x])) continue; // only what the window just moved onto
+				if (!r) continue;
 				for (int k = 1; k < XRES + YRES; k++)
 				{
 					int tx = int(std::lround(x + sx * k)), ty = int(std::lround(y + sy * k));
