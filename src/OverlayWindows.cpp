@@ -55,6 +55,8 @@
 namespace
 {
 	float uiScale = 1;
+	bool windowWalls = true;            // open windows are walls to particles (Overlay.WindowWalls)
+	std::vector<uint8_t> ourWalls;      // XCELLS x YCELLS: 1 where a window put a wall (not the user)
 	std::string recording;        // Overlay.Keys.<name> being recorded in the Overlay tab, or empty
 	bool rebuildPalette = false;  // the UI scale changed: remake the side window (not from inside its own click)
 	int reopenTab = -1;
@@ -857,7 +859,11 @@ namespace
 			PushButton(x + S(12) + 3 * (bw4 + S(6)), top, bw4, L"Clear", [] { GameController::Ref().ClearSim(); }, L"Empty the sim");
 			y += S(68);
 
-			top = Group(x, y, w, S(52), L"Edges");
+			top = Group(x, y, w, S(76), L"Edges");
+			Toggle(x + S(12), top + S(24), L"Open windows are walls (sand piles on title bars)", windowWalls, false, [] {
+				windowWalls = !windowWalls;
+				GlobalPrefs::Ref().Set("Overlay.WindowWalls", windowWalls);
+			}, L"Only while the sim is on top of every window");
 			const wchar_t *edges[] = { L"Void", L"Solid", L"Loop" };
 			const wchar_t *edgeTips[] = { L"Particles and air leave at the edges", L"The edges are walls", L"Particles wrap around (whole screen only for now)" };
 			int ex = x + S(12);
@@ -865,7 +871,7 @@ namespace
 			{
 				ex += Toggle(ex, top, edges[i], gc.GetEdgeMode() == i, true, [i] { GameController::Ref().SetEdgeMode(i); }, edgeTips[i]) + S(18);
 			}
-			y += S(60);
+			y += S(84);
 
 			top = Group(x, y, w, S(76), L"Gravity");
 			const wchar_t *gravs[] = { L"Vertical", L"Off", L"Radial", L"Custom" };
@@ -2236,6 +2242,7 @@ void OverlayWindows::Init(void *mainHwnd)
 {
 	mainWindow = HWND(mainHwnd);
 	auto &prefs = GlobalPrefs::Ref();
+	windowWalls = prefs.Get("Overlay.WindowWalls", true);
 	// Default UI scale: the larger of Windows' display scaling (TPT is DPI aware) and screen height / 1080, in
 	// quarter steps. Overridable.
 	HDC screen = GetDC(nullptr);
@@ -2250,6 +2257,7 @@ void OverlayWindows::Init(void *mainHwnd)
 }
 
 static void TickRecording();
+static void TickWindowWalls();
 
 void OverlayWindows::Tick()
 {
@@ -2257,6 +2265,7 @@ void OverlayWindows::Tick()
 	{
 		return;
 	}
+	TickWindowWalls();
 	static std::vector<Notification *> seen;
 	auto notes = GameController::Ref().GetModel()->GetNotifications();
 	if (notes != seen)
@@ -2438,6 +2447,10 @@ void OverlayWindows::ApplySimMasks(uint32_t *argb, int w)
 			{
 				p |= 0xFF000000;
 			}
+			else if (!ourWalls.empty() && ourWalls[size_t(y / CELL) * XCELLS + x / CELL])
+			{
+				p = 0; // a window's wall: the window shows through
+			}
 			else if (!area.Contains({ x, y }))
 			{
 				p = 0;
@@ -2457,6 +2470,64 @@ void OverlayWindows::ApplySimMasks(uint32_t *argb, int w)
 		for (int x = area.pos.X - 1; x <= br.X + 1; x++) mark(x, area.pos.Y - 1), mark(x, br.Y + 1);
 		for (int y = area.pos.Y; y <= br.Y; y++) mark(area.pos.X - 1, y), mark(br.X + 1, y);
 	}
+}
+
+// A few times a second: every visible window's rectangle becomes wall cells, so particles pile on title bars and
+// flow around windows. Only empty cells are taken, and only those are given back.
+// ponytail: a save made meanwhile includes these walls; strip them in the save path if that bothers anyone.
+static void TickWindowWalls()
+{
+	static int frames = 0;
+	if (++frames % 20) return;
+	auto *sim = GameController::Ref().GetModel()->GetSimulation();
+	ourWalls.resize(size_t(XCELLS) * YCELLS);
+	std::vector<uint8_t> want(ourWalls.size());
+	RECT sr;
+	GetWindowRect(mainWindow, &sr);
+	int sw = sr.right - sr.left, sh = sr.bottom - sr.top;
+	if (windowWalls && OverlayGetLayer() == OverlayLayer::OnTop && sw > 0 && sh > 0)
+	{
+		struct Ctx { std::vector<uint8_t> *want; RECT sr; int sw, sh; } ctx{ &want, sr, sw, sh };
+		EnumWindows([](HWND hwnd, LPARAM lp) -> BOOL {
+			auto &c = *(Ctx *)lp;
+			auto ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+			BOOL cloaked = FALSE;
+			DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof(cloaked));
+			wchar_t cls[32];
+			GetClassNameW(hwnd, cls, 32);
+			if (hwnd == mainWindow || !IsWindowVisible(hwnd) || IsIconic(hwnd) || cloaked || (ex & WS_EX_TRANSPARENT) ||
+			    ((ex & WS_EX_TOOLWINDOW) && GetWindowThreadProcessId(hwnd, nullptr) != GetCurrentThreadId()) ||
+			    !wcscmp(cls, L"Progman") || !wcscmp(cls, L"WorkerW") || !wcscmp(cls, L"Shell_TrayWnd"))
+			{
+				return TRUE;
+			}
+			RECT r; // the visible frame, without the invisible resize borders
+			if (DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &r, sizeof(r)) != S_OK) GetWindowRect(hwnd, &r);
+			// screen -> sim pixels -> cells, rounded to the nearest cell edge
+			auto cell = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw / CELL)); };
+			int x0 = std::max(0, cell(r.left - c.sr.left, WINDOWW, c.sw)), x1 = std::min(XCELLS, cell(r.right - c.sr.left, WINDOWW, c.sw));
+			int y0 = std::max(0, cell(r.top - c.sr.top, WINDOWH, c.sh)), y1 = std::min(YCELLS, cell(r.bottom - c.sr.top, WINDOWH, c.sh));
+			for (int y = y0; y < y1; y++)
+				for (int x = x0; x < x1; x++) (*c.want)[size_t(y) * XCELLS + x] = 1;
+			return TRUE;
+		}, LPARAM(&ctx));
+	}
+	for (int y = 0; y < YCELLS; y++)
+		for (int x = 0; x < XCELLS; x++)
+		{
+			auto i = size_t(y) * XCELLS + x;
+			auto &b = sim->bmap[y][x];
+			if (want[i] && !ourWalls[i] && !b)
+			{
+				b = WL_WALL;
+				ourWalls[i] = 1;
+			}
+			else if (!want[i] && ourWalls[i])
+			{
+				if (b == WL_WALL) b = 0;
+				ourWalls[i] = 0;
+			}
+		}
 }
 
 void OverlayWindows::ClearUnderWindows(uint32_t *argb, int w, int h, int ww, int wh)
