@@ -2549,14 +2549,26 @@ namespace
 				{ L"Water streaks", L"How much water streaks the windows it runs over (they dry)", &overlayFeel.water, 3, "Water" },
 				{ L"Acid eats windows", L"How fast acid eats holes in windows and icons (with Destructible on)", &overlayFeel.acidEat, 3, "AcidEat" },
 				{ L"Hole opacity", L"How solid a hole's inside is drawn: full shows the wallpaper behind, off shows the window itself with only the rim", &overlayFeel.holeOpacity, 1, "HoleOpacity" },
+				{ L"Shards", L"How many bits chip off and fly when something breaks a window (off: none)", &overlayFeel.shards, 3, "Shards" },
+				{ L"Shard size", L"How big each chip is, in sim pixels", &overlayFeel.shardSize, 6, "ShardSize" },
+				{ L"Black holes", L"How far and hard black holes (NBHL) tear at windows and icons near them (with Destructible on)", &overlayFeel.blackHole, 3, "BlackHole" },
+				{ L"Explosion shake", L"How hard explosions shake the REAL windows they hit; they go back where they were (off by default)", &overlayFeel.shake, 3, "Shake" },
 				{ L"Blasts and burning", L"How hard explosions, bombs, DEST, singularities and anything 2000 C or hotter break windows and icons (with Destructible on)", &overlayFeel.blast, 3, "Blast" },
 			};
-			top = Group(x, y, w, S(26) * int(std::size(feel)) + S(34), L"Desktop physics");
+			top = Group(x, y, w, S(26) * int(std::size(feel)) + S(86), L"Desktop physics");
 			Toggle(x + S(12), top, L"Destructible windows and icons", overlayFeel.destructible, false, [] {
 				overlayFeel.destructible = !overlayFeel.destructible;
 				GlobalPrefs::Ref().Set("Overlay.Feel.Destructible", overlayFeel.destructible);
 			}, L"Acid and explosions eat holes in windows and icons. Only in the overlay: the real windows and icons are never touched, and clearing the sim mends them");
-			top += S(26);
+			Toggle(x + S(12), top + S(26), L"Shards take the window's colour", overlayFeel.shardTint, false, [] {
+				overlayFeel.shardTint = !overlayFeel.shardTint;
+				GlobalPrefs::Ref().Set("Overlay.Feel.ShardTint", overlayFeel.shardTint);
+			}, L"On: chips are the colour of the window they broke off. Off: dark grey");
+			Toggle(x + S(12), top + S(52), L"Shards are sim particles (broken glass)", overlayFeel.shardParticles, false, [] {
+				overlayFeel.shardParticles = !overlayFeel.shardParticles;
+				GlobalPrefs::Ref().Set("Overlay.Feel.ShardParticles", overlayFeel.shardParticles);
+			}, L"Off: solid chunks that spin, fall and fade. On: broken glass in the sim, which piles up, melts and reacts");
+			top += S(78);
 			for (int i = 0; i < int(std::size(feel)); i++)
 			{
 				auto &f = feel[i];
@@ -2570,7 +2582,7 @@ namespace
 					GlobalPrefs::Ref().Set(ByteString("Overlay.Feel.") + f.pref, *f.v);
 				}, f.tip);
 			}
-			y += S(26) * int(std::size(feel)) + S(42);
+			y += S(26) * int(std::size(feel)) + S(94);
 
 			top = Group(x, y, w, S(76), L"Gravity");
 			const wchar_t *gravs[] = { L"Vertical", L"Off", L"Radial", L"Custom" };
@@ -4651,7 +4663,9 @@ void OverlayWindows::Init(void *mainHwnd)
 	windowWalls = prefs.Get("Overlay.WindowWalls", true);
 	iconWalls = prefs.Get("Overlay.IconWalls", true);
 	overlayFeel.destructible = prefs.Get("Overlay.Feel.Destructible", false);
-	for (auto [v, name] : { std::pair{ &overlayFeel.grip, "Grip" }, { &overlayFeel.fling, "Fling" }, { &overlayFeel.push, "Push" }, { &overlayFeel.wind, "Wind" }, { &overlayFeel.scorch, "Scorch" }, { &overlayFeel.frost, "Frost" }, { &overlayFeel.acid, "Acid" }, { &overlayFeel.water, "Water" }, { &overlayFeel.acidEat, "AcidEat" }, { &overlayFeel.blast, "Blast" }, { &overlayFeel.holeOpacity, "HoleOpacity" } })
+	overlayFeel.shardTint = prefs.Get("Overlay.Feel.ShardTint", true);
+	overlayFeel.shardParticles = prefs.Get("Overlay.Feel.ShardParticles", false);
+	for (auto [v, name] : { std::pair{ &overlayFeel.grip, "Grip" }, { &overlayFeel.fling, "Fling" }, { &overlayFeel.push, "Push" }, { &overlayFeel.wind, "Wind" }, { &overlayFeel.scorch, "Scorch" }, { &overlayFeel.frost, "Frost" }, { &overlayFeel.acid, "Acid" }, { &overlayFeel.water, "Water" }, { &overlayFeel.acidEat, "AcidEat" }, { &overlayFeel.blast, "Blast" }, { &overlayFeel.holeOpacity, "HoleOpacity" }, { &overlayFeel.shards, "Shards" }, { &overlayFeel.shardSize, "ShardSize" }, { &overlayFeel.blackHole, "BlackHole" }, { &overlayFeel.shake, "Shake" } })
 		*v = prefs.Get(ByteString("Overlay.Feel.") + name, *v);
 	// Default UI scale: the larger of Windows' display scaling (TPT is DPI aware) and screen height / 1080, in
 	// quarter steps. Overridable.
@@ -5303,6 +5317,33 @@ static void TickWindowWalls()
 	RECT sr;
 	GetWindowRect(mainWindow, &sr);
 	int sw = sr.right - sr.left, sh = sr.bottom - sr.top;
+	static RECT grabRect;
+	grabRect = sr;
+	// shards take the colour under them: GDI's copy of the screen leaves out layered windows, so not the overlay
+	overlayGrabScreen = [](int x0, int y0, int w, int h, uint32_t *out) {
+		int sw = grabRect.right - grabRect.left, sh = grabRect.bottom - grabRect.top;
+		if (sw <= 0 || sh <= 0) return false;
+		HDC screen = GetDC(nullptr), dc = CreateCompatibleDC(screen);
+		BITMAPINFO bi{};
+		bi.bmiHeader = { sizeof(BITMAPINFOHEADER), w, -h, 1, 32, BI_RGB };
+		void *bits = nullptr;
+		HBITMAP bmp = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+		bool ok = false;
+		if (bmp)
+		{
+			auto old = SelectObject(dc, bmp);
+			SetStretchBltMode(dc, COLORONCOLOR);
+			ok = StretchBlt(dc, 0, 0, w, h, screen, grabRect.left + x0 * sw / WINDOWW, grabRect.top + y0 * sh / WINDOWH,
+			                w * sw / WINDOWW, h * sh / WINDOWH, SRCCOPY);
+			if (ok)
+				for (int i = 0; i < w * h; i++) out[i] = ((uint32_t *)bits)[i] & 0xFFFFFF;
+			SelectObject(dc, old);
+			DeleteObject(bmp);
+		}
+		DeleteDC(dc);
+		ReleaseDC(nullptr, screen);
+		return ok;
+	};
 	// windows are walls only when the sim is over them; icons whenever it's over the icons
 	// the mouse over the desktop (where the overlay lets clicks through) stirs the air
 	static POINT lastCursor{ -1, -1 };
@@ -5386,6 +5427,36 @@ static void TickWindowWalls()
 	iconRects = std::move(iconsNow);
 
 	OverlayApplyWalls(sim, wins);
+
+	// Explosions shake the real windows they hit (off unless the Shake slider is up): a jolt that dies away, then the
+	// window goes back exactly where it was. Not maximised or full-screen ones, and a window you grab stops shaking.
+	struct Shaking { POINT home, set; float amp; };
+	static std::map<HWND, Shaking> shaking;
+	for (auto [id, kick] : overlayKicks)
+	{
+		HWND hwnd = HWND(id);
+		RECT r;
+		if (!wallRects.count(hwnd) || IsZoomed(hwnd) || !GetWindowRect(hwnd, &r)) continue; // icons aren't windows
+		auto it = shaking.find(hwnd);
+		float amp = std::min(40.f, kick * 4 * overlayFeel.shake) * sw / WINDOWW;
+		if (it == shaking.end()) shaking[hwnd] = { { r.left, r.top }, { r.left, r.top }, amp };
+		else it->second.amp = std::max(it->second.amp, amp);
+	}
+	for (auto it = shaking.begin(); it != shaking.end();)
+	{
+		auto &s = it->second;
+		RECT r;
+		if (!IsWindow(it->first) || !GetWindowRect(it->first, &r) || r.left != s.set.x || r.top != s.set.y)
+		{
+			it = shaking.erase(it); // closed, or moved by someone else (you): leave it be
+			continue;
+		}
+		s.amp *= 0.8f;
+		bool done = s.amp < 1;
+		s.set = done ? s.home : POINT{ s.home.x + LONG(std::lround((sim->rng.uniform01() * 2 - 1) * s.amp)), s.home.y + LONG(std::lround((sim->rng.uniform01() * 2 - 1) * s.amp)) };
+		SetWindowPos(it->first, nullptr, s.set.x, s.set.y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+		it = done ? shaking.erase(it) : std::next(it);
+	}
 }
 
 void OverlayWindows::ClearUnderWindows(uint32_t *argb, int w, int h, int ww, int wh)

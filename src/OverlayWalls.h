@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <vector>
 
 class Simulation;
@@ -22,9 +23,21 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls);
 struct OverlayFeel
 {
 	float grip = 1, fling = 1, push = 1, wind = 1, scorch = 1, frost = 1, acid = 1, water = 1, acidEat = 1, blast = 1, holeOpacity = 1;
+	float shards = 1, shardSize = 3, blackHole = 1, shake = 0;
 	bool destructible = false; // acid and blasts eat holes in windows and icons (overlay only)
+	bool shardTint = true;     // shards take the colour of what broke
+	bool shardParticles = false; // shards are sim particles (broken glass) instead of drawn chunks
 };
 extern OverlayFeel overlayFeel;
+
+// Reads what's on screen (without the overlay) under a box of sim pixels, 0x00RRGGBB, w * h; false where it can't.
+extern bool (*overlayGrabScreen)(int x0, int y0, int w, int h, uint32_t *out);
+
+// Drawn chunks of broken window still flying or settling (the overlay keeps drawing smoothly while there are).
+bool OverlayDebrisFlying();
+
+// How hard the last tick's blasts hit each wall (by OverlayWall::id), for shaking real windows; filled while shake > 0.
+extern std::map<uintptr_t, float> overlayKicks;
 
 // Draws the marks on windows (Simulation::windowMarks) on the frame where the window walls are (occupied & wallBit).
 // Holes show backdrop (XRES x YRES, 0x00RRGGBB: what is behind the window) when given.

@@ -9,6 +9,19 @@
 
 OverlayFeel overlayFeel;
 
+// Chunks of broken window, drawn over the sim: jagged pieces that spin, arc, bounce off windows and fade where they land.
+struct Debris
+{
+	float x, y, vx, vy, angle, spin;
+	int life;
+	uint32_t colour;
+	std::array<float, 6> radius; // a jagged hexagon
+};
+static std::vector<Debris> debris;
+bool OverlayDebrisFlying() { return !debris.empty(); }
+bool (*overlayGrabScreen)(int, int, int, int, uint32_t *) = nullptr;
+std::map<uintptr_t, float> overlayKicks;
+
 // The marks of a window (or icon) where it is now and at its size now: resized, what still fits is kept, from the top-left.
 static Simulation::WindowMarks &Marks(Simulation *sim, const OverlayWall &w)
 {
@@ -70,34 +83,84 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 	};
 	// what touches a window: acid eats it, DEST and singularities destroy it, a bomb blows a chunk out, and anything
 	// 2000 C or hotter (plasma, burning thermite, lightning) burns through it
-	auto chunk = [&](int cx, int cy, float r, uint8_t how) {
-		int n = int(r) + 2;
-		for (int y = std::max(0, cy - n); y < std::min(YRES, cy + n); y++)
-			for (int x = std::max(0, cx - n); x < std::min(XRES, cx + n); x++)
+	std::vector<uint32_t> grab;
+	auto chunk = [&](int cx, int cy, float r, uint8_t how, const float *toward = nullptr) {
+		int n = int(r) + 2, bx0 = std::max(0, cx - n), by0 = std::max(0, cy - n), bx1 = std::min(XRES, cx + n), by1 = std::min(YRES, cy + n);
+		std::vector<std::pair<int, int>> chips;
+		for (int y = by0; y < by1; y++)
+			for (int x = bx0; x < bx1; x++)
 			{
 				float d = std::hypot(float(x - cx), float(y - cy)), edge = r + 1.5f * std::sin(x * 1.7f + y * 2.3f) * std::cos(x * 0.9f - y * 1.3f);
 				if (d < edge && mask[size_t(y) * XRES + x])
 				{
 					eat(x, y, how);
-					// some of it chips off: dark shards kicked up and out of the hole (not into the rest of the window), then
-					// they fall
-					if (sim->rng.uniform01() < 0.15f)
-						if (int s = sim->create_part(-1, x, y, PT_BGLA); s >= 0)
-						{
-							auto &q = sim->parts[s];
-							q.vx = (x - cx) / std::max(1.f, d) * (2 + 4 * sim->rng.uniform01());
-							q.vy = -(4 + 6 * sim->rng.uniform01());
-							q.temp = R_TEMP + 273.15f;
-							q.dcolour = 0xFF404448;
-						}
+					if (sim->rng.uniform01() < 0.05f * overlayFeel.shards) chips.push_back({ x, y });
 				}
 			}
+		if (chips.empty() || bx1 <= bx0 || by1 <= by0) return;
+		// some of it chips off: clumps of shards, the colour of the window they came from, kicked up and out of the hole
+		// (or pulled toward a black hole), then they fall
+		bool tint = overlayFeel.shardTint && overlayGrabScreen;
+		if (tint) grab.resize(size_t(bx1 - bx0) * (by1 - by0)), tint = overlayGrabScreen(bx0, by0, bx1 - bx0, by1 - by0, grab.data());
+		int size = std::max(1, int(std::lround(overlayFeel.shardSize)));
+		for (auto [x, y] : chips)
+		{
+			if (!overlayFeel.shardParticles && debris.size() >= 600) break;
+			float vx, vy;
+			if (toward)
+			{
+				float dx = toward[0] - x, dy = toward[1] - y, d = std::max(1.f, std::hypot(dx, dy));
+				vx = dx / d * 3, vy = dy / d * 3;
+			}
+			else
+			{
+				float d = std::max(1.f, std::hypot(float(x - cx), float(y - cy)));
+				vx = (x - cx) / d * (2 + 4 * sim->rng.uniform01());
+				vy = -(4 + 6 * sim->rng.uniform01());
+			}
+			// the window's colour, a shade darker so they show against it (a broken edge)
+			uint32_t c = tint ? grab[size_t(y - by0) * (bx1 - bx0) + (x - bx0)] : 0x5A5F66;
+			uint32_t colour = ((c >> 16 & 0xFF) * 3 / 5) << 16 | ((c >> 8 & 0xFF) * 3 / 5) << 8 | (c & 0xFF) * 3 / 5;
+			if (!overlayFeel.shardParticles)
+			{
+				Debris d{ float(x), float(y), vx, vy, sim->rng.uniform01() * 6.28f, (sim->rng.uniform01() - 0.5f) * 0.6f, 180, c, {} };
+				for (auto &r : d.radius) r = overlayFeel.shardSize * (0.5f + 0.7f * sim->rng.uniform01());
+				debris.push_back(d);
+				continue;
+			}
+			for (int j = 0; j < size; j++)
+				for (int i = 0; i < size; i++)
+				{
+					int sx = x + i, sy = y + j;
+					if (sx >= XRES || sy >= YRES || mask[size_t(sy) * XRES + sx]) continue;
+					if (int s = sim->create_part(-1, sx, sy, PT_BGLA); s >= 0)
+					{
+						auto &q = sim->parts[s];
+						q.vx = vx, q.vy = vy;
+						q.temp = R_TEMP + 273.15f; // not melted by the blast's own heat straight away
+						q.dcolour = 0xFF000000 | colour;
+					}
+				}
+		}
 	};
 	if (overlayFeel.destructible)
 		for (int i = 0; i <= sim->parts.active; i++)
 		{
 			auto &p = sim->parts[i];
 			int t = p.type;
+			if (t == PT_NBHL && overlayFeel.blackHole > 0)
+			{
+				// a black hole tears at windows near it: the nearer, the likelier, and the bits fly into it
+				float R = 30 * overlayFeel.blackHole, hole[2] = { p.x, p.y };
+				for (int k = 0; k < 3; k++)
+				{
+					int sx = int(p.x + (sim->rng.uniform01() * 2 - 1) * R), sy = int(p.y + (sim->rng.uniform01() * 2 - 1) * R);
+					float d = std::hypot(sx - p.x, sy - p.y);
+					if (sx < 0 || sy < 0 || sx >= XRES || sy >= YRES || d > R || !mask[size_t(sy) * XRES + sx]) continue;
+					if (sim->rng.uniform01() < 0.15f * (1 - d / R)) chunk(sx, sy, 2, Blasted, hole);
+				}
+				continue;
+			}
 			bool acid = t == PT_ACID && overlayFeel.acidEat > 0, hot = p.temp >= 2273.15f && overlayFeel.blast > 0;
 			bool destroys = (t == PT_DEST || t == PT_SING || t == PT_BOMB) && overlayFeel.blast > 0;
 			if (!acid && !hot && !destroys) continue;
@@ -127,10 +190,38 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 				break;
 			}
 		}
+	// the chunks fly: gravity, a little air, and they bounce off windows, then lie there and fade
+	for (auto &d : debris)
+	{
+		d.vy += 0.25f, d.vx *= 0.99f, d.angle += d.spin, d.life--;
+		float nx = d.x + d.vx, ny = d.y + d.vy;
+		int ix = int(nx), iy = int(ny);
+		if (ix >= 0 && iy >= 0 && ix < XRES && iy < YRES && mask[size_t(iy) * XRES + ix])
+		{
+			if (!(int(d.y) >= 0 && int(d.y) < YRES && ix >= 0 && ix < XRES && mask[size_t(int(d.y)) * XRES + ix])) d.vy = -d.vy * 0.3f; // hit from above or below
+			else d.vx = -d.vx * 0.4f; // a side
+			d.vx *= 0.6f, d.spin *= 0.5f;
+			if (std::abs(d.vy) < 0.8f) d.vy = 0, d.spin = 0, d.vx *= 0.5f, d.life = std::min(d.life, 60); // landed
+			continue;
+		}
+		d.x = nx, d.y = ny;
+	}
+	debris.erase(std::remove_if(debris.begin(), debris.end(), [](const Debris &d) { return d.life <= 0 || d.y > YRES + 10 || d.x < -10 || d.x > XRES + 10; }), debris.end());
 	// a blast's shock wave (pressure jumping up, not pressure that lingers after) tears out a ragged round chunk, bigger
 	// the harder it hits (a small C-4 charge peaks ~6 in its own cells)
 	static std::vector<float> lastPressure;
 	lastPressure.resize(size_t(XCELLS) * YCELLS, 0.f);
+	// and shakes the windows it hits, by the biggest jump in pressure on or just around them
+	overlayKicks.clear();
+	if (overlayFeel.shake > 0)
+		for (auto &w : walls)
+		{
+			float kick = 0;
+			for (int cy = std::max(0, w.y0 / CELL - 1); cy < std::min(YCELLS, w.y1 / CELL + 2); cy++)
+				for (int cx = std::max(0, w.x0 / CELL - 1); cx < std::min(XCELLS, w.x1 / CELL + 2); cx++)
+					kick = std::max(kick, sim->pv[cy][cx] - lastPressure[size_t(cy) * XCELLS + cx]);
+			if (w.id && kick > 1) overlayKicks[w.id] = std::max(overlayKicks[w.id], kick);
+		}
 	if (overlayFeel.destructible && overlayFeel.blast > 0)
 		for (int cy = 0; cy < YCELLS; cy++)
 			for (int cx = 0; cx < XCELLS; cx++)
@@ -371,6 +462,35 @@ void OverlayDrawMarks(const Simulation *sim, uint32_t *argb, int stride, const u
 						auto &q = argb[size_t(y + dy) * stride + x + dx];
 						if (d == 1 || (q >> 24) < (rim >> 24)) q = rim; // the nearer ring wins
 					}
+			}
+	}
+	// flying chunks: a jagged piece in the window's colour, catching the light as it turns, with a darker broken edge
+	for (auto &d : debris)
+	{
+		std::array<std::pair<float, float>, 6> v;
+		for (int k = 0; k < 6; k++)
+			v[k] = { d.x + std::cos(d.angle + k * 1.047f) * d.radius[k], d.y + std::sin(d.angle + k * 1.047f) * d.radius[k] };
+		auto inside = [&](float px, float py) {
+			for (int k = 0; k < 6; k++)
+			{
+				auto [ax, ay] = v[k];
+				auto [bx, by] = v[(k + 1) % 6];
+				if ((bx - ax) * (py - ay) - (by - ay) * (px - ax) < 0) return false;
+			}
+			return true;
+		};
+		float shade = 0.85f + 0.3f * std::cos(d.angle * 2);
+		uint32_t alpha = uint32_t(255 * std::min(1, d.life) * std::min(1.f, d.life / 30.f));
+		int n = int(overlayFeel.shardSize * 1.3f) + 2;
+		for (int y = std::max(0, int(d.y) - n); y <= std::min(YRES - 1, int(d.y) + n); y++)
+			for (int x = std::max(0, int(d.x) - n); x <= std::min(XRES - 1, int(d.x) + n); x++)
+			{
+				float px = x + 0.5f, py = y + 0.5f;
+				if (!inside(px, py)) continue;
+				bool edge = !inside(px + 1, py) || !inside(px - 1, py) || !inside(px, py + 1) || !inside(px, py - 1);
+				float k = edge ? shade * 0.55f : shade;
+				uint32_t r = std::min(255u, uint32_t((d.colour >> 16 & 0xFF) * k)), g = std::min(255u, uint32_t((d.colour >> 8 & 0xFF) * k)), b = std::min(255u, uint32_t((d.colour & 0xFF) * k));
+				argb[size_t(y) * stride + x] = alpha << 24 | (r * alpha / 255) << 16 | (g * alpha / 255) << 8 | b * alpha / 255;
 			}
 	}
 }

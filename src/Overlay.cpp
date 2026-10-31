@@ -4,6 +4,7 @@
 #include "simulation/Simulation.h"
 #include <algorithm>
 #include "OverlayWindows.h"
+#include "OverlayWalls.h"
 #include "SimulationConfig.h"
 #include "prefs/GlobalPrefs.h"
 #include "gui/interface/Engine.h"
@@ -909,7 +910,7 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 	// Drawing at the screen's rate only pays while something moves: particles, a window, the menus fading, or TPT in
 	// use. Idle, a few frames a second keep up with slow changes and spot the next move, for a fraction of the CPU.
 	static double busyUntil = 0;
-	if (!moving.empty() || catchEmpty || !cursorMiss || (fade > 0 && fade < 1) || !OverlayWindows::WindowShifts().empty())
+	if (!moving.empty() || catchEmpty || !cursorMiss || (fade > 0 && fade < 1) || !OverlayWindows::WindowShifts().empty() || OverlayDebrisFlying())
 		busyUntil = Now() + 1;
 	overlayIdle = Now() >= busyUntil;
 	ui::Engine::Ref().SetDrawingFrequencyLimit(overlayIdle ? DrawLimit(DrawLimitExplicit{ 15 }) : busyLimit);

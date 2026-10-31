@@ -302,7 +302,10 @@ tray menu: the tray menu stays native on purpose.
   rewrite TPT's physics).
 - [x] Destructible windows and icons (2026-10-31; Simulation tab switch, off by default; acid/blast strength sliders):
   acid eats ragged holes (yellow-green rim); blast shock waves (pressure over 3 AND jumping up) tear round chunks,
-  bombs blow small ones, DEST and singularities destroy, 2000 C+ (plasma, thermite, lightning) burns slowly (ember + char rim). `MarkHole` in
+  bombs blow small ones, DEST and singularities destroy, 2000 C+ (plasma, thermite, lightning) burns slowly (ember + char rim).
+  Broken bits fly off as drawn chunks in the window's colour (Shards / Shard size sliders, toggles for colour and for sim-particle
+  glass instead); black holes (NBHL) tear at windows near them; Explosion shake (off by default) jolts the REAL windows a blast hits
+  and puts them back. `MarkHole` in
   `Simulation::windowMarks`, taken out of the sim's walls; holes show the wallpaper (IDesktopWallpaper + WIC, per
   monitor, drawn as fill). Overlay only, cleared with the sim. Tested on my test window with acid and real C-4 (PLEX).
 - [ ] Explosions shake nearby windows a few pixels (moves other apps' windows: off by default, a switch to enable).
