@@ -76,7 +76,21 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 			for (int x = std::max(0, cx - n); x < std::min(XRES, cx + n); x++)
 			{
 				float d = std::hypot(float(x - cx), float(y - cy)), edge = r + 1.5f * std::sin(x * 1.7f + y * 2.3f) * std::cos(x * 0.9f - y * 1.3f);
-				if (d < edge && mask[size_t(y) * XRES + x]) eat(x, y, how);
+				if (d < edge && mask[size_t(y) * XRES + x])
+				{
+					eat(x, y, how);
+					// some of it chips off: dark shards kicked up and out of the hole (not into the rest of the window), then
+					// they fall
+					if (sim->rng.uniform01() < 0.15f)
+						if (int s = sim->create_part(-1, x, y, PT_BGLA); s >= 0)
+						{
+							auto &q = sim->parts[s];
+							q.vx = (x - cx) / std::max(1.f, d) * (2 + 4 * sim->rng.uniform01());
+							q.vy = -(4 + 6 * sim->rng.uniform01());
+							q.temp = R_TEMP + 273.15f;
+							q.dcolour = 0xFF404448;
+						}
+				}
 			}
 	};
 	if (overlayFeel.destructible)
