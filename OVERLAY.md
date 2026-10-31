@@ -108,6 +108,9 @@ overlay, and TPT only runs the top screen, so **the sim freezes while any dialog
    window size: element search, property tool, sign tool, deco colour picker, local saves and stamps (a real file
    list with thumbnails, drag and drop), options, render options, the Lua console. Rare or online screens (login,
    tags, online browser, profile) stay re-hosted until someone needs them native.
+   - [x] Element search (2026-10-30): a search box over the Elements tab's tiles. Clicking it gives the side window
+     the keyboard; typing filters every section by name (prefix matches first) and description, Enter picks the
+     first, Esc clears; both hand the keyboard back to TPT. Tested with posted keys.
    - [x] Real Vista-style menus, drop-downs and dialogs (user request 2026-10-30): today the hosted ones are TPT's
      pixel UI inside a Vista frame. First: Settings, drop-down lists, context menus.
      - [x] Drop-down lists and context menus are real Windows menus (ui::Window::MenuItems; TrackPopupMenu on its

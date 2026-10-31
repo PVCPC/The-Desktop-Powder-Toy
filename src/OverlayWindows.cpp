@@ -36,6 +36,7 @@
 #include "gui/interface/Slider.h"
 #include "gui/interface/Textbox.h"
 #include <algorithm>
+#include <cwctype>
 #include <atomic>
 #include <thread>
 #include <mutex>
@@ -64,6 +65,7 @@ namespace
 	float uiScale = 1;
 	bool windowWalls = true;            // open windows are walls to particles (Overlay.WindowWalls)
 	std::vector<uint8_t> ourWalls;      // XCELLS x YCELLS: 1 where a window put a wall (not the user)
+	HWND mainWindow = nullptr;    // TPT's own window
 	std::string recording;        // Overlay.Keys.<name> being recorded in the Overlay tab, or empty
 	std::function<void()> later; // run on the next tick, outside any window's message handling
 	bool rebuildPalette = false;  // the UI scale changed: remake the side window (not from inside its own click)
@@ -1793,6 +1795,9 @@ namespace
 		virtual void Paint() = 0;
 		virtual LRESULT HitTest(int, int) { return HTCLIENT; }
 		virtual void Mouse(UINT, int, int, WPARAM) {}
+		// WM_KEYDOWN, WM_CHAR, WM_KILLFOCUS; true = handled. Only while a panel has taken the keyboard (see
+		// SideWindow::search).
+		virtual bool Key(UINT, WPARAM) { return false; }
 
 		void Create(int x, int y, int w, int h)
 		{
@@ -1989,6 +1994,11 @@ namespace
 					self->Mouse(msg, GET_X_LPARAM(lp), GET_Y_LPARAM(lp), wp);
 					return 0;
 				}
+				case WM_KEYDOWN:
+				case WM_CHAR:
+				case WM_KILLFOCUS:
+					if (self->Key(msg, wp)) return 0;
+					break;
 				case WM_MOUSELEAVE:
 				case WM_LBUTTONDOWN:
 				case WM_LBUTTONUP:
@@ -2041,6 +2051,8 @@ namespace
 		bool closing = false; // closed: Tick drops it (not from inside its own click)
 		int titleH, border, tabH, navW, statusH, tileW, tileH, gap;
 		uint64_t shownState = 0;
+		std::wstring query; // Elements tab search: tools from every section whose name or description has it
+		bool typing = false; // the search box has the keyboard
 		static constexpr const wchar_t *tabNames[] = { L"Elements", L"Tools", L"Simulation", L"Display", L"Saves", L"Overlay", L"Welcome" };
 		static constexpr int toolsTab = 1, welcomeTab = 6;
 
@@ -2070,6 +2082,25 @@ namespace
 		{
 			auto sections = Sections();
 			std::vector<Tool *> out;
+			if (!query.empty())
+			{
+				auto lower = [](std::wstring s) {
+					for (auto &c : s) c = wchar_t(std::towlower(c));
+					return s;
+				};
+				auto q = lower(query);
+				std::vector<Tool *> rest; // names starting with the query first, then any other match
+				for (auto *menu : sections)
+					for (auto *tool : menu->GetToolList())
+					{
+						auto name = lower(Label(tool));
+						if (!tool->MenuVisible) continue;
+						if (name.rfind(q, 0) == 0) out.push_back(tool);
+						else if (name.find(q) != name.npos || lower(Wide(tool->Description)).find(q) != std::wstring::npos) rest.push_back(tool);
+					}
+				out.insert(out.end(), rest.begin(), rest.end());
+				return out;
+			}
 			if (section < int(sections.size()))
 			{
 				for (auto *tool : sections[section]->GetToolList())
@@ -2091,10 +2122,47 @@ namespace
 		{
 			return { border, titleH + tabH, cv.w - border, cv.h - border - statusH };
 		}
+		RECT SearchRect()
+		{
+			auto c = Content();
+			return { c.left + navW + gap, c.top + gap, c.right - gap, c.top + gap + S(23) };
+		}
 		RECT ToolArea()
 		{
 			auto c = Content();
-			return { c.left + navW + gap, c.top + gap, c.right - gap, c.bottom };
+			return { c.left + navW + gap, SearchRect().bottom + gap, c.right - gap, c.bottom };
+		}
+
+		// The search box takes the keyboard from TPT until Enter, Esc or a click elsewhere.
+		void StartTyping()
+		{
+			typing = true;
+			SetForegroundWindow(hwnd);
+			SetFocus(hwnd);
+		}
+		void StopTyping()
+		{
+			typing = false;
+			dirty = true;
+			if (mainWindow && GetForegroundWindow() == hwnd) SetForegroundWindow(mainWindow);
+		}
+		bool Key(UINT msg, WPARAM wp) override
+		{
+			if (!typing) return false;
+			if (msg == WM_KILLFOCUS) typing = false;
+			else if (msg == WM_KEYDOWN && wp == VK_ESCAPE) query.clear(), StopTyping();
+			else if (msg == WM_KEYDOWN && wp == VK_RETURN)
+			{
+				auto tools = Tools();
+				if (!tools.empty()) GameController::Ref().SetActiveTool(0, tools[0]);
+				StopTyping();
+			}
+			else if (msg == WM_CHAR && wp == VK_BACK && !query.empty()) query.pop_back();
+			else if (msg == WM_CHAR && wp >= 32) query += wchar_t(wp);
+			else return msg == WM_CHAR;
+			scroll = 0;
+			dirty = true;
+			return true;
 		}
 		int Columns()
 		{
@@ -2192,10 +2260,21 @@ namespace
 			for (int i = 0; i < int(sections.size()); i++)
 			{
 				auto rc = NavRect(i);
-				theme->NavItem(cv, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, i == section ? 2 : (Hovered(rc) ? 1 : 0));
-				text->Draw(cv, rc.left + S(6), rc.top + S(3), Wide(sections[i]->GetDescription()), i == section && theme->navSelInk != 0xFFFFFFFF ? theme->navSelInk : theme->navInk, i == section, rc.right - rc.left - S(10));
-				Add(rc, [this, i] { section = i, scroll = 0; });
+				bool on = i == section && query.empty(); // a search spans every section
+				theme->NavItem(cv, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, on ? 2 : (Hovered(rc) ? 1 : 0));
+				text->Draw(cv, rc.left + S(6), rc.top + S(3), Wide(sections[i]->GetDescription()), on && theme->navSelInk != 0xFFFFFFFF ? theme->navSelInk : theme->navInk, on, rc.right - rc.left - S(10));
+				Add(rc, [this, i] { section = i, scroll = 0, query.clear(); });
 			}
+			auto sr = SearchRect();
+			int sw = sr.right - sr.left, sh = sr.bottom - sr.top;
+			cv.RoundRect(sr.left, sr.top, sw, sh, S(3), 0xFFFFFF, 0xFFFFFF, 255);
+			cv.RoundFrame(sr.left, sr.top, sw, sh, S(3), typing ? 0x3C7FB1 : (Hovered(sr) ? 0x7EB4EA : 0xABADB3), 255);
+			auto shown = query.empty() && !typing ? std::wstring(L"Search elements") : query;
+			auto qs = text->Measure(shown.empty() ? std::wstring(L" ") : shown);
+			int ty = sr.top + (sh - qs.cy) / 2;
+			text->Draw(cv, sr.left + S(6), ty, shown, query.empty() ? 0x6D6D6D : 0x000000, false, sw - S(12));
+			if (typing) Line(cv, sr.left + S(6) + (query.empty() ? 0 : std::min(int(qs.cx), sw - S(12))), ty, std::max(1, S(1)), qs.cy, 0x000000); // the caret
+			Add(sr, [this] { StartTyping(); }, L"Type to find an element by name or description; Enter picks the first, Esc clears");
 			auto tools = Tools();
 			auto area = ToolArea();
 			auto &gc = GameController::Ref();
@@ -3059,7 +3138,6 @@ namespace
 		}
 	};
 
-	HWND mainWindow = nullptr;
 	std::unique_ptr<SideWindow> palette;
 	std::vector<std::unique_ptr<SideWindow>> torn; // tabs in their own windows (Overlay.Windows.Torn, a bit per tab)
 
