@@ -168,10 +168,11 @@ public:
 	// XRES x YRES, or empty: 1 where something outside the sim (the overlay's desktop windows) blocks particles,
 	// pixel by pixel. Nothing moves or is drawn into it; unlike walls it never deletes what's already there.
 	std::vector<uint8_t> pixelWalls;
-	// Scorch marks hot particles left on those windows, by window (OverlayWall::id): 0-255 per window pixel from its
+	// Marks particles left on those windows, by window (OverlayWall::id): per kind, 0-255 per window pixel from its
 	// top-left (x, y: where that is now, in sim pixels). Cleared with the sim.
-	struct WindowSoot { int x = 0, y = 0, w = 0, h = 0; std::vector<uint8_t> a; };
-	std::map<uintptr_t, WindowSoot> windowSoot;
+	enum WindowMark { MarkWater, MarkFrost, MarkAcid, MarkSoot, MarkKinds }; // drawn in this order
+	struct WindowMarks { int x = 0, y = 0, w = 0, h = 0; std::array<std::vector<uint8_t>, MarkKinds> a; std::array<bool, MarkKinds> any{}; };
+	std::map<uintptr_t, WindowMarks> windowMarks;
 	bool PixelWall(int x, int y) const
 	{
 		return !pixelWalls.empty() && pixelWalls[size_t(y) * XRES + x];

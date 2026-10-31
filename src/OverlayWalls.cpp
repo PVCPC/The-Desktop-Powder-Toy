@@ -1,6 +1,7 @@
 #include "OverlayWalls.h"
 #include "simulation/Simulation.h"
 #include "SimulationConfig.h"
+#include "simulation/ElementClasses.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -111,62 +112,125 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 				}
 			}
 	}
-	// Anything hot (fire, lava, plasma...) touching a window scorches it: marks that move with it until the sim is cleared.
+	// What touches a window marks it, marks that move with it: fire and lava scorch, ice and cryo frost, acid etches
+	// pits, water streaks. Frost melts and water dries; scorch and pits stay until the sim is cleared.
 	// ponytail: marks are kept from the visible top-left, so a window half off screen shifts them; keep the full rect if it matters.
-	if (overlayFeel.scorch > 0)
-		for (auto &w : walls)
-		{
-			if (w.solid || !w.id) continue;
-			int ww = w.x1 - w.x0, wh = w.y1 - w.y0;
-			auto it = sim->windowSoot.find(w.id);
-			if (it != sim->windowSoot.end()) it->second.x = w.x0, it->second.y = w.y0;
-			auto hot = [&](int x, int y) {
-				if (x < 0 || y < 0 || x >= XRES || y >= YRES) return false;
-				int r = sim->pmap[y][x];
-				return r && sim->parts[ID(r)].temp >= 573.15f; // 300 C
-			};
-			auto scorch = [&](int x, int y) { // a window pixel next to the hot one
-				auto &s = sim->windowSoot[w.id];
-				if (s.w != ww || s.h != wh)
+	using M = Simulation::WindowMark;
+	const float rate[M::MarkKinds] = { overlayFeel.water, overlayFeel.frost, overlayFeel.acid, overlayFeel.scorch };
+	for (auto &w : walls)
+	{
+		if (w.solid || !w.id) continue;
+		int ww = w.x1 - w.x0, wh = w.y1 - w.y0;
+		if (auto it = sim->windowMarks.find(w.id); it != sim->windowMarks.end()) it->second.x = w.x0, it->second.y = w.y0;
+		auto kindAt = [&](int x, int y) {
+			if (x < 0 || y < 0 || x >= XRES || y >= YRES) return -1;
+			int r = sim->pmap[y][x];
+			if (!r) return -1;
+			int t = TYP(r);
+			float temp = sim->parts[ID(r)].temp;
+			int k = t == PT_ACID                                                     ? M::MarkAcid
+			        : t == PT_WATR || t == PT_DSTW || t == PT_SLTW || t == PT_CBNW ? M::MarkWater
+			        : temp >= 573.15f                                                ? M::MarkSoot  // 300 C
+			        : temp <= 253.15f                                                ? M::MarkFrost // -20 C
+			                                                                         : -1;
+			return k >= 0 && rate[k] > 0 ? k : -1;
+		};
+		auto mark = [&](int kind, int x, int y) { // a window pixel next to what touched it
+			auto &m = sim->windowMarks[w.id];
+			if (m.w != ww || m.h != wh)
+			{
+				for (auto &a : m.a) // resized: keep what still fits, from the top-left
 				{
-					std::vector<uint8_t> a(size_t(ww) * wh, 0); // resized: keep what still fits, from the top-left
-					for (int j = 0; j < std::min(wh, s.h); j++)
-						for (int i = 0; i < std::min(ww, s.w); i++) a[size_t(j) * ww + i] = s.a[size_t(j) * s.w + i];
-					s = { w.x0, w.y0, ww, wh, std::move(a) };
+					std::vector<uint8_t> b(size_t(ww) * wh, 0);
+					for (int j = 0; j < std::min(wh, m.h) && !a.empty(); j++)
+						for (int i = 0; i < std::min(ww, m.w); i++) b[size_t(j) * ww + i] = a[size_t(j) * m.w + i];
+					a = std::move(b);
 				}
+				m.x = w.x0, m.y = w.y0, m.w = ww, m.h = wh;
+			}
+			auto &a = m.a[kind];
+			m.any[kind] = true;
+			auto add = [&](int i, int j, float v, int cap) {
+				int sx = x - w.x0 + i, sy = y - w.y0 + j;
+				if (sx < 0 || sy < 0 || sx >= ww || sy >= wh) return;
+				auto &p = a[size_t(sy) * ww + sx];
+				p = uint8_t(std::min(float(cap), p + v * rate[kind]));
+			};
+			switch (kind)
+			{
+			case M::MarkSoot: // a smudge
 				for (int j = -2; j <= 2; j++)
 					for (int i = -2; i <= 2; i++)
-					{
-						int sx = x - w.x0 + i, sy = y - w.y0 + j, d = i * i + j * j;
-						if (sx < 0 || sy < 0 || sx >= ww || sy >= wh || d > 4) continue;
-						auto &v = s.a[size_t(sy) * ww + sx];
-						v = uint8_t(std::min(255.f, v + (d ? 3 : 10) * overlayFeel.scorch));
-					}
-			};
-			for (int x = w.x0; x < w.x1; x++)
-			{
-				if (hot(x, w.y0 - 1)) scorch(x, w.y0);
-				if (hot(x, w.y1)) scorch(x, w.y1 - 1);
+						if (i * i + j * j <= 4) add(i, j, i || j ? 3 : 10, 255);
+				break;
+			case M::MarkFrost: // speckled crystals, wider
+				for (int j = -3; j <= 3; j++)
+					for (int i = -3; i <= 3; i++)
+						if (i * i + j * j <= 9) add(i, j, float(sim->rng.between(0, 4)), 200);
+				break;
+			case M::MarkAcid: // now and then a pit
+				if (sim->rng.uniform01() < 0.2f)
+				{
+					add(0, 0, 50, 255);
+					add(-1, 0, 15, 255), add(1, 0, 15, 255), add(0, -1, 15, 255), add(0, 1, 15, 255);
+				}
+				break;
+			case M::MarkWater: // a streak running down
+				for (int j = 0; j < 10; j++) add(0, j, 4 - j * 0.3f, 140);
+				break;
 			}
-			for (int y = w.y0; y < w.y1; y++)
-			{
-				if (hot(w.x0 - 1, y)) scorch(w.x0, y);
-				if (hot(w.x1, y)) scorch(w.x1 - 1, y);
-			}
+		};
+		for (int x = w.x0; x < w.x1; x++)
+		{
+			if (int k = kindAt(x, w.y0 - 1); k >= 0) mark(k, x, w.y0);
+			if (int k = kindAt(x, w.y1); k >= 0) mark(k, x, w.y1 - 1);
+		}
+		for (int y = w.y0; y < w.y1; y++)
+		{
+			if (int k = kindAt(w.x0 - 1, y); k >= 0) mark(k, w.x0, y);
+			if (int k = kindAt(w.x1, y); k >= 0) mark(k, w.x1 - 1, y);
+		}
+	}
+	// frost melts and water dries (about 20 s and 10 s from full at 60 fps)
+	for (auto &[id, m] : sim->windowMarks)
+		for (int kind : { int(M::MarkFrost), int(M::MarkWater) })
+		{
+			if (!m.any[kind] || sim->currentTick % 6 != 0) continue;
+			bool any = false;
+			for (auto &p : m.a[kind])
+				if (p) p -= std::min<uint8_t>(p, kind == M::MarkFrost ? 1 : 2), any |= p != 0;
+			m.any[kind] = any;
 		}
 }
 
-void OverlayDrawSoot(const Simulation *sim, uint32_t *argb, int stride, const uint8_t *occupied, uint8_t wallBit)
+void OverlayDrawMarks(const Simulation *sim, uint32_t *argb, int stride, const uint8_t *occupied, uint8_t wallBit)
 {
-	for (auto &[id, s] : sim->windowSoot)
-		for (int j = 0; j < s.h; j++)
-			for (int i = 0; i < s.w; i++)
+	// per kind: colour (premultiplied below) and how opaque at full strength, of 256
+	constexpr uint32_t colour[] = { 0x8AA8C8, 0xE4F0FF, 0x7A9A2A, 0x221A12 };
+	constexpr int opacity[] = { 110, 170, 190, 224 };
+	for (auto &[id, m] : sim->windowMarks)
+	{
+		if (std::none_of(m.any.begin(), m.any.end(), [](bool b) { return b; })) continue;
+		for (int j = 0; j < m.h; j++)
+			for (int i = 0; i < m.w; i++)
 			{
-				int x = s.x + i, y = s.y + j, a = s.a[size_t(j) * s.w + i];
-				if (!a || x < 0 || y < 0 || x >= XRES || y >= YRES || !(occupied[size_t(y) * XRES + x] & wallBit)) continue;
-				a = a * 7 / 8; // charcoal, premultiplied: never quite black, so the window still shows through
-				argb[size_t(y) * stride + x] = uint32_t(a) << 24 | uint32_t(0x22 * a / 255) << 16 | uint32_t(0x1A * a / 255) << 8 | uint32_t(0x12 * a / 255);
+				int x = m.x + i, y = m.y + j;
+				if (x < 0 || y < 0 || x >= XRES || y >= YRES || !(occupied[size_t(y) * XRES + x] & wallBit)) continue;
+				uint32_t r = 0, g = 0, b = 0, a = 0; // premultiplied, painted over each other in order
+				for (int kind = 0; kind < Simulation::MarkKinds; kind++)
+				{
+					if (!m.any[kind]) continue;
+					uint32_t v = m.a[kind][size_t(j) * m.w + i];
+					if (!v) continue;
+					uint32_t sa = v * opacity[kind] >> 8, c = colour[kind];
+					r = (c >> 16) * sa / 255 + r * (255 - sa) / 255;
+					g = (c >> 8 & 0xFF) * sa / 255 + g * (255 - sa) / 255;
+					b = (c & 0xFF) * sa / 255 + b * (255 - sa) / 255;
+					a = sa + a * (255 - sa) / 255;
+				}
+				if (a) argb[size_t(y) * stride + x] = a << 24 | r << 16 | g << 8 | b;
 			}
+	}
 }
 
 void OverlayCursorWind(Simulation *sim, int x, int y, int dx, int dy)

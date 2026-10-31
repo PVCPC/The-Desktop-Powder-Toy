@@ -23,9 +23,9 @@ current mode is saved as `Overlay.Input`. A fading glass notice shows the new mo
 
 Desktop physics (OverlayWalls.cpp, shared by every platform): sand on a window rides along when it moves and is
 flung off when it stops short or turns back (window speed averaged over ticks, since positions don't arrive in step
-with them); a moving window shoves what it moves onto; hot particles (300 C and up) touching a window leave scorch marks
-(`Simulation::windowSoot`, cleared with the sim); the mouse stirs the air where the overlay lets clicks through. The
-Simulation tab's "Desktop physics" sliders scale each (`Overlay.Feel.Grip/Fling/Push/Wind/Scorch`). Windows only so
+with them); a moving window shoves what it moves onto; what touches a window marks it (`Simulation::windowMarks`): 300 C and up scorches, -20 C and
+below frosts (melts), acid pits, water streaks (dries); scorch and pits stay until the sim is cleared; the mouse stirs the air where the overlay lets clicks through. The
+Simulation tab's "Desktop physics" sliders scale each (`Overlay.Feel.Grip/Fling/Push/Wind/Scorch/Frost/Acid/Water`). Windows only so
 far for scorch drawing and the mouse breeze (macOS: ApplySimMasks/cursor hook still to do).
 
 The scene is kept between runs: quitting (or Windows shutting down) saves it as `overlay-scene-*.cps` tiles next to
@@ -293,7 +293,7 @@ tray menu: the tray menu stays native on purpose.
 
 ## Desktop physics to-do (user 2026-10-31, in this order)
 
-- [ ] More window marks, on the scorch system (Simulation::windowSoot gets a kind per pixel): frost from ice, LN2 and
+- [x] (2026-10-31: `Simulation::windowMarks`, tested on a test window) More window marks, on the scorch system (Simulation::windowSoot gets a kind per pixel): frost from ice, LN2 and
   cryo (pale, melts away slowly), acid etching (greenish pits), water streaks (faint, dry out). A slider each.
 - [ ] Icons carry and fling sand like windows (riding is windows-only today: icon walls are shaped, `w.solid`).
 - [ ] Water clings to windows: runs down the sides and drips off the bottom edge instead of bouncing off.
