@@ -300,6 +300,9 @@ tray menu: the tray menu stays native on purpose.
   tests unchanged; not tried on real icons (needs the user to drop one).
 - [-] Water clinging to windows: DROPPED (user 2026-10-31: TPT doesn't do it in game, so no new mechanics that
   rewrite TPT's physics).
+- [x] Experiment (2026-10-31, sliders default off): acid and blasts (air pressure over 8) eat holes in windows and
+  icons: `MarkHole` in `Simulation::windowMarks`, taken out of the sim's walls and painted dark. Overlay only, cleared
+  with the sim. Tested: acid ate through and sand fell through; cleared = whole again.
 - [ ] Explosions shake nearby windows a few pixels (moves other apps' windows: off by default, a switch to enable).
 - [ ] Falling-sand CPU (~1 core with lots of sand moving): profile TPT's own update and trim what the overlay adds.
 

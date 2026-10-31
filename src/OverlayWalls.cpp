@@ -9,6 +9,26 @@
 
 OverlayFeel overlayFeel;
 
+// The marks of a window (or icon) where it is now and at its size now: resized, what still fits is kept, from the top-left.
+static Simulation::WindowMarks &Marks(Simulation *sim, const OverlayWall &w)
+{
+	auto &m = sim->windowMarks[w.id];
+	int ww = w.x1 - w.x0, wh = w.y1 - w.y0;
+	if (m.w != ww || m.h != wh)
+	{
+		for (auto &a : m.a)
+		{
+			std::vector<uint8_t> b(size_t(ww) * wh, 0);
+			for (int j = 0; j < std::min(wh, m.h) && !a.empty(); j++)
+				for (int i = 0; i < std::min(ww, m.w); i++) b[size_t(j) * ww + i] = a[size_t(j) * m.w + i];
+			a = std::move(b);
+		}
+		m.w = ww, m.h = wh;
+	}
+	m.x = w.x0, m.y = w.y0;
+	return m;
+}
+
 void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 {
 	auto old = std::move(sim->pixelWalls);
@@ -25,6 +45,53 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 			for (int x = w.x0; x < w.x1; x++)
 				if (w.solid(x, y)) mask[size_t(y) * XRES + x] = 1;
 		}
+	// Experiment (off unless its sliders are up): acid and blasts eat holes in windows and icons. Only the sim's walls and
+	// the overlay's paint change, and clearing the sim mends them: the real windows and icons are never touched.
+	using M = Simulation::WindowMark;
+	for (auto &w : walls)
+		if (auto it = sim->windowMarks.find(w.id); w.id && it != sim->windowMarks.end() && it->second.any[M::MarkHole])
+		{
+			auto &m = Marks(sim, w);
+			for (int y = w.y0; y < w.y1; y++)
+				for (int x = w.x0; x < w.x1; x++)
+					if (m.a[M::MarkHole][size_t(y - w.y0) * m.w + (x - w.x0)]) mask[size_t(y) * XRES + x] = 0;
+		}
+	auto eat = [&](int x, int y) { // a wall pixel: the window or icon it belongs to loses it
+		for (auto &w : walls)
+			if (w.id && x >= w.x0 && x < w.x1 && y >= w.y0 && y < w.y1 && (!w.solid || w.solid(x, y)))
+			{
+				auto &m = Marks(sim, w);
+				m.a[M::MarkHole][size_t(y - w.y0) * m.w + (x - w.x0)] = 255;
+				m.any[M::MarkHole] = true;
+				mask[size_t(y) * XRES + x] = 0;
+				return;
+			}
+	};
+	if (overlayFeel.acidEat > 0)
+		for (int i = 0; i <= sim->parts.active; i++)
+		{
+			auto &p = sim->parts[i];
+			if (p.type != PT_ACID) continue;
+			int x = int(p.x + 0.5f), y = int(p.y + 0.5f);
+			for (auto [dx, dy] : { std::pair{ 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } })
+			{
+				int nx = x + dx, ny = y + dy;
+				if (nx < 0 || ny < 0 || nx >= XRES || ny >= YRES || !mask[size_t(ny) * XRES + nx] || sim->rng.uniform01() >= 0.1f * overlayFeel.acidEat) continue;
+				eat(nx, ny);
+				if (sim->rng.uniform01() < 0.3f) sim->kill_part(i); // used up, like acid eating anything else
+				break;
+			}
+		}
+	if (overlayFeel.blast > 0)
+		for (int cy = 0; cy < YCELLS; cy++)
+			for (int cx = 0; cx < XCELLS; cx++)
+			{
+				float chance = (sim->pv[cy][cx] - 8) / 40 * overlayFeel.blast; // pressure: TPT's blasts reach 30-256
+				if (chance <= 0) continue;
+				for (int y = cy * CELL; y < (cy + 1) * CELL; y++)
+					for (int x = cx * CELL; x < (cx + 1) * CELL; x++)
+						if (mask[size_t(y) * XRES + x] && sim->rng.uniform01() < chance) eat(x, y);
+			}
 	// What rests on a window rides along when it moves (friction): each column's stack of particles on its old top
 	// edge goes the same way. Big jumps (snapping, maximising) leave it behind. When the window slows, stops or turns,
 	// the riders keep the speed it lost: shake a window and the sand flies off.
@@ -123,7 +190,6 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 	// What touches a window marks it, marks that move with it: fire and lava scorch, ice and cryo frost, acid etches
 	// pits, water streaks. Frost melts and water dries; scorch and pits stay until the sim is cleared.
 	// ponytail: marks are kept from the visible top-left, so a window half off screen shifts them; keep the full rect if it matters.
-	using M = Simulation::WindowMark;
 	const float rate[M::MarkKinds] = { overlayFeel.water, overlayFeel.frost, overlayFeel.acid, overlayFeel.scorch };
 	for (auto &w : walls)
 	{
@@ -144,18 +210,7 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 			return k >= 0 && rate[k] > 0 ? k : -1;
 		};
 		auto mark = [&](int kind, int x, int y) { // a window pixel next to what touched it
-			auto &m = sim->windowMarks[w.id];
-			if (m.w != ww || m.h != wh)
-			{
-				for (auto &a : m.a) // resized: keep what still fits, from the top-left
-				{
-					std::vector<uint8_t> b(size_t(ww) * wh, 0);
-					for (int j = 0; j < std::min(wh, m.h) && !a.empty(); j++)
-						for (int i = 0; i < std::min(ww, m.w); i++) b[size_t(j) * ww + i] = a[size_t(j) * m.w + i];
-					a = std::move(b);
-				}
-				m.x = w.x0, m.y = w.y0, m.w = ww, m.h = wh;
-			}
+			auto &m = Marks(sim, w);
 			auto &a = m.a[kind];
 			m.any[kind] = true;
 			auto add = [&](int i, int j, float v, int cap) {
@@ -223,9 +278,16 @@ void OverlayDrawMarks(const Simulation *sim, uint32_t *argb, int stride, const u
 			for (int i = 0; i < m.w; i++)
 			{
 				int x = m.x + i, y = m.y + j;
-				if (x < 0 || y < 0 || x >= XRES || y >= YRES || !(occupied[size_t(y) * XRES + x] & wallBit)) continue;
+				if (x < 0 || y < 0 || x >= XRES || y >= YRES) continue;
+				if (m.any[Simulation::MarkHole] && m.a[Simulation::MarkHole][size_t(j) * m.w + i])
+				{
+					auto &p = argb[size_t(y) * stride + x];
+					if (!(p >> 24)) p = 0xF0140E0A; // a hole: dark, what falls through it still shows
+					continue;
+				}
+				if (!(occupied[size_t(y) * XRES + x] & wallBit)) continue;
 				uint32_t r = 0, g = 0, b = 0, a = 0; // premultiplied, painted over each other in order
-				for (int kind = 0; kind < Simulation::MarkKinds; kind++)
+				for (int kind = 0; kind < Simulation::MarkHole; kind++)
 				{
 					if (!m.any[kind]) continue;
 					uint32_t v = m.a[kind][size_t(j) * m.w + i];

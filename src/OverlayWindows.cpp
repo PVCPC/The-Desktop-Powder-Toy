@@ -2544,6 +2544,8 @@ namespace
 				{ L"Frost", L"How fast ice, LN2 and cryo frost the windows they touch (it melts)", &overlayFeel.frost, 3, "Frost" },
 				{ L"Acid etching", L"How fast acid pits the windows it touches (cleared with the sim)", &overlayFeel.acid, 3, "Acid" },
 				{ L"Water streaks", L"How much water streaks the windows it runs over (they dry)", &overlayFeel.water, 3, "Water" },
+				{ L"Acid eats windows", L"Experiment: acid eats holes in windows and icons (only in the overlay: clear the sim to mend them)", &overlayFeel.acidEat, 3, "AcidEat" },
+				{ L"Blasts break windows", L"Experiment: explosions blow holes in windows and icons (only in the overlay: clear the sim to mend them)", &overlayFeel.blast, 3, "Blast" },
 			};
 			top = Group(x, y, w, S(26) * int(std::size(feel)) + S(8), L"Desktop physics");
 			for (int i = 0; i < int(std::size(feel)); i++)
@@ -4639,7 +4641,7 @@ void OverlayWindows::Init(void *mainHwnd)
 	auto &prefs = GlobalPrefs::Ref();
 	windowWalls = prefs.Get("Overlay.WindowWalls", true);
 	iconWalls = prefs.Get("Overlay.IconWalls", true);
-	for (auto [v, name] : { std::pair{ &overlayFeel.grip, "Grip" }, { &overlayFeel.fling, "Fling" }, { &overlayFeel.push, "Push" }, { &overlayFeel.wind, "Wind" }, { &overlayFeel.scorch, "Scorch" }, { &overlayFeel.frost, "Frost" }, { &overlayFeel.acid, "Acid" }, { &overlayFeel.water, "Water" } })
+	for (auto [v, name] : { std::pair{ &overlayFeel.grip, "Grip" }, { &overlayFeel.fling, "Fling" }, { &overlayFeel.push, "Push" }, { &overlayFeel.wind, "Wind" }, { &overlayFeel.scorch, "Scorch" }, { &overlayFeel.frost, "Frost" }, { &overlayFeel.acid, "Acid" }, { &overlayFeel.water, "Water" }, { &overlayFeel.acidEat, "AcidEat" }, { &overlayFeel.blast, "Blast" } })
 		*v = prefs.Get(ByteString("Overlay.Feel.") + name, *v);
 	// Default UI scale: the larger of Windows' display scaling (TPT is DPI aware) and screen height / 1080, in
 	// quarter steps. Overridable.
