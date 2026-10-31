@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1" xmlns:asmv3="urn:schemas-microsoft-com:asm.v3">
 	<assemblyIdentity name="." version="6.0.0.0"/>
+	<!-- themed (comctl32 v6) buttons and fields in the overlay's native dialogs -->
+	<dependency>
+		<dependentAssembly>
+			<assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*"/>
+		</dependentAssembly>
+	</dependency>
 	<!-- Windows 8 and up: lets the overlay's layered window be a child of the desktop (sim behind the icons) -->
 	<compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
 		<application>

@@ -8,6 +8,8 @@
 #include "gui/interface/DropDown.h"
 #include "gui/game/GameModel.h"
 #include "graphics/Graphics.h"
+#include "Overlay.h"
+#include "OverlayWindows.h"
 
 class SignWindow: public ui::Window
 {
@@ -245,6 +247,27 @@ void SignTool::Click(Simulation * sim, Brush const &brush, ui::Point position)
 			break;
 		}
 	}
-	if (signIndex != -1 || sim->signs.size() < MAXSIGNS)
-		new SignWindow(this, sim, signIndex, position);
+	if (signIndex == -1 && sim->signs.size() >= MAXSIGNS) return;
+	if (overlayMode || overlayWindowed)
+	{
+		int ju = signIndex == -1 ? int(sign::Middle) : int(sim->signs[signIndex].ju);
+		String text = signIndex == -1 ? String() : sim->signs[signIndex].text;
+		std::vector<String> extras;
+		if (signIndex != -1) extras = { "Delete", "Move" };
+		int result = OverlayWindows::Form(signIndex == -1 ? String("New sign") : String("Edit sign"), "The sign's text, and where its pointer goes:",
+		                                  { "Pointer left", "Pointer middle", "Pointer right", "No pointer" }, ju, text, extras,
+		                                  [](int, const String &v) { return v.length() > 0; }, 45);
+		if (result == 1 && signIndex == -1) sim->signs.push_back(sign(text, position.X, position.Y, sign::Justification(ju)));
+		else if (result == 1) sim->signs[signIndex].text = text, sim->signs[signIndex].ju = sign::Justification(ju);
+		else if (result == 2) sim->signs.erase(sim->signs.begin() + signIndex);
+		else if (result == 3)
+		{
+			// TPT's window moves it: the sign follows the mouse until a click
+			auto *window = new SignWindow(this, sim, signIndex, position);
+			window->movingSign = &sim->signs[signIndex];
+			window->signMoving = true;
+		}
+		if (result >= 0) return;
+	}
+	new SignWindow(this, sim, signIndex, position);
 }

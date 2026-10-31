@@ -11,3 +11,5 @@ void OverlayWindows::ApplySimMasks(uint32_t *, int) {}
 void OverlayWindows::ClearUnderWindows(uint32_t *, int, int, int, int) {}
 void OverlayWindows::SetPlayArea(int, int, int, int) {}
 bool OverlayWindows::AreaMouse(int, int, int) { return false; }
+int OverlayWindows::Form(const String &, const String &, const std::vector<String> &, int &, String &, const std::vector<String> &,
+                         std::function<bool(int, const String &)>, int) { return -1; }

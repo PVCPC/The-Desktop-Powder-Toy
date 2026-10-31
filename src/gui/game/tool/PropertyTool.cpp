@@ -12,6 +12,8 @@
 #include "simulation/SimulationData.h"
 #include "graphics/Graphics.h"
 #include "Format.h"
+#include "Overlay.h"
+#include "OverlayWindows.h"
 #include <SDL.h>
 
 class PropertyWindow: public ui::Window
@@ -190,6 +192,29 @@ void PropertyWindow::OnKeyPress(int key, int scan, bool repeat, bool shift, bool
 
 void PropertyTool::OpenWindow(Simulation *sim, std::optional<int> takePropertyFrom)
 {
+	if (overlayMode || overlayWindowed)
+	{
+		auto &prefs = GlobalPrefs::Ref();
+		int index = prefs.Get("Prop.Type", 0);
+		auto value = prefs.Get("Prop.Value", String(""));
+		std::vector<String> names;
+		for (auto &prop : Particle::GetProperties()) names.push_back(prop.Name.FromAscii());
+		auto parse = [](int index, const String &value) -> std::optional<Configuration> {
+			try
+			{
+				return Configuration{ AccessProperty::Parse(index, value), value };
+			}
+			catch (const AccessProperty::ParseError &)
+			{
+				return std::nullopt;
+			}
+		};
+		// ponytail: takePropertyFrom (TPT's pick-from-a-particle) isn't shown here; TPT's window still does it
+		int result = OverlayWindows::Form("Property", "Set a property of the particles you draw over:", names, index, value, {},
+		                                  [&](int i, const String &v) { return bool(parse(i, v)); });
+		if (result == 1) SetConfiguration(parse(index, value));
+		if (result >= 0) return;
+	}
 	new PropertyWindow(this, sim, takePropertyFrom);
 }
 

@@ -116,6 +116,12 @@ overlay, and TPT only runs the top screen, so **the sim freezes while any dialog
      Open/Place, Show in folder, Delete (asks first); Show folder buttons; a .cps or .stm dropped on the window opens
      or places it. Tested: thumbnails, click-to-open. Not tested (needs real input): the right-click menu, delete,
      drag and drop. Stamps show their IDs (TPT's rename is a later add).
+   - [x] Deco colour picker (2026-10-30): Windows' colour dialog (Tools tab); the swatch still opens TPT's (alpha).
+   - [x] Property and sign tools (2026-10-30): real Windows dialogs (OverlayWindows::Form: a drop-down, a text
+     field, OK/Cancel/extra buttons; comctl32 v6 manifest for themed controls). Property: OK greys out until the
+     value parses. Sign: Delete and Move (Move hands over to TPT's sign window, which follows the mouse). Tested with
+     posted messages: property WATR saved to prefs, new sign created. Modal on TPT's thread: the sim waits while open.
+     Not shown: picking a property from a particle (TPT's window still does that).
    - [x] Real Vista-style menus, drop-downs and dialogs (user request 2026-10-30): today the hosted ones are TPT's
      pixel UI inside a Vista frame. First: Settings, drop-down lists, context menus.
      - [x] Drop-down lists and context menus are real Windows menus (ui::Window::MenuItems; TrackPopupMenu on its

@@ -4640,6 +4640,111 @@ void OverlayWindows::SetPlayArea(int x, int y, int w, int h)
 	prefs.Set("Overlay.PlayArea.H", full ? 0 : area.size.Y);
 }
 
+
+int OverlayWindows::Form(const String &title, const String &prompt, const std::vector<String> &options, int &choice, String &text,
+                         const std::vector<String> &extras, std::function<bool(int, const String &)> valid, int limit)
+{
+	if (!mainWindow) return -1;
+	enum { idCombo = 100, idEdit, idExtra };
+	struct State
+	{
+		std::function<bool(int, const String &)> valid;
+		HWND combo, edit, ok;
+		int result = -1;
+		void Check()
+		{
+			wchar_t buf[512];
+			GetWindowTextW(edit, buf, 512);
+			EnableWindow(ok, valid(int(SendMessageW(combo, CB_GETCURSEL, 0, 0)), Platform::WinNarrow(buf).FromUtf8()));
+		}
+	} st{ valid };
+	static bool registered = false;
+	if (!registered)
+	{
+		WNDCLASSW wc{};
+		wc.lpfnWndProc = [](HWND w, UINT msg, WPARAM wp, LPARAM lp) -> LRESULT {
+			auto *s = (State *)GetWindowLongPtrW(w, GWLP_USERDATA);
+			if (s && msg == WM_COMMAND)
+			{
+				int id = LOWORD(wp), code = HIWORD(wp);
+				if ((id == idCombo && code == CBN_SELCHANGE) || (id == idEdit && code == EN_CHANGE)) s->Check();
+				else if (id == IDOK && IsWindowEnabled(s->ok)) s->result = 1;
+				else if (id == IDCANCEL) s->result = 0;
+				else if (id >= idExtra) s->result = 2 + id - idExtra;
+				return 0;
+			}
+			if (s && msg == WM_CLOSE) return s->result = 0, 0;
+			return DefWindowProcW(w, msg, wp, lp);
+		};
+		wc.hInstance = GetModuleHandleW(nullptr);
+		wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+		wc.hbrBackground = GetSysColorBrush(COLOR_BTNFACE);
+		wc.lpszClassName = L"TPTOverlayForm";
+		RegisterClassW(&wc);
+		registered = true;
+	}
+	HWND owner = palette && IsWindowVisible(palette->hwnd) ? palette->hwnd : mainWindow;
+	HDC screen = GetDC(nullptr);
+	int dpi = GetDeviceCaps(screen, LOGPIXELSY); // the system DPI, which SystemParametersInfo's font is sized for
+	ReleaseDC(nullptr, screen);
+	auto D = [dpi](int v) { return MulDiv(v, dpi, 96); };
+	NONCLIENTMETRICSW ncm{ sizeof(ncm) };
+	SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0);
+	HFONT font = CreateFontIndirectW(&ncm.lfMessageFont);
+
+	int cw = D(340), ch = D(146);
+	RECT wr{ 0, 0, cw, ch };
+	DWORD style = WS_POPUP | WS_CAPTION | WS_SYSMENU, ex = WS_EX_DLGMODALFRAME | WS_EX_TOPMOST;
+	AdjustWindowRectEx(&wr, style, FALSE, ex);
+	RECT or_;
+	GetWindowRect(owner, &or_);
+	int ww = wr.right - wr.left, wh = wr.bottom - wr.top;
+	HWND dlg = CreateWindowExW(ex, L"TPTOverlayForm", Wide(title).c_str(), style, (or_.left + or_.right - ww) / 2,
+	                           (or_.top + or_.bottom - wh) / 2, ww, wh, owner, nullptr, GetModuleHandleW(nullptr), nullptr);
+	auto child = [&](const wchar_t *cls, const wchar_t *txt, DWORD st, int x, int y, int w, int hh, int id) {
+		HWND c = CreateWindowExW(cls == std::wstring(L"EDIT") ? WS_EX_CLIENTEDGE : 0, cls, txt, WS_CHILD | WS_VISIBLE | st,
+		                         D(x), D(y), D(w), D(hh), dlg, HMENU(INT_PTR(id)), GetModuleHandleW(nullptr), nullptr);
+		SendMessageW(c, WM_SETFONT, WPARAM(font), TRUE);
+		return c;
+	};
+	child(L"STATIC", Wide(prompt).c_str(), 0, 12, 12, 316, 18, -1);
+	st.combo = child(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 12, 36, 160, 300, idCombo);
+	for (auto &o : options) SendMessageW(st.combo, CB_ADDSTRING, 0, LPARAM(Wide(o).c_str()));
+	SendMessageW(st.combo, CB_SETCURSEL, WPARAM(choice), 0);
+	st.edit = child(L"EDIT", Wide(text).c_str(), ES_AUTOHSCROLL | WS_TABSTOP, 12, 68, 316, 24, idEdit);
+	if (limit) SendMessageW(st.edit, EM_SETLIMITTEXT, WPARAM(limit), 0);
+	int bx = 12;
+	for (int i = 0; i < int(extras.size()); i++, bx += 81) child(L"BUTTON", Wide(extras[i]).c_str(), BS_PUSHBUTTON | WS_TABSTOP, bx, 108, 75, 26, idExtra + i);
+	st.ok = child(L"BUTTON", L"OK", BS_DEFPUSHBUTTON | WS_TABSTOP, 172, 108, 75, 26, IDOK);
+	child(L"BUTTON", L"Cancel", BS_PUSHBUTTON | WS_TABSTOP, 253, 108, 75, 26, IDCANCEL);
+	SetWindowLongPtrW(dlg, GWLP_USERDATA, LONG_PTR(&st));
+	st.Check();
+	st.result = -1;
+
+	// ponytail: a modal loop on TPT's thread, so the sim waits while it's open (as with the menus)
+	EnableWindow(owner, FALSE);
+	ShowWindow(dlg, SW_SHOW);
+	SetForegroundWindow(dlg);
+	SetFocus(st.edit);
+	SendMessageW(st.edit, EM_SETSEL, 0, -1);
+	MSG msg;
+	while (st.result < 0 && GetMessageW(&msg, nullptr, 0, 0))
+	{
+		if (IsDialogMessageW(dlg, &msg)) continue;
+		TranslateMessage(&msg);
+		DispatchMessageW(&msg);
+	}
+	if (msg.message == WM_QUIT) PostQuitMessage(int(msg.wParam));
+	wchar_t buf[512];
+	GetWindowTextW(st.edit, buf, 512);
+	text = Platform::WinNarrow(buf).FromUtf8();
+	choice = int(SendMessageW(st.combo, CB_GETCURSEL, 0, 0));
+	EnableWindow(owner, TRUE);
+	DestroyWindow(dlg);
+	DeleteObject(font);
+	SetForegroundWindow(owner);
+	return std::max(0, st.result);
+}
 #else
 void OverlayWindows::Init(void *) {}
 void OverlayWindows::Tick() {}
@@ -4651,4 +4756,6 @@ void OverlayWindows::ApplySimMasks(uint32_t *, int) {}
 void OverlayWindows::ClearUnderWindows(uint32_t *, int, int, int, int) {}
 void OverlayWindows::SetPlayArea(int, int, int, int) {}
 bool OverlayWindows::AreaMouse(int, int, int) { return false; }
+int OverlayWindows::Form(const String &, const String &, const std::vector<String> &, int &, String &, const std::vector<String> &,
+                         std::function<bool(int, const String &)>, int) { return -1; }
 #endif
