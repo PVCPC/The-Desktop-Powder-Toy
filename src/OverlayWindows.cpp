@@ -1798,6 +1798,9 @@ namespace
 		bool appWindow = false;
 		int grip = 0; // resize border width
 		Vec2<int> minSize{ 0, 0 };
+		int drag = 0; // the frame part (HTCAPTION, HTLEFT...) being dragged, 0 = none
+		POINT dragFrom{};
+		RECT dragRect{};
 		HWND owner = nullptr; // an owned window: no taskbar button, normal z-order, minimises with its owner
 
 		virtual ~Panel()
@@ -1989,6 +1992,25 @@ namespace
 				case WM_EXITSIZEMOVE:
 					self->SavePosition();
 					return 0;
+				case WM_NCLBUTTONDOWN:
+					// Moved and sized by hand: Windows' own move/size loop runs on TPT's thread and holds the sim still
+					// until the button comes up. ponytail: no drag-to-top maximise or Snap layouts that way
+					if ((wp == HTCAPTION || (wp >= HTLEFT && wp <= HTBOTTOMRIGHT)) && !IsZoomed(hwnd))
+					{
+						self->drag = int(wp);
+						GetCursorPos(&self->dragFrom);
+						GetWindowRect(hwnd, &self->dragRect);
+						SetCapture(hwnd);
+						return 0;
+					}
+					break;
+				case WM_CAPTURECHANGED:
+					if (self->drag)
+					{
+						self->drag = 0;
+						self->SavePosition();
+					}
+					break;
 				case WM_MOVING:
 					if (self->appWindow)
 					{
@@ -2008,6 +2030,22 @@ namespace
 					break;
 				case WM_MOUSEMOVE:
 				{
+					if (int d = self->drag)
+					{
+						POINT p;
+						GetCursorPos(&p);
+						int dx = p.x - self->dragFrom.x, dy = p.y - self->dragFrom.y;
+						RECT r = self->dragRect;
+						auto min = self->minSize;
+						if (d == HTCAPTION) OffsetRect(&r, dx, dy);
+						if (d == HTLEFT || d == HTTOPLEFT || d == HTBOTTOMLEFT) r.left = std::min(r.left + dx, r.right - min.X);
+						if (d == HTRIGHT || d == HTTOPRIGHT || d == HTBOTTOMRIGHT) r.right = std::max(r.right + dx, r.left + min.X);
+						if (d == HTTOP || d == HTTOPLEFT || d == HTTOPRIGHT) r.top = std::min(r.top + dy, r.bottom - min.Y);
+						if (d == HTBOTTOM || d == HTBOTTOMLEFT || d == HTBOTTOMRIGHT) r.bottom = std::max(r.bottom + dy, r.top + min.Y);
+						if (d == HTCAPTION) SendMessageW(hwnd, WM_MOVING, 0, LPARAM(&r)); // the screen-edge dock
+						SetWindowPos(hwnd, nullptr, r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOZORDER | SWP_NOACTIVATE);
+						return 0;
+					}
 					TRACKMOUSEEVENT tme{ sizeof(tme), TME_LEAVE, hwnd, 0 };
 					TrackMouseEvent(&tme);
 					self->Mouse(msg, GET_X_LPARAM(lp), GET_Y_LPARAM(lp), wp);
@@ -2026,9 +2064,15 @@ namespace
 					DragFinish(drop);
 					return 0;
 				}
+				case WM_LBUTTONUP:
+					if (self->drag)
+					{
+						ReleaseCapture(); // ends the drag (WM_CAPTURECHANGED)
+						return 0;
+					}
+					[[fallthrough]];
 				case WM_MOUSELEAVE:
 				case WM_LBUTTONDOWN:
-				case WM_LBUTTONUP:
 				case WM_RBUTTONDOWN:
 				case WM_RBUTTONUP:
 				case WM_MBUTTONDOWN:
@@ -2940,7 +2984,7 @@ namespace
 			y += S(108);
 			top = Group(x, y, w, S(84), L"Sim layer");
 			const wchar_t *layers[] = { L"On top of every window", L"Under windows, over the desktop icons",
-			                            L"Behind the desktop icons, like a wallpaper (look only: clicks go to the desktop)" };
+			                            L"Behind the desktop icons, like a wallpaper (clicks go to the desktop; Locked comes up to draw)" };
 			for (int i = 0; i < int(OverlayLayer::Count); i++)
 			{
 				Toggle(x + S(12), top + i * S(24), layers[i], int(OverlayGetLayer()) == i, true, [i] { OverlaySetLayer(OverlayLayer(i)); });
