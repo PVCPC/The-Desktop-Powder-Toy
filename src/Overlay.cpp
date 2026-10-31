@@ -32,6 +32,13 @@
 # ifndef WS_EX_NOREDIRECTIONBITMAP
 #  define WS_EX_NOREDIRECTIONBITMAP 0x00200000L // SDL_syswm.h already pulled in windows.h for the XP target
 # endif
+#elif defined(__APPLE__)
+# include "OverlayMac.h"
+namespace
+{
+	OverlayInput input = OverlayInput::Auto;
+	std::vector<uint32_t> argb;
+}
 #endif
 
 bool overlayMode = false;
@@ -640,6 +647,9 @@ void OverlaySetInput(OverlayInput newInput)
 {
 #ifdef _WIN32
 	SetInput(newInput);
+#elif defined(__APPLE__)
+	input = newInput;
+	GlobalPrefs::Ref().Set("Overlay.Input", int(input));
 #else
 	(void)newInput;
 #endif
@@ -658,7 +668,7 @@ void OverlayLoadKeys()
 
 OverlayInput OverlayGetInput()
 {
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
 	return input;
 #else
 	return OverlayInput::Auto;
@@ -674,6 +684,18 @@ std::pair<Vec2<int>, int> OverlaySimSize(int scale)
 		bool menus = GlobalPrefs::Ref().Get("Overlay.ShowTPTMenus", false);
 		auto cells = (screen / scale - (menus ? Vec2(BARSIZE, MENUSIZE) : Vec2(0, 0))) / CELL; // hidden menus: off screen
 		// pmap holds the particle index above PMAPBITS
+		if (int64_t(cells.X) * cells.Y * CELL * CELL <= (int64_t(1) << (31 - PMAPBITS)))
+		{
+			return { cells, scale };
+		}
+	}
+#elif defined(__APPLE__)
+	// TPT's own menus stay (no side window here), inside the usable area: the bottom row sits just above the Dock
+	int sw, sh;
+	OverlayMac::ScreenSize(sw, sh);
+	for (scale = std::max(scale, 1); ; scale++)
+	{
+		auto cells = (Vec2(sw, sh) / scale - Vec2(BARSIZE, MENUSIZE)) / CELL;
 		if (int64_t(cells.X) * cells.Y * CELL * CELL <= (int64_t(1) << (31 - PMAPBITS)))
 		{
 			return { cells, scale };
@@ -711,8 +733,12 @@ void ApplyOverlay(SDL_Window *window)
 	SetInput(prefs.Get("Overlay.Input", OverlayInput::Count, OverlayInput::Auto), false);
 	layer = prefs.Get("Overlay.Layer", OverlayLayer::Count, OverlayLayer::OnTop);
 	if (layer != OverlayLayer::OnTop) ApplyLayer();
+#elif defined(__APPLE__)
+	if (overlayWindowed) return; // ponytail: no side windows on the Mac, so overlay:window is plain TPT there
+	OverlayMac::Init(window);
+	input = GlobalPrefs::Ref().Get("Overlay.Input", OverlayInput::Count, OverlayInput::Auto);
 #else
-	(void)window; // ponytail: Windows only; X11/Wayland/macOS each need their own shape/input-region code
+	(void)window; // ponytail: Windows and macOS only; X11/Wayland each need their own shape/input-region code
 #endif
 }
 
@@ -739,6 +765,8 @@ void OverlayTickUI()
 	{
 		OverlayWindows::TogglePalette();
 	}
+	OverlayWindows::Tick();
+#elif defined(__APPLE__)
 	OverlayWindows::Tick();
 #endif
 }
@@ -885,8 +913,7 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 		for (int x = 0; x < ww; x++) columns[x] = x * w / ww;
 	}
 	constexpr int bands = 32;
-	static const auto bandIds = [] { std::array<int, bands> a; std::iota(a.begin(), a.end(), 0); return a; }();
-	std::for_each(std::execution::par, bandIds.begin(), bandIds.end(), [&](int b) {
+	OverlayParallel(bands, [&](int b) {
 		for (int y = wh * b / bands; y < wh * (b + 1) / bands; y++)
 		{
 			auto *dst = bits + size_t(y) * ww;
@@ -915,6 +942,19 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 		if (!told) fprintf(stderr, "overlay: UpdateLayeredWindow failed (%lu)\n", GetLastError());
 		told = true;
 	}
+#elif defined(__APPLE__)
+	(void)window;
+	OverlayWindows::Tick();
+	argb.resize(size_t(w) * h);
+	OverlayBands(h, [&](int y0, int y1) {
+		for (int i = y0 * w; i < y1 * w; i++)
+		{
+			auto c = vid[i] & 0xFFFFFF;
+			argb[i] = c ? c | 0xFF000000 : 0; // black is see-through
+		}
+	});
+	OverlayMac::Present(argb.data(), w, h, input == OverlayInput::Locked || (input == OverlayInput::Auto && OverlayMac::Active()),
+	                    input == OverlayInput::PassThrough);
 #else
 	(void)window, (void)vid, (void)w, (void)h;
 #endif

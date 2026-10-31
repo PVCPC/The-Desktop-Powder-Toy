@@ -132,7 +132,14 @@ powder_files = files(
 	'PowderToy.cpp',
 	'lua/CommandInterface.cpp',
 	'lua/TPTSTypes.cpp',
+	'OverlayWalls.cpp',
 )
+if host_platform == 'darwin'
+	add_languages('objcpp', native: false)
+	powder_files += files('OverlayMac.mm')
+	# ponytail: the font editor (build_font, off by default) links Overlay.cpp but not this; add it there if it's ever built on a Mac
+	powder_deps += dependency('appleframeworks', modules: [ 'AppKit', 'QuartzCore' ])
+endif
 powder_external_files = []
 
 if host_platform == 'emscripten'

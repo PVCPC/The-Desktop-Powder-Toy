@@ -6,8 +6,8 @@ Windows desktop**: sand piles up on your open windows and desktop icons, water p
 everything you don't draw stays see-through and clickable. All of the original game is still here; the original
 README follows below.
 
-**[Download for Windows 10/11](https://github.com/PVCPC/The-Desktop-Powder-Toy/releases/latest)**: unzip and run
-`The Desktop Powder Toy.exe`, nothing to install.
+**[Download](https://github.com/PVCPC/The-Desktop-Powder-Toy/releases/latest)** for Windows 10/11 or macOS 11+ (Apple
+Silicon): unzip and run it, nothing to install.
 
 Our work is on the [`overlay`](https://github.com/PVCPC/The-Desktop-Powder-Toy/tree/overlay) branch. Details, design notes and the to-do list are in
 [OVERLAY.md](https://github.com/PVCPC/The-Desktop-Powder-Toy/blob/overlay/OVERLAY.md).
@@ -45,7 +45,9 @@ What's new
 |---|---|
 | ![Simulation window](https://raw.githubusercontent.com/PVCPC/The-Desktop-Powder-Toy/overlay/docs/overlay/simulation-window.png) | ![Display window](https://raw.githubusercontent.com/PVCPC/The-Desktop-Powder-Toy/overlay/docs/overlay/display-window.png) |
 
-Windows only for now. Download it above, or build as below and run `powder.exe`.
+Windows and macOS. Download it above, or build as below and run `powder.exe` (`powder` on the Mac). The Mac version
+is newer and smaller: the sim and window walls are the same, but TPT's own menus stand in for the side window, and an
+hourglass in the menu bar for the tray icon (click modes, pause, clear, quit).
 
 ---
 

@@ -1,6 +1,7 @@
 // Overlay mode's own desktop windows (OVERLAY.md): each menu is a real top-level layered window, drawn here in
 // software with per-pixel alpha. The look is a Theme (Windows Vista, 7, 8, 10, Classic Mac, macOS).
 #include "OverlayWindows.h"
+#include "OverlayWalls.h"
 #ifdef _WIN32
 #undef _WIN32_WINNT
 #define _WIN32_WINNT 0x0601 // IFolderView2 for the desktop icons (the build targets XP)
@@ -5121,8 +5122,7 @@ static void TickWindowWalls()
 	if (sim->currentTick == lastTick && ++skipped < 2) return;
 	lastTick = sim->currentTick, skipped = 0;
 	// wallRects: where each window was on the last tick
-	struct Win { int x0, y0, x1, y1, mx, my; const DeskIcon *icon = nullptr; };
-	std::vector<Win> wins;
+	std::vector<OverlayWall> wins;
 	RECT sr;
 	GetWindowRect(mainWindow, &sr);
 	int sw = sr.right - sr.left, sh = sr.bottom - sr.top;
@@ -5136,7 +5136,7 @@ static void TickWindowWalls()
 		return;
 	}
 	std::map<HWND, RECT> now;
-	struct Ctx { std::vector<Win> *wins; std::map<HWND, RECT> *now; RECT sr; int sw, sh; } ctx{ &wins, &now, sr, sw, sh };
+	struct Ctx { std::vector<OverlayWall> *wins; std::map<HWND, RECT> *now; RECT sr; int sw, sh; } ctx{ &wins, &now, sr, sw, sh };
 	if (doWindows) EnumWindows([](HWND hwnd, LPARAM lp) -> BOOL {
 		auto &c = *(Ctx *)lp;
 		auto ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
@@ -5154,8 +5154,8 @@ static void TickWindowWalls()
 		RECT r; // the visible frame, without the invisible resize borders
 		if (DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &r, sizeof(r)) != S_OK) GetWindowRect(hwnd, &r);
 		auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); }; // screen -> sim pixels
-		Win w{ std::max(0, px(r.left - c.sr.left, WINDOWW, c.sw)), std::max(0, px(r.top - c.sr.top, WINDOWH, c.sh)),
-		       std::min(XRES, px(r.right - c.sr.left, WINDOWW, c.sw)), std::min(YRES, px(r.bottom - c.sr.top, WINDOWH, c.sh)), 0, 0 };
+		OverlayWall w{ std::max(0, px(r.left - c.sr.left, WINDOWW, c.sw)), std::max(0, px(r.top - c.sr.top, WINDOWH, c.sh)),
+		               std::min(XRES, px(r.right - c.sr.left, WINDOWW, c.sw)), std::min(YRES, px(r.bottom - c.sr.top, WINDOWH, c.sh)), 0, 0, {} };
 		(*c.now)[hwnd] = r;
 		if (w.x1 <= w.x0 || w.y1 <= w.y0) return TRUE;
 		if (auto it = wallRects.find(hwnd); it != wallRects.end())
@@ -5173,88 +5173,19 @@ static void TickWindowWalls()
 		{
 			auto &r = icon.r;
 			auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); };
-			Win w{ std::max(0, px(r.left - sr.left, WINDOWW, sw)), std::max(0, px(r.top - sr.top, WINDOWH, sh)),
-			       std::min(XRES, px(r.right - sr.left, WINDOWW, sw)), std::min(YRES, px(r.bottom - sr.top, WINDOWH, sh)), 0, 0, &icon };
+			OverlayWall w{ std::max(0, px(r.left - sr.left, WINDOWW, sw)), std::max(0, px(r.top - sr.top, WINDOWH, sh)),
+			               std::min(XRES, px(r.right - sr.left, WINDOWW, sw)), std::min(YRES, px(r.bottom - sr.top, WINDOWH, sh)), 0, 0, {} };
+			if (icon.shape)
+				// each sim pixel takes the icon pixel under its centre
+				w.solid = [&icon, sr, sw, sh](int x, int y) {
+					int n = icon.r.right - icon.r.left;
+					int ix = int(sr.left + (x + 0.5) * sw / WINDOWW) - icon.r.left, iy = int(sr.top + (y + 0.5) * sh / WINDOWH) - icon.r.top;
+					return ix >= 0 && iy >= 0 && ix < n && iy < n && (*icon.shape)[size_t(iy) * n + ix];
+				};
 			if (w.x1 > w.x0 && w.y1 > w.y0) wins.push_back(w);
 		}
 
-	auto old = std::move(sim->pixelWalls);
-	auto &mask = sim->pixelWalls;
-	mask.assign(size_t(XRES) * YRES, 0);
-	for (auto &w : wins)
-		for (int y = w.y0; y < w.y1; y++)
-		{
-			if (!w.icon || !w.icon->shape)
-			{
-				std::fill(&mask[size_t(y) * XRES + w.x0], &mask[size_t(y) * XRES + w.x1], 1);
-				continue;
-			}
-			// an icon: each sim pixel takes the icon pixel under its centre
-			int n = w.icon->r.right - w.icon->r.left;
-			int iy = int(sr.top + (y + 0.5) * sh / WINDOWH) - w.icon->r.top;
-			if (iy < 0 || iy >= n) continue;
-			for (int x = w.x0; x < w.x1; x++)
-			{
-				int ix = int(sr.left + (x + 0.5) * sw / WINDOWW) - w.icon->r.left;
-				if (ix >= 0 && ix < n && (*w.icon->shape)[size_t(iy) * n + ix]) mask[size_t(y) * XRES + x] = 1;
-			}
-		}
-	// What rests on a window rides along when it moves (friction): each column's stack of particles on its old top
-	// edge goes the same way. Big jumps (snapping, maximising) leave it behind.
-	for (auto &w : wins)
-	{
-		int mx = w.mx, my = w.my;
-		if (w.icon || (!mx && !my) || std::abs(mx) > 40 || std::abs(my) > 40) continue;
-		int top = w.y0 - my - 1; // the row just above the old top edge
-		if (top < 0 || top >= YRES) continue;
-		struct Rider { int r, x, y; };
-		std::vector<Rider> riders;
-		for (int x = std::max(0, w.x0 - mx); x < std::min(XRES, w.x1 - mx); x++)
-			for (int y = top; y >= 0 && sim->pmap[y][x]; y--) riders.push_back({ sim->pmap[y][x], x, y });
-		// front ones first: a rider's old spot is then never taken by one moved before it, so a blocked one stays put
-		std::sort(riders.begin(), riders.end(), [mx, my](const Rider &a, const Rider &b) { return a.x * mx + a.y * my > b.x * mx + b.y * my; });
-		for (auto &p : riders) sim->pmap[p.y][p.x] = 0;
-		for (auto &p : riders)
-		{
-			int tx = p.x + mx, ty = p.y + my;
-			bool free = tx >= 0 && ty >= 0 && tx < XRES && ty < YRES && !sim->pmap[ty][tx] && !mask[size_t(ty) * XRES + tx] &&
-			            !sim->IsWallBlocking(tx, ty, TYP(p.r));
-			if (!free) tx = p.x, ty = p.y; // blocked (another window, a wall): scraped off
-			auto &part = sim->parts[ID(p.r)];
-			part.x = float(tx);
-			part.y = float(ty);
-			sim->pmap[ty][tx] = p.r;
-		}
-	}
-	for (auto &w : wins)
-	{
-		int mx = w.mx, my = w.my;
-		if (!mx && !my) my = -1;
-		float len = std::hypot(float(mx), float(my)), sx = mx / len, sy = my / len;
-		float vx = std::clamp(mx * 1.f, -10.f, 10.f), vy = std::clamp(my * 1.f, -10.f, 10.f); // the window's speed, per frame
-		for (int y = w.y0; y < w.y1; y++)
-			for (int x = w.x0; x < w.x1; x++)
-			{
-				int r = sim->pmap[y][x];
-				if (!r || !mask[size_t(y) * XRES + x] || (!old.empty() && old[size_t(y) * XRES + x])) continue; // only what the window just moved onto
-				for (int k = 1; k < XRES + YRES; k++)
-				{
-					int tx = int(std::lround(x + sx * k)), ty = int(std::lround(y + sy * k));
-					if (tx < 0 || ty < 0 || tx >= XRES || ty >= YRES) break; // nowhere to go: stays, under the window
-					bool own = tx >= w.x0 && tx < w.x1 && ty >= w.y0 && ty < w.y1 && (!w.icon || mask[size_t(ty) * XRES + tx]);
-					if (!own && mask[size_t(ty) * XRES + tx]) break; // another window or icon: no tunnelling through it
-					if (own || sim->pmap[ty][tx] || sim->IsWallBlocking(tx, ty, TYP(r))) continue;
-					auto &part = sim->parts[ID(r)];
-					part.x = float(tx);
-					part.y = float(ty);
-					part.vx = vx;
-					part.vy = vy;
-					sim->pmap[ty][tx] = r;
-					sim->pmap[y][x] = 0;
-					break;
-				}
-			}
-	}
+	OverlayApplyWalls(sim, wins);
 }
 
 void OverlayWindows::ClearUnderWindows(uint32_t *argb, int w, int h, int ww, int wh)
@@ -5612,7 +5543,71 @@ void OverlayWindows::HideConsole()
 }
 #else
 void OverlayWindows::Init(void *) {}
+#ifdef __APPLE__
+#include "Overlay.h"
+#include "OverlayMac.h"
+#include "gui/game/GameController.h"
+#include "gui/game/GameModel.h"
+#include "simulation/Simulation.h"
+#include "SimulationConfig.h"
+#include "prefs/GlobalPrefs.h"
+#include <SDL.h>
+#include <cmath>
+#include <map>
+
+// Other apps' windows are walls, as on Windows (TickWindowWalls there)
+void OverlayWindows::Tick()
+{
+	if (!&GameController::Ref()) return;
+	auto *sim = GameController::Ref().GetModel()->GetSimulation();
+	static int lastTick = -1, skipped = 0;
+	if (sim->currentTick == lastTick && ++skipped < 2) return;
+	lastTick = sim->currentTick, skipped = 0;
+	static std::map<uint32_t, OverlayMac::Rect> last; // where each window was on the last tick
+	std::map<uint32_t, OverlayMac::Rect> now;
+	std::vector<OverlayWall> walls;
+	auto me = OverlayMac::Window();
+	double sw = me.r - me.l, sh = me.b - me.t;
+	if (sw > 0 && sh > 0 && GlobalPrefs::Ref().Get("Overlay.WindowWalls", true))
+		for (auto &r : OverlayMac::OtherWindows())
+		{
+			auto px = [](double v, int n, double nw) { return int(std::lround(v * n / nw)); }; // screen -> sim pixels
+			OverlayWall w{ std::max(0, px(r.l - me.l, WINDOWW, sw)), std::max(0, px(r.t - me.t, WINDOWH, sh)),
+			               std::min(XRES, px(r.r - me.l, WINDOWW, sw)), std::min(YRES, px(r.b - me.t, WINDOWH, sh)), 0, 0, {} };
+			now[r.id] = r;
+			if (w.x1 <= w.x0 || w.y1 <= w.y0) continue;
+			if (auto it = last.find(r.id); it != last.end())
+			{
+				w.mx = px(r.l - it->second.l, WINDOWW, sw);
+				w.my = px(r.t - it->second.t, WINDOWH, sh);
+			}
+			walls.push_back(w);
+		}
+	last = std::move(now);
+	OverlayApplyWalls(sim, walls);
+}
+
+void OverlayMacMenu(int item)
+{
+	auto &gc = GameController::Ref();
+	if (item < int(OverlayInput::Count)) OverlaySetInput(OverlayInput(item));
+	if (item == 10) gc.SetPaused(!gc.GetPaused());
+	if (item == 11) gc.ClearSim();
+	if (item == 99)
+	{
+		SDL_Event quit{};
+		quit.type = SDL_QUIT;
+		SDL_PushEvent(&quit);
+	}
+}
+
+bool OverlayMacChecked(int item)
+{
+	return item < int(OverlayInput::Count) ? int(OverlayGetInput()) == item : item == 10 && GameController::Ref().GetPaused();
+}
+#else
 void OverlayWindows::Tick() {}
+#endif
 void OverlayWindows::TogglePalette() {}
 void OverlayWindows::SetPassThrough(bool) {}
 void OverlayWindows::Notify(const char *) {}

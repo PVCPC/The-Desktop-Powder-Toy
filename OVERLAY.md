@@ -5,7 +5,7 @@ The to-do list and ideas for the overlay live here. Keep it current.
 `powder.exe overlay:window` is TPT's normal window with the side windows and tray (Overlay tab -> Size -> Runs as
 switches between the two, restarting with the scene). `powder.exe` (or `overlay:on`) runs TPT as a borderless, always-on-top window over the desktop. Empty (black) pixels
 are see-through. TPT presents its own frame with per-pixel alpha (`UpdateLayeredWindow`, `src/Overlay.cpp`), so
-clicks on see-through pixels reach the desktop and windows behind. Windows only for now.
+clicks on see-through pixels reach the desktop and windows behind. Windows, and macOS since 0.2 (`src/OverlayMac.mm`: a clear NSWindow whose frame is a Core Animation layer, `ignoresMouseEvents` from the pixel under the mouse, window walls from `CGWindowListCopyWindowInfo`, a menu bar item for the tray; TPT's own menus instead of the side window). The wall physics shared by both is `src/OverlayWalls.cpp`.
 
 ## Input modes
 

@@ -379,7 +379,7 @@ int Main(int argc, char *argv[])
 
 	overlayWindowed = arguments["overlay"] == "window";
 	// The Desktop Powder Toy: on the desktop unless told otherwise (overlay:off is plain TPT)
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
 	overlayMode = overlayWindowed || !arguments["overlay"].has_value() || trueArg(arguments["overlay"]);
 #else
 	overlayMode = overlayWindowed || trueArg(arguments["overlay"]);
