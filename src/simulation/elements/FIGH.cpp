@@ -61,11 +61,26 @@ void Element::Element_FIGH()
 // back at a drop (now and then it jumps off anyway).
 static int PetComm(Simulation *sim, playerst *figh, int f)
 {
-	static int dir[MAX_FIGHTERS], left[MAX_FIGHTERS];
+	static int dir[MAX_FIGHTERS], left[MAX_FIGHTERS], flee[MAX_FIGHTERS];
 	if (--left[f] <= 0)
 	{
 		dir[f] = sim->rng.chance(1, 3) ? 0 : (sim->rng.chance(1, 2) ? 1 : 2);
 		left[f] = sim->rng.between(40, 240);
+	}
+	// fire, lava or anything hot nearby: run the other way, off ledges if need be
+	flee[f]--;
+	int cx = int(figh->legs[4] + figh->legs[12]) / 2, cy = int(figh->legs[5]) - 6;
+	for (int k = 0; k < 8; k++)
+	{
+		int sx = cx + sim->rng.between(-24, 24), sy = cy + sim->rng.between(-16, 10);
+		if (sx < 0 || sy < 0 || sx >= XRES || sy >= YRES) continue;
+		int r = sim->pmap[sy][sx] ? sim->pmap[sy][sx] : sim->photons[sy][sx];
+		if (r && TYP(r) != PT_FIGH && (TYP(r) == PT_FIRE || TYP(r) == PT_LAVA || TYP(r) == PT_PLSM || sim->parts[ID(r)].temp > 423.15f))
+		{
+			dir[f] = sx < cx ? 2 : 1;
+			left[f] = flee[f] = 60;
+			break;
+		}
 	}
 	if (!dir[f])
 	{
@@ -73,7 +88,7 @@ static int PetComm(Simulation *sim, playerst *figh, int f)
 	}
 	bool goLeft = dir[f] == 1;
 	int fx = goLeft ? int(figh->legs[4]) - 6 : int(figh->legs[12]) + 6, fy = int(goLeft ? figh->legs[5] : figh->legs[13]);
-	if (sim->eval_move(PT_FIGH, fx, fy + 6, nullptr) && sim->eval_move(PT_FIGH, fx, fy + 14, nullptr) && !sim->rng.chance(1, 30))
+	if (sim->eval_move(PT_FIGH, fx, fy + 6, nullptr) && sim->eval_move(PT_FIGH, fx, fy + 14, nullptr) && flee[f] <= 0 && !sim->rng.chance(1, 30))
 	{
 		dir[f] = goLeft ? 2 : 1;
 		return 0;
