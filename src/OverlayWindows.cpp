@@ -24,6 +24,10 @@
 #include "graphics/Renderer.h"
 #include "gui/game/RenderPreset.h"
 #include "gui/game/IntroText.h"
+#include "gui/dialogues/ErrorMessage.h"
+#include "client/Client.h"
+#include "simulation/SaveRenderer.h"
+#include "Config.h"
 #include "gui/interface/Engine.h"
 #include "graphics/Graphics.h"
 #include "gui/interface/Window.h"
@@ -1798,6 +1802,7 @@ namespace
 		// WM_KEYDOWN, WM_CHAR, WM_KILLFOCUS; true = handled. Only while a panel has taken the keyboard (see
 		// SideWindow::search).
 		virtual bool Key(UINT, WPARAM) { return false; }
+		virtual void Drop(const std::wstring &path) { (void)path; } // a file dropped on an app window
 
 		void Create(int x, int y, int w, int h)
 		{
@@ -1819,6 +1824,7 @@ namespace
 			hwnd = CreateWindowExW(ex, L"TPTOverlayPanel", title.empty() ? Platform::WinWiden(name).c_str() : title.c_str(), style, x, y, w, h,
 			                       owner, nullptr, GetModuleHandleW(nullptr), nullptr);
 			SetWindowLongPtrW(hwnd, GWLP_USERDATA, LONG_PTR(this));
+			if (appWindow) DragAcceptFiles(hwnd, TRUE);
 			BOOL noFade = TRUE;
 			DwmSetWindowAttribute(hwnd, DWMWA_TRANSITIONS_FORCEDISABLED, &noFade, sizeof(noFade));
 			// Creation measured the client area before Proc could say "no frame"; measure again, or the canvas
@@ -1999,6 +2005,14 @@ namespace
 				case WM_KILLFOCUS:
 					if (self->Key(msg, wp)) return 0;
 					break;
+				case WM_DROPFILES:
+				{
+					auto drop = HDROP(wp);
+					wchar_t path[MAX_PATH];
+					if (DragQueryFileW(drop, 0, path, MAX_PATH)) self->Drop(path); // ponytail: the first file only
+					DragFinish(drop);
+					return 0;
+				}
 				case WM_MOUSELEAVE:
 				case WM_LBUTTONDOWN:
 				case WM_LBUTTONUP:
@@ -2051,6 +2065,17 @@ namespace
 		bool closing = false; // closed: Tick drops it (not from inside its own click)
 		int titleH, border, tabH, navW, statusH, tileW, tileH, gap;
 		uint64_t shownState = 0;
+		// Saves tab: the saves and stamps on this computer, thumbnails rendered one per tick.
+		struct Local
+		{
+			ByteString path, stamp; // stamp: its ID, for a stamp
+			std::wstring name;
+			std::unique_ptr<VideoBuffer> thumb;
+			bool tried = false;
+		};
+		std::vector<Local> locals;
+		DWORD localsAt = 0; // when the folders were last listed
+		static constexpr int savesTab = 4;
 		std::wstring query; // Elements tab search: tools from every section whose name or description has it
 		bool typing = false; // the search box has the keyboard
 		static constexpr const wchar_t *tabNames[] = { L"Elements", L"Tools", L"Simulation", L"Display", L"Saves", L"Overlay", L"Welcome" };
@@ -2558,7 +2583,7 @@ namespace
 			}
 			else if (auto *file = model->GetSaveFile())
 			{
-				name = Platform::WinWiden(file->GetName());
+				name = file->GetDisplayName().size() ? Wide(file->GetDisplayName()) : Platform::WinWiden(file->GetName());
 				info = L"Saved on this computer";
 			}
 			text->Draw(cv, x + S(12), top, name, Text::Style{ 13, FW_SEMIBOLD, false, false, 0x1E395B });
@@ -2583,6 +2608,46 @@ namespace
 			y += S(133);
 			top = Group(x, y, w, S(52), L"TPT");
 			PushButton(x + S(12), top, bw, L"Options\u2026", [] { GameController::Ref().OpenOptions(); }, L"TPT's own settings window");
+			y += S(60);
+			// What's on this computer, with thumbnails: click opens (a stamp: place it), right-click for more.
+			int tw = S(124), th = S(78), cellH = th + S(22), pad = S(8);
+			int cols = std::max(1, (w - S(24) + pad) / (tw + pad));
+			for (int kind = 0; kind < 2; kind++)
+			{
+				std::vector<Local *> list;
+				for (auto &l : locals)
+					if (l.stamp.empty() == (kind == 0)) list.push_back(&l);
+				int rows = std::max(1, (int(list.size()) + cols - 1) / cols);
+				top = Group(x, y, w, S(66) + rows * (cellH + pad), kind ? L"Stamps" : L"Saves on this computer");
+				PushButton(x + S(12), top, bw, L"Show folder", [kind] {
+					auto dir = ByteString(kind ? STAMPS_DIR : LOCAL_SAVE_DIR);
+					Platform::MakeDirectory(dir);
+					ShellExecuteW(nullptr, L"open", FullPath(dir).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+				}, kind ? L"The stamps folder" : L"The saves folder; drop a .cps or .stm file on this window to open it");
+				top += S(31);
+				if (list.empty()) Caption(x + S(12), top, kind ? L"No stamps yet" : L"No saves yet", 0x6D6D6D);
+				for (int i = 0; i < int(list.size()); i++)
+				{
+					auto &l = *list[i];
+					int cx = x + S(12) + (i % cols) * (tw + pad), cy = top + (i / cols) * (cellH + pad);
+					RECT rc{ cx, cy, cx + tw, cy + cellH };
+					cv.RoundRect(cx, cy, tw, th, 0, 0x000000, 0x000000, 255); // TPT's black, behind a thumbnail that doesn't fill
+					if (l.thumb)
+					{
+						auto size = l.thumb->Size();
+						int ox = cx + (tw - size.X) / 2, oy = cy + (th - size.Y) / 2;
+						for (int py = 0; py < size.Y; py++)
+							for (int px = 0; px < size.X; px++) cv.Blend(ox + px, oy + py, l.thumb->Data()[py * size.X + px] & 0xFFFFFF, 255);
+					}
+					cv.RoundFrame(cx - 1, cy - 1, tw + 2, th + 2, 0, Hovered(rc) ? 0x3C7FB1 : 0xABADB3, 255);
+					auto ns = text->Measure(l.name);
+					text->Draw(cv, cx + std::max(0, (tw - int(ns.cx)) / 2), cy + th + S(3), l.name, theme->ink, false, tw);
+					Add(rc, [path = l.path, stamp = l.stamp] { OpenLocal(path, stamp); },
+					    l.name + (kind ? L": click to place it, right-click for more" : L": click to open, right-click for more"),
+					    [this, path = l.path, stamp = l.stamp, name = l.name] { later = [this, path, stamp, name] { LocalMenu(path, stamp, name); }; });
+				}
+				y += S(74) + rows * (cellH + pad);
+			}
 		}
 
 		// The start page, in place of TPT's text over the game at startup: the same help, laid out like a Vista
@@ -2912,6 +2977,128 @@ namespace
 		}
 
 		// A theme family's list as a menu under its button.
+		void ScanLocals()
+		{
+			std::vector<Local> found;
+			auto dir = ByteString::Build(LOCAL_SAVE_DIR, PATH_SEP_CHAR);
+			auto files = Platform::DirectorySearch(dir, "", { ".cps" });
+			std::sort(files.begin(), files.end(), [](const ByteString &a, const ByteString &b) { return a.ToLower() < b.ToLower(); });
+			for (auto &file : files)
+			{
+				auto name = file.SplitFromEndBy(PATH_SEP_CHAR).After().SplitFromEndBy('.').Before();
+				found.push_back({ dir + file, "", Wide(name.FromUtf8()) });
+			}
+			Client::Ref().RescanStamps();
+			for (auto &id : Client::Ref().GetStamps()) // newest first, as TPT lists them
+				found.push_back({ ByteString::Build(STAMPS_DIR, PATH_SEP_CHAR, id, ".stm"), id, Platform::WinWiden(id) });
+			for (auto &l : found)
+				for (auto &old : locals)
+					if (old.path == l.path) l.thumb = std::move(old.thumb), l.tried = old.tried;
+			if (found.size() != locals.size()) dirty = true;
+			locals = std::move(found);
+		}
+
+		void TickLocals()
+		{
+			if (tab != savesTab || !IsWindowVisible(hwnd)) return;
+			if (GetTickCount() - localsAt > 2000)
+			{
+				ScanLocals();
+				localsAt = GetTickCount();
+			}
+			for (auto &l : locals)
+			{
+				if (l.tried) continue;
+				// ponytail: rendered on TPT's thread, one per tick; a big save is a short hitch. TPT's own
+				// ThumbnailRendererTask threads it if that shows
+				l.tried = true;
+				SaveFile file(l.path, true);
+				if (auto *save = file.LazyGetGameSave())
+				{
+					RendererSettings settings;
+					l.thumb = SaveRenderer::Ref().Render(save, false, settings);
+					if (l.thumb) l.thumb->ResizeToFit({ S(124), S(78) }, true);
+				}
+				dirty = true;
+				break;
+			}
+		}
+
+		static void OpenLocal(const ByteString &path, const ByteString &stamp)
+		{
+			auto &gc = GameController::Ref();
+			if (stamp.size())
+			{
+				auto file = Client::Ref().GetStamp(stamp);
+				if (!file || !file->GetGameSave()) new ErrorMessage("Error loading stamp", file ? file->GetError() : String("Not found"));
+				else
+				{
+					Client::Ref().MoveStampToFront(stamp);
+					gc.LoadStamp(file->TakeGameSave());
+				}
+				return;
+			}
+			auto file = std::make_unique<SaveFile>(path, true);
+			if (!file->LazyGetGameSave())
+			{
+				new ErrorMessage("Error loading save", file->GetError());
+				return;
+			}
+			file->SetDisplayName(path.SplitFromEndBy(PATH_SEP_CHAR).After().SplitFromEndBy('.').Before().FromUtf8());
+			gc.HistorySnapshot();
+			gc.LoadSaveFile(std::move(file));
+		}
+
+		static std::wstring FullPath(const ByteString &path)
+		{
+			wchar_t full[MAX_PATH];
+			return GetFullPathNameW(Platform::WinWiden(path).c_str(), MAX_PATH, full, nullptr) ? full : Platform::WinWiden(path);
+		}
+
+		void LocalMenu(const ByteString &path, const ByteString &stamp, const std::wstring &name)
+		{
+			HMENU m = CreatePopupMenu();
+			AppendMenuW(m, MF_STRING | MF_DEFAULT, 1, stamp.size() ? L"Place" : L"Open");
+			AppendMenuW(m, MF_STRING, 2, L"Show in folder");
+			AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+			AppendMenuW(m, MF_STRING, 3, L"Delete\u2026");
+			POINT p;
+			GetCursorPos(&p);
+			int cmd = TrackPopupMenu(m, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON, p.x, p.y, 0, hwnd, nullptr);
+			DestroyMenu(m);
+			if (cmd == 1) OpenLocal(path, stamp);
+			if (cmd == 2) ShellExecuteW(nullptr, L"open", L"explorer.exe", (L"/select,\"" + FullPath(path) + L"\"").c_str(), nullptr, SW_SHOWNORMAL);
+			if (cmd == 3 && MessageBoxW(hwnd, (L"Delete " + name + L"? This can't be undone.").c_str(), L"The Powder Toy", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) == IDYES)
+			{
+				if (stamp.size()) Client::Ref().DeleteStamp(stamp);
+				else Platform::RemoveFile(path);
+				localsAt = 0; // list again now
+			}
+		}
+
+		// A .cps dropped on the window opens; a .stm is placed as a stamp.
+		void Drop(const std::wstring &path) override
+		{
+			auto p = Platform::WinNarrow(path);
+			auto ext = p.SplitFromEndBy('.').After().ToLower();
+			if (ext == "cps") OpenLocal(p, "");
+			else if (ext == "stm")
+			{
+				std::vector<char> data;
+				if (Platform::ReadFile(data, p))
+				{
+					try
+					{
+						GameController::Ref().LoadStamp(std::make_unique<GameSave>(std::move(data)));
+					}
+					catch (std::exception &e)
+					{
+						new ErrorMessage("Error loading stamp", ByteString(e.what()).FromUtf8());
+					}
+				}
+			}
+		}
+
 		void PickTheme(const std::vector<int> &ids, RECT rc)
 		{
 			HMENU m = CreatePopupMenu();
@@ -3055,6 +3242,7 @@ namespace
 		// Repaint when anything shown changes, from here, from TPT's keys, or from Lua.
 		void Tick()
 		{
+			TickLocals();
 			auto &gc = GameController::Ref();
 			auto *model = gc.GetModel();
 			auto *sim = model->GetSimulation();

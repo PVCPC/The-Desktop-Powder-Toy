@@ -111,6 +111,11 @@ overlay, and TPT only runs the top screen, so **the sim freezes while any dialog
    - [x] Element search (2026-10-30): a search box over the Elements tab's tiles. Clicking it gives the side window
      the keyboard; typing filters every section by name (prefix matches first) and description, Enter picks the
      first, Esc clears; both hand the keyboard back to TPT. Tested with posted keys.
+   - [x] Local saves and stamps (2026-10-30): the Saves tab lists Saves\*.cps and the stamps with thumbnails
+     (rendered one per tick, folders re-listed every 2 s). Click opens a save / places a stamp; right-click =
+     Open/Place, Show in folder, Delete (asks first); Show folder buttons; a .cps or .stm dropped on the window opens
+     or places it. Tested: thumbnails, click-to-open. Not tested (needs real input): the right-click menu, delete,
+     drag and drop. Stamps show their IDs (TPT's rename is a later add).
    - [x] Real Vista-style menus, drop-downs and dialogs (user request 2026-10-30): today the hosted ones are TPT's
      pixel UI inside a Vista frame. First: Settings, drop-down lists, context menus.
      - [x] Drop-down lists and context menus are real Windows menus (ui::Window::MenuItems; TrackPopupMenu on its
