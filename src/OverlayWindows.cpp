@@ -2369,8 +2369,8 @@ void OverlayWindows::Tick()
 	if (!areaRestored)
 	{
 		auto &prefs = GlobalPrefs::Ref();
-		SetPlayArea(prefs.Get("Overlay.PlayArea.X", 0), prefs.Get("Overlay.PlayArea.Y", 0),
-		            prefs.Get("Overlay.PlayArea.W", CELLS.X), prefs.Get("Overlay.PlayArea.H", CELLS.Y));
+		int w = prefs.Get("Overlay.PlayArea.W", 0), h = prefs.Get("Overlay.PlayArea.H", 0); // 0: the whole sim, whatever its size
+		SetPlayArea(prefs.Get("Overlay.PlayArea.X", 0), prefs.Get("Overlay.PlayArea.Y", 0), w > 0 ? w : CELLS.X, h > 0 ? h : CELLS.Y);
 		areaRestored = true;
 		GameController::Ref().GetView()->SkipIntroText(); // it's in the side window's Welcome tab
 	}
@@ -2721,8 +2721,9 @@ void OverlayWindows::SetPlayArea(int x, int y, int w, int h)
 	auto &prefs = GlobalPrefs::Ref();
 	prefs.Set("Overlay.PlayArea.X", area.pos.X);
 	prefs.Set("Overlay.PlayArea.Y", area.pos.Y);
-	prefs.Set("Overlay.PlayArea.W", area.size.X);
-	prefs.Set("Overlay.PlayArea.H", area.size.Y);
+	bool full = area == CELLS.OriginRect();
+	prefs.Set("Overlay.PlayArea.W", full ? 0 : area.size.X);
+	prefs.Set("Overlay.PlayArea.H", full ? 0 : area.size.Y);
 }
 
 #else
