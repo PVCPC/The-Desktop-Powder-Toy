@@ -505,10 +505,9 @@ float4 PartPs(V i) : SV_Target { return i.col; }
 		auto style = GetWindowLongPtrW(hwnd, GWL_STYLE);
 		if (desk && !GetParent(hwnd))
 		{
-			// its monitor's corner, where the overlay sits (at startup the window is still centred, not there yet)
-			MONITORINFO mi{ sizeof(mi) };
-			GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi);
-			screen = mi.rcMonitor;
+			// the corner of all the monitors, where the overlay sits (at startup the window is still centred, not there yet)
+			screen.left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+			screen.top = GetSystemMetrics(SM_YVIRTUALSCREEN);
 			SetWindowLongPtrW(hwnd, GWL_STYLE, (style | WS_CHILD) & ~LONG_PTR(WS_POPUP));
 			SetParent(hwnd, desk);
 			// Colour-keyed instead of per-pixel alpha (OverlayPresent); dropping WS_EX_LAYERED resets the mode
@@ -681,10 +680,22 @@ OverlayInput OverlayGetInput()
 #endif
 }
 
+int OverlayDefaultScale()
+{
+#ifdef _WIN32
+	HDC screen = GetDC(nullptr);
+	float dpiScale = GetDeviceCaps(screen, LOGPIXELSY) / 96.f;
+	ReleaseDC(nullptr, screen);
+	return std::max(1, int(std::lround(2 * std::max(dpiScale, GetSystemMetrics(SM_CYSCREEN) / 1080.f))));
+#else
+	return 1;
+#endif
+}
+
 std::pair<Vec2<int>, int> OverlaySimSize(int scale)
 {
 #ifdef _WIN32
-	Vec2<int> screen(GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
+	Vec2<int> screen(GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN)); // every monitor
 	for (scale = std::max(scale, 1); ; scale++)
 	{
 		bool menus = GlobalPrefs::Ref().Get("Overlay.ShowTPTMenus", false);

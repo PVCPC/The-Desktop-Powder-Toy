@@ -421,9 +421,14 @@ int Main(int argc, char *argv[])
 		}
 	}
 
+#ifdef _WIN32
+	if (overlayMode) // overlay:window too: the sim is screen-sized and the resizable window shows part of it
+#else
 	if (overlayMode && !overlayWindowed)
+#endif
 	{
 		// Before anything sized by the sim exists (save thumbnails, the drawing surface, the game).
+		if (!overlayWindowed && !prefs.BackedByFile() && !scaleArg.has_value()) windowFrameOps.scale = OverlayDefaultScale(); // first run, saved below
 		auto [cells, scale] = OverlaySimSize(windowFrameOps.scale);
 		SetSimSize(cells);
 		windowFrameOps.scale = scale;
@@ -487,7 +492,11 @@ int Main(int argc, char *argv[])
 
 	SDLOpen();
 
-	if (Client::Ref().IsFirstRun() && FORCE_WINDOW_FRAME_OPS == forceWindowFrameOpsNone)
+	if (Client::Ref().IsFirstRun() && overlayMode && !overlayWindowed)
+	{
+		prefs.Set("Scale", engine.windowFrameOps.scale);
+	}
+	else if (Client::Ref().IsFirstRun() && FORCE_WINDOW_FRAME_OPS == forceWindowFrameOpsNone)
 	{
 		auto guessed = GuessBestScale();
 		if (engine.windowFrameOps.scale != guessed)

@@ -3314,7 +3314,7 @@ namespace
 			mx += Toggle(mx, top + S(56), L"Desktop overlay", !overlayWindowed, true, [] { Restart(ui::Engine::Ref().windowFrameOps.scale, false); },
 			             L"Over the desktop (restarts TPT; the scene comes along)") + S(18);
 			Toggle(mx, top + S(56), L"Normal window", overlayWindowed, true, [] { Restart(ui::Engine::Ref().windowFrameOps.scale, true); },
-			       L"TPT's own window with these side windows (restarts TPT; the scene comes along, clipped to the smaller sim)");
+			       L"TPT's own window with these side windows; resize it for more or less room (restarts TPT; the scene comes along)");
 			// The sim's pixel size: a different sim size, so TPT restarts with the scene carried over.
 			Caption(x + S(12), top + S(28), L"Sim pixel size");
 			int sx = x + S(200);
@@ -4746,7 +4746,7 @@ void OverlayWindows::Tick()
 	{
 		auto &prefs = GlobalPrefs::Ref();
 		int w = prefs.Get("Overlay.PlayArea.W", 0), h = prefs.Get("Overlay.PlayArea.H", 0); // 0: the whole sim, whatever its size
-		SetPlayArea(prefs.Get("Overlay.PlayArea.X", 0), prefs.Get("Overlay.PlayArea.Y", 0), w > 0 ? w : CELLS.X, h > 0 ? h : CELLS.Y);
+		if (!overlayWindowed) SetPlayArea(prefs.Get("Overlay.PlayArea.X", 0), prefs.Get("Overlay.PlayArea.Y", 0), w > 0 ? w : CELLS.X, h > 0 ? h : CELLS.Y);
 		areaRestored = true;
 		if (GlobalPrefs::Ref().Get("Overlay.PendingScene", false))
 		{
@@ -5482,7 +5482,36 @@ static void TickWindowWalls()
 	}
 	bool doWindows = windowWalls && OverlayGetLayer() == OverlayLayer::OnTop;
 	bool doIcons = iconWalls && OverlayGetLayer() != OverlayLayer::BehindIcons;
-	if (overlayWindowed || (!doWindows && !doIcons) || sw <= 0 || sh <= 0)
+	// The overlay spans every monitor; where none is (beside a shorter one) is solid, so sand stops at its edge
+	static std::vector<RECT> gaps = [] {
+		std::vector<RECT> mons, out;
+		EnumDisplayMonitors(nullptr, nullptr, [](HMONITOR, HDC, LPRECT r, LPARAM lp) -> BOOL {
+			((std::vector<RECT> *)lp)->push_back(*r);
+			return TRUE;
+		}, LPARAM(&mons));
+		RECT v{ GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN) };
+		v.right = v.left + GetSystemMetrics(SM_CXVIRTUALSCREEN), v.bottom = v.top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
+		std::vector<long> ys{ v.top, v.bottom };
+		for (auto &m : mons) ys.push_back(m.top), ys.push_back(m.bottom);
+		std::sort(ys.begin(), ys.end());
+		for (size_t i = 0; i + 1 < ys.size(); i++)
+		{
+			if (ys[i] == ys[i + 1]) continue;
+			std::vector<std::pair<long, long>> spans; // monitors across this band
+			for (auto &m : mons)
+				if (m.top <= ys[i] && m.bottom >= ys[i + 1]) spans.push_back({ m.left, m.right });
+			std::sort(spans.begin(), spans.end());
+			long x = v.left;
+			for (auto [l, r] : spans)
+			{
+				if (l > x) out.push_back({ x, ys[i], l, ys[i + 1] });
+				x = std::max(x, r);
+			}
+			if (x < v.right) out.push_back({ x, ys[i], v.right, ys[i + 1] });
+		}
+		return out;
+	}();
+	if (overlayWindowed || (!doWindows && !doIcons && gaps.empty()) || sw <= 0 || sh <= 0)
 	{
 		sim->pixelWalls.clear();
 		wallRects.clear();
@@ -5522,6 +5551,13 @@ static void TickWindowWalls()
 		return TRUE;
 	}, LPARAM(&ctx));
 	wallRects = std::move(now);
+	for (auto &r : gaps)
+	{
+		auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); };
+		OverlayWall w{ std::max(0, px(r.left - sr.left, WINDOWW, sw)), std::max(0, px(r.top - sr.top, WINDOWH, sh)),
+		               std::min(XRES, px(r.right - sr.left, WINDOWW, sw)), std::min(YRES, px(r.bottom - sr.top, WINDOWH, sh)), 0, 0, {} };
+		if (w.x1 > w.x0 && w.y1 > w.y0) wins.push_back(w);
+	}
 	auto icons = doIcons ? DesktopIcons() : std::vector<DeskIcon>{};
 	static std::map<uintptr_t, RECT> iconRects; // where each icon was on the last tick
 	std::map<uintptr_t, RECT> iconsNow;
@@ -5628,7 +5664,7 @@ bool OverlayWindows::AreaMouse(int x, int y, int what)
 	static int drag = 0, shown = 0;
 	static Vec2<int> from{ 0, 0 };
 	static Rect<int> start = CELLS.OriginRect();
-	if (!&GameController::Ref() || !overlayMode) return false;
+	if (!&GameController::Ref() || !overlayMode || overlayWindowed) return false; // windowed: the window's edges are the area's
 	auto *sim = GameController::Ref().GetModel()->GetSimulation();
 	if (what == 1)
 	{
@@ -5661,6 +5697,17 @@ bool OverlayWindows::AreaMouse(int x, int y, int what)
 		shown = e;
 	}
 	return drag;
+}
+
+void OverlayWindows::SetWindowedView(int w, int h)
+{
+	if (!&GameController::Ref()) return;
+	auto *sim = GameController::Ref().GetModel()->GetSimulation();
+	// whole cells covering the view (a partial one would show a strip of wall)
+	sim->playArea = RectSized(Vec2(0, 0), Vec2(std::clamp((w + CELL - 1) / CELL, 1, XCELLS), std::clamp((h + CELL - 1) / CELL, 1, YCELLS)));
+	sim->ApplyPlayArea();
+	GlobalPrefs::Ref().Set("Overlay.WindowedView.W", w);
+	GlobalPrefs::Ref().Set("Overlay.WindowedView.H", h);
 }
 
 void OverlayWindows::SetPlayArea(int x, int y, int w, int h)
@@ -6012,6 +6059,7 @@ void OverlayWindows::FrameWalls(std::vector<uint8_t> &, uint8_t) {}
 std::vector<OverlayWindows::WindowShift> OverlayWindows::WindowShifts() { return {}; }
 void OverlayWindows::ClearUnderWindows(uint32_t *, int, int, int, int) {}
 void OverlayWindows::SetPlayArea(int, int, int, int) {}
+void OverlayWindows::SetWindowedView(int, int) {}
 bool OverlayWindows::AreaMouse(int, int, int) { return false; }
 int OverlayWindows::Form(const String &, const String &, const std::vector<String> &, int &, String &, const std::vector<String> &,
                          std::function<bool(int, const String &)>, int) { return -1; }

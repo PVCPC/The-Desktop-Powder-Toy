@@ -322,6 +322,13 @@ tray menu: the tray menu stays native on purpose.
   rest after, one at a time. Air passes split by rows. Sand rain ~190k grains: 30 -> 53 ticks/s; same results as the
   one-core order. Left single-core: render_parts (~5 ms, order-dependent effects) and RecalcFreeParticles (pmap order).
 
+- [x] Every monitor (2026-10-31): sim sized to the virtual screen, overlay at its corner; where no monitor is
+  (beside a shorter one) is a wall (gap rects, TickWindowWalls). Untested on a real second monitor.
+- [x] First-run sim pixel size: 2 x max(DPI scale, height/1080) (OverlayDefaultScale); TPT's own guess skipped.
+- [x] Resizable overlay:window (2026-10-31): the sim is screen-sized there too; the window shows its top-left corner
+  and the play area follows the window (blit, SetWindowedView; Overlay.WindowedView.W/H). Tested: 612x384, 494x287
+  and 161x120 views keep exactly the stone inside them. TPT's own bars aren't shown in that mode (side windows).
+
 ## Ideas
 
 - **Menu inspiration: Kingsway** (2017), whose whole UI is a fake retro desktop. Every TPT panel would be its own

@@ -49,7 +49,10 @@ What's new
 - **Smooth and low latency**: frames go to the GPU (Direct3D 11 + DirectComposition) and are drawn at the
   screen's refresh rate (120 Hz+) while the physics stays at 60. Moving grains are carried forward between
   physics steps, so there's no added frame of lag, and sand stays on a moving window.
-- `overlay:window` runs TPT in its normal window but with the new side windows and tray.
+- `overlay:window` runs TPT in its normal window but with the new side windows and tray. Resize the window for more
+  or less room (up to the size of the screen).
+- **Every monitor**: the overlay spans all your screens; sand stops at the edge of a shorter one. On a first run the
+  sim pixel size follows the screen and Windows' display scaling (2x on a 1080p screen at 100%, 3x at 150%).
 
 ![The side windows: Tools, Simulation, Display, Saves and the main window with its Welcome tab](https://raw.githubusercontent.com/PVCPC/The-Desktop-Powder-Toy/overlay/docs/overlay/desktop.png)
 

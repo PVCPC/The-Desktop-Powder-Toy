@@ -8,7 +8,15 @@
 #include "common/platform/Platform.h"
 #include "common/clipboard/Clipboard.h"
 #include "FrameSchedule.h"
+#include "OverlayWindows.h"
+#include "prefs/GlobalPrefs.h"
 #include <iostream>
+#include <algorithm>
+#ifdef _WIN32
+constexpr bool overlayResizable = true; // overlay:window's resizable sim view (blit)
+#else
+constexpr bool overlayResizable = false;
+#endif
 
 int desktopWidth = 1280;
 int desktopHeight = 1024;
@@ -110,6 +118,26 @@ void blit(pixel *vid)
 	if (overlayWindowed)
 	{
 		OverlayTickUI();
+#ifdef _WIN32
+		// The resizable window shows the screen-sized sim's top-left corner; resizing it gives more or less room.
+		static Vec2<int> view{ 0, 0 };
+		static SDL_Renderer *viewFor = nullptr; // a remade renderer needs its logical size again
+		int scale = std::max(currentFrameOps.scale, 1), ww, wh;
+		SDL_GetWindowSize(sdl_window, &ww, &wh);
+		Vec2<int> now(std::clamp(ww / scale, 1, XRES), std::clamp(wh / scale, 1, YRES));
+		if (now != view || viewFor != sdl_renderer)
+		{
+			view = now, viewFor = sdl_renderer;
+			OverlayWindows::SetWindowedView(view.X, view.Y);
+			SDL_RenderSetLogicalSize(sdl_renderer, view.X, view.Y);
+		}
+		SDL_UpdateTexture(sdl_texture, nullptr, vid, WINDOWW * sizeof (Uint32));
+		SDL_RenderClear(sdl_renderer);
+		SDL_Rect src{ 0, 0, view.X, view.Y };
+		SDL_RenderCopy(sdl_renderer, sdl_texture, &src, nullptr);
+		SDL_RenderPresent(sdl_renderer);
+		return;
+#endif
 	}
 	else if (overlayMode)
 	{
@@ -250,7 +278,7 @@ void SDLSetScreen()
 		{
 			flags = newFrameOpsNorm.changeResolution ? SDL_WINDOW_FULLSCREEN : SDL_WINDOW_FULLSCREEN_DESKTOP;
 		}
-		if (newFrameOpsNorm.resizable)
+		if (newFrameOpsNorm.resizable || (overlayWindowed && overlayResizable))
 		{
 			flags |= SDL_WINDOW_RESIZABLE;
 		}
@@ -304,16 +332,37 @@ void SDLSetScreen()
 		Clipboard::RecreateWindow();
 	}
 	SDL_RenderSetIntegerScale(sdl_renderer, newFrameOpsNorm.forceIntegerScaling ? SDL_TRUE : SDL_FALSE);
-	if (!(newFrameOpsNorm.resizable && SDL_GetWindowFlags(sdl_window) & SDL_WINDOW_MAXIMIZED))
+	if (overlayWindowed && overlayResizable)
+	{
+		// the view's size from last time (stock TPT's sim by default), at most the whole sim
+		auto &prefs = GlobalPrefs::Ref();
+		int s = newFrameOpsNorm.scale;
+		SDL_SetWindowMinimumSize(sdl_window, 64 * s, 64 * s);
+		SDL_SetWindowMaximumSize(sdl_window, XRES * s, YRES * s);
+		if (!(SDL_GetWindowFlags(sdl_window) & SDL_WINDOW_MAXIMIZED))
+		{
+			SDL_SetWindowSize(sdl_window, std::clamp(prefs.Get("Overlay.WindowedView.W", 612), 64, XRES) * s,
+			                  std::clamp(prefs.Get("Overlay.WindowedView.H", 384), 64, YRES) * s);
+			LoadWindowPosition();
+		}
+	}
+	else if (!(newFrameOpsNorm.resizable && SDL_GetWindowFlags(sdl_window) & SDL_WINDOW_MAXIMIZED))
 	{
 		SDL_SetWindowSize(sdl_window, size.X, size.Y);
 		LoadWindowPosition();
 		if (overlayMode && !overlayWindowed)
 		{
 			// The overlay starts at its monitor's corner (hidden menus hang off the right and bottom edges); a saved
-			// normal-window position would push it off screen.
+			// normal-window position would push it off screen. On Windows it spans every monitor (OverlaySimSize).
 			SDL_Rect display;
 			SDL_GetDisplayBounds(SDL_GetWindowDisplayIndex(sdl_window), &display);
+#ifdef _WIN32
+			for (int i = 0, n = SDL_GetNumVideoDisplays(); i < n; i++)
+			{
+				SDL_Rect d;
+				if (!SDL_GetDisplayBounds(i, &d)) SDL_UnionRect(&display, &d, &display);
+			}
+#endif
 			SDL_SetWindowPosition(sdl_window, display.x, display.y);
 		}
 	}

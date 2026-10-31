@@ -59,3 +59,5 @@ void OverlayFrameParts(const RenderableSimulation &sim, bool zoom);
 // The sim size (in cells) and pixel scale that fill the primary screen, starting from the given scale and raising it
 // until the sim fits pmap. Stock size off Windows.
 std::pair<Vec2<int>, int> OverlaySimSize(int scale);
+// The sim pixel size on a first run: chunkier on high-DPI and big screens (2 on a 1080p screen at 100%)
+int OverlayDefaultScale();
