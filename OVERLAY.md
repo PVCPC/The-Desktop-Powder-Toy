@@ -285,7 +285,7 @@ tray menu: the tray menu stays native on purpose.
 - [x] Hosted dialogs don't resize (by design: TPT lays its dialogs out at a fixed size)
 - [x] Render options (drawn in place) sits partly under the taskbar (its switches are native in the Display tab now)
 - [x] Tools tab sits after Welcome; it belongs next to Elements
-- [ ] Shortcut recording is untested with real key presses (tests can't press keys on this PC; needs the user to try)
+- [x] Shortcut recording and the hotkeys: CONFIRMED WORKING by the user (said so 4 times by 2026-10-31; never ask again)
 - [x] Changing the UI scale keeps the side window's pixel size (now scales with it)
 - [x] The Saves tab doesn't show the open save's name, votes or tags (now an Open save group)
 - [x] Remade windows leave a ghost of the old title (the old window was never destroyed; ~Panel destroys it now)
