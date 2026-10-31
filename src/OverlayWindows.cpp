@@ -65,6 +65,8 @@
 #include <commdlg.h>
 #pragma comment(lib, "comdlg32.lib")
 #include <shlobj.h>
+#include <commctrl.h>
+#include <commoncontrols.h>
 #include <exdisp.h>
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "oleaut32.lib")
@@ -4576,28 +4578,33 @@ static std::shared_ptr<const std::vector<uint8_t>> IconShape(IShellFolder *folde
 	if (auto it = cache.find(key); it != cache.end()) return item->Release(), it->second;
 	if (budget-- <= 0) return item->Release(), nullptr;
 	auto shape = std::make_shared<std::vector<uint8_t>>(size_t(size) * size, 1); // a square if the picture fails
-	IShellItemImageFactory *images = nullptr;
-	HBITMAP bmp = nullptr;
-	if (SUCCEEDED(item->QueryInterface(IID_PPV_ARGS(&images))) && SUCCEEDED(images->GetImage({ size, size }, SIIGBF_ICONONLY, &bmp)))
+	// The shell's own cached icon list, drawn at the desktop's size: ~1 ms an icon, where IShellItemImageFactory took ~30
+	// (a full desktop sat as squares for 15 s). The desktop is the namespace root, so the child ID is an absolute one.
+	SHFILEINFOW fi{};
+	IImageList *images = nullptr;
+	HICON icon = nullptr;
+	if (SHGetFileInfoW(LPCWSTR(child), 0, &fi, sizeof(fi), SHGFI_PIDL | SHGFI_SYSICONINDEX) &&
+	    SUCCEEDED(SHGetImageList(size > 48 ? SHIL_JUMBO : size > 32 ? SHIL_EXTRALARGE : SHIL_LARGE, IID_PPV_ARGS(&images))) &&
+	    SUCCEEDED(images->GetIcon(fi.iIcon, ILD_TRANSPARENT, &icon)))
 	{
-		BITMAP bm{};
-		GetObjectW(bmp, sizeof(bm), &bm);
 		BITMAPINFO bi{};
-		bi.bmiHeader = { sizeof(bi.bmiHeader), bm.bmWidth, -bm.bmHeight, 1, 32, BI_RGB };
-		std::vector<uint32_t> px(size_t(bm.bmWidth) * bm.bmHeight);
-		HDC dc = GetDC(nullptr);
-		if (bm.bmBitsPixel == 32 && GetDIBits(dc, bmp, 0, bm.bmHeight, px.data(), &bi, DIB_RGB_COLORS))
+		bi.bmiHeader = { sizeof(bi.bmiHeader), size, -size, 1, 32, BI_RGB };
+		uint32_t *px = nullptr;
+		HDC dc = CreateCompatibleDC(nullptr);
+		if (HBITMAP bmp = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, (void **)&px, nullptr, 0))
 		{
-			// centred in the icon's box, as Explorer draws a smaller picture
-			int ox = (size - bm.bmWidth) / 2, oy = (size - bm.bmHeight) / 2;
-			std::fill(shape->begin(), shape->end(), 0);
-			for (int y = 0; y < bm.bmHeight; y++)
-				for (int x = 0; x < bm.bmWidth; x++)
-					if (px[size_t(y) * bm.bmWidth + x] >> 24 >= 128 && x + ox >= 0 && x + ox < size && y + oy >= 0 && y + oy < size)
-						(*shape)[size_t(y + oy) * size + x + ox] = 1;
+			auto old = SelectObject(dc, bmp);
+			std::fill(px, px + size * size, 0u);
+			DrawIconEx(dc, 0, 0, icon, size, size, 0, nullptr, DI_NORMAL);
+			GdiFlush();
+			bool alpha = std::any_of(px, px + size * size, [](uint32_t c) { return c >> 24; });
+			for (int i = 0; i < size * size; i++) // old icons without alpha: whatever the mask let through
+				(*shape)[i] = alpha ? px[i] >> 24 >= 128 : (px[i] & 0xFFFFFF) != 0;
+			SelectObject(dc, old);
+			DeleteObject(bmp);
 		}
-		ReleaseDC(nullptr, dc);
-		DeleteObject(bmp);
+		DeleteDC(dc);
+		DestroyIcon(icon);
 	}
 	if (images) images->Release();
 	item->Release();
@@ -4642,11 +4649,12 @@ static std::vector<DeskIcon> ReadDesktopIcons(IFolderView2 *&view, HWND &list)
 		view->Release(), view = nullptr; // Explorer restarted: find it again
 		return icons;
 	}
-	// ponytail: the icon is assumed centred at the top of its spacing cell (no per-item rect from IFolderView)
+	// ponytail: the icon rect is a guess from its position (no per-item rect from IFolderView); ~15 ms a new shape, so a
+	// full desktop (443 items here) takes ~7 s to get them all
 	if (IsWindowVisible(list))
 	{
 		PITEMID_CHILD item;
-		int budget = 16;
+		int budget = 64;
 		while (items->Next(1, &item, nullptr) == S_OK)
 		{
 			POINT p;
