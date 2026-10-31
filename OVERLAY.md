@@ -189,9 +189,9 @@ Assessment, in the order I'd do it (effort: S = an hour or two, M = a session, L
    - [ ] **Look as two dropdowns** (user request 2026-10-30): a Windows dropdown (every Windows version above) and a
      macOS dropdown, instead of one radio list.
    - [ ] **The 8 eras of Mac UI** (user request 2026-10-30), each its own entry in the macOS dropdown: System 1-6
-     (1-bit), System 7 (colour), Mac OS 8-9 Platinum, Mac OS X Aqua (10.0-10.2), Brushed metal / Aqua (10.3-10.4),
-     Leopard-Mavericks unified grey (10.5-10.9), Yosemite-Mojave flat (10.10-10.15), Big Sur and later (11+). The
-     current Classic Mac = Platinum and macOS = Big Sur+.
+     (1-bit), System 7 (colour), Mac OS 8-9 Platinum, Mac OS X 10.0-10.6 (Aqua), 10.7-10.9 (Lion-Mavericks grey),
+     10.10-10.15 (Yosemite-Catalina flat), 11-15 (Big Sur-Sequoia), 26 (Liquid Glass). Eras 4-8 as the user
+     defined them. The current Classic Mac = Platinum (era 3) and macOS = 11-15 (era 7).
 7. [x] Black particles inside the zoom window (S); menus fade when unused (S). Done 2026-10-30: the zoom box is opaque
    (a magnifier); TPT's own menus, when shown, fade out after 3 s without the mouse over them.
 8. [-] Other platforms: X11 / Wayland input regions, macOS (L; only if someone needs them). Deferred by the
