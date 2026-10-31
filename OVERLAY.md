@@ -150,7 +150,8 @@ Assessment, in the order I'd do it (effort: S = an hour or two, M = a session, L
    - [x] Overlay settings: input mode, TPT's menus, shortcut list
    - [x] Hotkey recording and UI scale in the Overlay tab
    - [ ] Tear tabs off into their own windows; dock the window to a screen edge
-   - [ ] Play area: drag its edges on the desktop instead of +/- buttons (loop wrap: done, see below)
+   - [x] Play area: drag its edges or corners on the desktop (2026-10-30; resize cursor, snaps to cells, min 8;
+     logic tested with a hook, real-mouse drag for the user to try). Loop wrap: done, see below.
    - [x] Bottom button row hidden with the rest (2026-10-30); its save name, vote and tags have no side-window
      home yet; the Saves tab's Online group has browse, upload, vote, tags and sign in
    - [x] Welcome tab (2026-10-30): TPT's startup text, rewritten as a Vista start page (headers, keycaps, tip

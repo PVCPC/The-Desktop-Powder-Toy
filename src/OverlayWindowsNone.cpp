@@ -10,3 +10,4 @@ bool OverlayWindows::HideTPTMenus() { return false; }
 void OverlayWindows::ApplySimMasks(uint32_t *, int) {}
 void OverlayWindows::ClearUnderWindows(uint32_t *, int, int, int, int) {}
 void OverlayWindows::SetPlayArea(int, int, int, int) {}
+bool OverlayWindows::AreaMouse(int, int, int) { return false; }

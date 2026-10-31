@@ -1,5 +1,6 @@
 #include "GameView.h"
 #include "Overlay.h"
+#include "OverlayWindows.h"
 
 #include "Brush.h"
 #include "tool/DecorationTool.h"
@@ -1105,6 +1106,10 @@ void GameView::updateToolButtonScroll()
 
 void GameView::OnMouseMove(int x, int y, int dx, int dy)
 {
+	if (overlayMode && OverlayWindows::AreaMouse(x, y, 0))
+	{
+		return; // dragging a play-area edge
+	}
 	bool newMouseInZoom = c->MouseInZoom(ui::Point(x, y));
 	mousePosition = c->PointTranslate(ui::Point(x, y));
 	currentMouse = ui::Point(x, y);
@@ -1153,6 +1158,10 @@ void GameView::OnMouseMove(int x, int y, int dx, int dy)
 
 void GameView::OnMouseDown(int x, int y, unsigned button)
 {
+	if (overlayMode && button == SDL_BUTTON_LEFT && OverlayWindows::AreaMouse(x, y, 1))
+	{
+		return;
+	}
 	currentMouse = ui::Point(x, y);
 	if (altBehaviour && !shiftBehaviour && !ctrlBehaviour)
 		button = SDL_BUTTON_MIDDLE;
@@ -1220,6 +1229,10 @@ Vec2<int> GameView::PlaceSavePos() const
 
 void GameView::OnMouseUp(int x, int y, unsigned button)
 {
+	if (overlayMode && OverlayWindows::AreaMouse(x, y, 2))
+	{
+		return;
+	}
 	currentMouse = ui::Point(x, y);
 	if (zoomEnabled && !zoomCursorFixed)
 	{

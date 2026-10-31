@@ -40,6 +40,7 @@
 #include <tuple>
 #include <cmath>
 #include <functional>
+#include <SDL.h>
 #include <map>
 #include <memory>
 #include <vector>
@@ -2464,11 +2465,16 @@ void OverlayWindows::ApplySimMasks(uint32_t *argb, int w)
 	{
 		// A faint frame just outside the area, so you can see where it ends.
 		auto br = area.BottomRight();
-		auto mark = [&](int x, int y) {
-			if (x >= 0 && y >= 0 && x < XRES && y < YRES) argb[y * w + x] = 0x785080C0;
+		// Around it, a band you can't see but can grab to drag the edges (alpha 0 lets clicks through).
+		auto mark = [&](int x, int y, uint32_t c) {
+			if (x >= 0 && y >= 0 && x < XRES && y < YRES) argb[y * w + x] = c;
 		};
-		for (int x = area.pos.X - 1; x <= br.X + 1; x++) mark(x, area.pos.Y - 1), mark(x, br.Y + 1);
-		for (int y = area.pos.Y; y <= br.Y; y++) mark(area.pos.X - 1, y), mark(br.X + 1, y);
+		for (int d = 4; d >= 1; d--)
+		{
+			uint32_t c = d == 1 ? 0x785080C0 : 0x01000000;
+			for (int x = area.pos.X - d; x <= br.X + d; x++) mark(x, area.pos.Y - d, c), mark(x, br.Y + d, c);
+			for (int y = area.pos.Y - d + 1; y < br.Y + d; y++) mark(area.pos.X - d, y, c), mark(br.X + d, y, c);
+		}
 	}
 }
 
@@ -2561,6 +2567,55 @@ void OverlayWindows::ClearUnderWindows(uint32_t *argb, int w, int h, int ww, int
 	}
 }
 
+// Which play-area edges are under the mouse: 1 left, 2 right, 4 top, 8 bottom (4 px outside to 1 inside).
+static int AreaEdges(Simulation *sim, int x, int y)
+{
+	auto a = sim->PlayRect();
+	auto br = a.BottomRight();
+	if (x < a.pos.X - 4 || x > br.X + 4 || y < a.pos.Y - 4 || y > br.Y + 4) return 0;
+	return (x <= a.pos.X + 1 ? 1 : x >= br.X - 1 ? 2 : 0) | (y <= a.pos.Y + 1 ? 4 : y >= br.Y - 1 ? 8 : 0);
+}
+
+bool OverlayWindows::AreaMouse(int x, int y, int what)
+{
+	static int drag = 0, shown = 0;
+	static Vec2<int> from{ 0, 0 };
+	static Rect<int> start = CELLS.OriginRect();
+	if (!&GameController::Ref() || !overlayMode) return false;
+	auto *sim = GameController::Ref().GetModel()->GetSimulation();
+	if (what == 1)
+	{
+		drag = AreaEdges(sim, x, y);
+		from = { x, y };
+		start = sim->playArea;
+	}
+	else if (what == 2)
+	{
+		bool was = drag;
+		drag = 0;
+		return was;
+	}
+	else if (drag)
+	{
+		int dx = int(std::lround(double(x - from.X) / CELL)), dy = int(std::lround(double(y - from.Y) / CELL));
+		int l = start.pos.X, t = start.pos.Y, r = l + start.size.X, b = t + start.size.Y;
+		if (drag & 1) l = std::clamp(l + dx, 0, r - 8);
+		if (drag & 2) r = std::clamp(r + dx, l + 8, XCELLS);
+		if (drag & 4) t = std::clamp(t + dy, 0, b - 8);
+		if (drag & 8) b = std::clamp(b + dy, t + 8, YCELLS);
+		if (RectSized(Vec2(l, t), Vec2(r - l, b - t)) != sim->playArea) SetPlayArea(l, t, r - l, b - t);
+	}
+	int e = drag ? drag : AreaEdges(sim, x, y);
+	if (e != shown)
+	{
+		static SDL_Cursor *we = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZEWE), *ns = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENS),
+		                  *nwse = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENWSE), *nesw = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENESW);
+		SDL_SetCursor(!e ? SDL_GetDefaultCursor() : e == 5 || e == 10 ? nwse : e == 6 || e == 9 ? nesw : e & 3 ? we : ns);
+		shown = e;
+	}
+	return drag;
+}
+
 void OverlayWindows::SetPlayArea(int x, int y, int w, int h)
 {
 	if (!&GameController::Ref())
@@ -2590,4 +2645,5 @@ bool OverlayWindows::HideTPTMenus() { return false; }
 void OverlayWindows::ApplySimMasks(uint32_t *, int) {}
 void OverlayWindows::ClearUnderWindows(uint32_t *, int, int, int, int) {}
 void OverlayWindows::SetPlayArea(int, int, int, int) {}
+bool OverlayWindows::AreaMouse(int, int, int) { return false; }
 #endif

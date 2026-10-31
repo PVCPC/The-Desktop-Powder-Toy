@@ -18,5 +18,8 @@ namespace OverlayWindows
 	void ClearUnderWindows(uint32_t *argb, int w, int h, int ww, int wh);
 	// The playable area in cells, saved in prefs (Overlay.PlayArea.*).
 	void SetPlayArea(int x, int y, int w, int h);
+	// Dragging the play area's edges with the mouse (sim pixels). what: 0 move, 1 left button down, 2 up.
+	// True if the mouse is busy with an edge, so TPT shouldn't draw.
+	bool AreaMouse(int x, int y, int what);
 	bool RecordingKey(); // the Overlay tab is waiting for a new shortcut: global hotkeys are off
 }
