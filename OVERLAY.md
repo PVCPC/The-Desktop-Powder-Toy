@@ -21,7 +21,9 @@ The hotkeys are global (polled each frame, so they work while TPT is unfocused) 
 current mode is saved as `Overlay.Input`. A fading glass notice shows the new mode. Ctrl+Alt+C
 (`Overlay.Keys.Clear`) clears the sim.
 
-Desktop physics (OverlayWalls.cpp, shared by every platform): sand on a window rides along when it moves and is
+Desktop physics (OverlayWalls.cpp, shared by every platform): sand on a window rides along when it moves, layer by
+layer (the bottom grips, each layer above may slip, more on jolts; solids rigid, liquids slosh, a window going down
+pulls nothing down), and is
 flung off when it stops short or turns back (window speed averaged over ticks, since positions don't arrive in step
 with them); a moving window shoves what it moves onto; what touches a window marks it (`Simulation::windowMarks`): 300 C and up scorches, -20 C and
 below frosts (melts), acid pits, water streaks (dries); scorch and pits stay until the sim is cleared; the mouse stirs the air where the overlay lets clicks through. The
@@ -315,6 +317,10 @@ tray menu: the tray menu stays native on purpose.
   single-threaded, left alone), its renderer ~2.7 ms; the overlay's per-frame work went 6.4 -> 3.3 ms (frame mask pass
   row spans instead of per-pixel rect tests 2.1 -> 0.5; window scan does cheap checks before DWM calls; windows that
   didn't move or resize skip the push scan 0.7 -> 0.2). Lots of sand still fills a core: that is TPT's sim.
+- [x] Multi-core sim (2026-10-31): plain particles (no update function or ChangeType, not energy, slow) update in 32 px
+  blocks, nine passes 64 px apart, per-block RNGs (`SimRNG`), create/kill/change-type locked (`parallelLock`); the
+  rest after, one at a time. Air passes split by rows. Sand rain ~190k grains: 30 -> 53 ticks/s; same results as the
+  one-core order. Left single-core: render_parts (~5 ms, order-dependent effects) and RecalcFreeParticles (pmap order).
 
 ## Ideas
 

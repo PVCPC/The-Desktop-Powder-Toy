@@ -29,7 +29,8 @@ What's new
 - **Input modes** for where clicks go: Auto (TPT while it's in front, the desktop otherwise), Pass-through and
   Locked, with global hotkeys (Ctrl+Alt+O / P / L, customisable). Full-screen apps and games are detected and the
   overlay steps aside. Ctrl+Alt+C clears the screen.
-- **Windows you can throw sand with**: sand rides a window you drag and flies off when you stop or shake it;
+- **Windows you can throw sand with**: sand rides a window you drag and flies off when you stop or shake it; a tall
+  pile shears (the bottom grips the window, the layers above slip and slide off) and liquids slosh;
   fire and lava scorch windows, ice frosts them, acid pits them and water streaks them; desktop icons carry their
   pile when you drop them; your mouse blows sand like a breeze. Sliders in the Simulation tab tune all of it.
 - **Destructible windows** (a switch, off by default): acid eats holes in windows and icons, explosions blow chunks
@@ -38,6 +39,8 @@ What's new
   is broken: clearing the sim mends everything.
 - **Your sand stays**: the scene is saved when you quit and comes back next time.
 - **Light on the CPU**: when nothing moves it drops to a few frames a second (about a quarter of one core).
+- **Uses every core**: plain particles (sand, water and the like) and the air update run across all CPU cores, so
+  big piles stay smooth (about 53 ticks a second with 190k falling grains, from 30).
 - **Desktop-style menus**: TPT's side bar and tool strip move into real Windows windows (Elements, Simulation,
   Display, Saves, Overlay tabs) that can be dragged, docked, torn into separate windows and hidden to the tray
   icon. Dragging one doesn't freeze the simulation.
