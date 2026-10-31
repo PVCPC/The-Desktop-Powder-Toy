@@ -378,7 +378,12 @@ int Main(int argc, char *argv[])
 	};
 
 	overlayWindowed = arguments["overlay"] == "window";
+	// The Desktop Powder Toy: on the desktop unless told otherwise (overlay:off is plain TPT)
+#ifdef _WIN32
+	overlayMode = overlayWindowed || !arguments["overlay"].has_value() || trueArg(arguments["overlay"]);
+#else
 	overlayMode = overlayWindowed || trueArg(arguments["overlay"]);
+#endif
 	auto kioskArg = arguments["kiosk"];
 	if (kioskArg.has_value())
 	{
@@ -488,7 +493,7 @@ int Main(int argc, char *argv[])
 		{
 			engine.windowFrameOps.scale = guessed;
 			prefs.Set("Scale", guessed);
-			showLargeScreenDialog = true;
+			showLargeScreenDialog = !overlayMode; // on the desktop the scale is the sim pixel size, not a window size
 		}
 	}
 
