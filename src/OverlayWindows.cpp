@@ -38,6 +38,7 @@
 #include <algorithm>
 #include <atomic>
 #include <thread>
+#include <mutex>
 #include <tuple>
 #include <cmath>
 #include <functional>
@@ -51,6 +52,10 @@
 #include <shellapi.h>
 #include <dwmapi.h>
 #pragma comment(lib, "dwmapi.lib")
+#include <d3d11.h>
+#include <dxgi1_2.h>
+#pragma comment(lib, "d3d11.lib")
+#pragma comment(lib, "dxgi.lib")
 #undef small       // rpcndr.h, via dwmapi.h
 #undef GetUserName // SaveInfo::GetUserName
 
@@ -60,6 +65,7 @@ namespace
 	bool windowWalls = true;            // open windows are walls to particles (Overlay.WindowWalls)
 	std::vector<uint8_t> ourWalls;      // XCELLS x YCELLS: 1 where a window put a wall (not the user)
 	std::string recording;        // Overlay.Keys.<name> being recorded in the Overlay tab, or empty
+	std::function<void()> later; // run on the next tick, outside any window's message handling
 	bool rebuildPalette = false;  // the UI scale changed: remake the side window (not from inside its own click)
 	int reopenTab = -1;
 	int S(float v)
@@ -310,6 +316,168 @@ namespace
 		if (plus) cv.RoundRect(cx - thick / 2, cy - k, thick, 2 * k + 1, 0, c, c, 255);
 	}
 
+	// The desktop as the GPU composes it (DXGI desktop duplication, what screen recorders use), minus windows kept out
+	// of captures. Grab copies one screen rectangle out at half size; the last frame is kept for when nothing has
+	// changed.
+	struct DesktopGrab
+	{
+		ID3D11Device *dev = nullptr;
+		ID3D11DeviceContext *ctx = nullptr;
+		IDXGIOutputDuplication *dup = nullptr;
+		// The whole screen, and two read-back copies of the grabbed rectangle: each grab reads the one copied a refresh
+		// ago (done by then, so no waiting on the GPU) while the GPU fills the other.
+		ID3D11Texture2D *frame = nullptr, *staging[2] = {};
+		ID3D11Texture2D *mip = nullptr; // the rectangle at full and half size: GenerateMips does the halving
+		ID3D11ShaderResourceView *mipView = nullptr;
+		ID3D11RenderTargetView *mipTarget = nullptr; // to clear the part that's off this screen
+		POINT stagedAt[2] = {}; // the screen position each copy is of
+		bool staged[2] = {};
+		int cur = 0;
+		RECT desk{};
+		int sw = 0, sh = 0;
+		bool have = false;
+
+		~DesktopGrab()
+		{
+			Release();
+		}
+
+		void Release()
+		{
+			for (IUnknown *p : std::initializer_list<IUnknown *>{ mipTarget, mipView, mip, staging[0], staging[1], frame, dup, ctx, dev })
+				if (p) p->Release();
+			mipTarget = nullptr, mipView = nullptr, mip = nullptr;
+			staging[0] = staging[1] = nullptr, frame = nullptr, dup = nullptr, ctx = nullptr, dev = nullptr;
+			staged[0] = staged[1] = have = false;
+		}
+
+		bool Open(POINT at)
+		{
+			IDXGIFactory1 *factory;
+			if (FAILED(CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void **)&factory))) return false;
+			IDXGIAdapter1 *adapter;
+			bool ok = false;
+			for (UINT i = 0; !ok && factory->EnumAdapters1(i, &adapter) == S_OK; i++)
+			{
+				IDXGIOutput *output;
+				for (UINT j = 0; !ok && adapter->EnumOutputs(j, &output) == S_OK; j++)
+				{
+					DXGI_OUTPUT_DESC d;
+					output->GetDesc(&d);
+					IDXGIOutput1 *output1;
+					if (PtInRect(&d.DesktopCoordinates, at) && SUCCEEDED(output->QueryInterface(__uuidof(IDXGIOutput1), (void **)&output1)))
+					{
+						if (SUCCEEDED(D3D11CreateDevice(adapter, D3D_DRIVER_TYPE_UNKNOWN, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &dev, nullptr, &ctx)))
+							ok = SUCCEEDED(output1->DuplicateOutput(dev, &dup));
+						desk = d.DesktopCoordinates;
+						output1->Release();
+					}
+					output->Release();
+				}
+				adapter->Release();
+			}
+			factory->Release();
+			if (!ok) Release();
+			return ok;
+		}
+
+		// The screen rectangle at (x, y), bw x bh, into dst at half size (off this screen: black). False: no
+		// duplication here.
+		bool Grab(int x, int y, int bw, int bh, uint32_t *dst)
+		{
+			POINT c{ x + bw / 2, y + bh / 2 };
+			if (dup && !PtInRect(&desk, c)) Release(); // moved to another screen
+			if (!dup && !Open(c)) return false;
+			DXGI_OUTDUPL_FRAME_INFO info;
+			IDXGIResource *res = nullptr;
+			HRESULT hr = dup->AcquireNextFrame(0, &info, &res);
+			if (hr == DXGI_ERROR_ACCESS_LOST)
+			{
+				Release(); // mode change, secure desktop...: reopened next time
+				return false;
+			}
+			if (SUCCEEDED(hr))
+			{
+				ID3D11Texture2D *tex;
+				if (info.LastPresentTime.QuadPart && SUCCEEDED(res->QueryInterface(__uuidof(ID3D11Texture2D), (void **)&tex)))
+				{
+					if (!frame)
+					{
+						D3D11_TEXTURE2D_DESC td;
+						tex->GetDesc(&td);
+						td.Usage = D3D11_USAGE_DEFAULT, td.BindFlags = 0, td.CPUAccessFlags = 0, td.MiscFlags = 0;
+						dev->CreateTexture2D(&td, nullptr, &frame);
+						sw = int(td.Width), sh = int(td.Height);
+					}
+					if (frame) ctx->CopyResource(frame, tex), have = true;
+					tex->Release();
+				}
+				res->Release();
+				dup->ReleaseFrame();
+			}
+			if (!have) return false;
+			int hw = bw / 2, hh = bh / 2;
+			D3D11_TEXTURE2D_DESC md;
+			if (mip && (mip->GetDesc(&md), int(md.Width) != bw || int(md.Height) != bh))
+			{
+				mipTarget->Release(), mipView->Release(), mip->Release();
+				mipTarget = nullptr, mipView = nullptr, mip = nullptr;
+			}
+			if (!mip)
+			{
+				D3D11_TEXTURE2D_DESC td{};
+				td.Width = UINT(bw), td.Height = UINT(bh), td.MipLevels = 2, td.ArraySize = 1, td.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+				td.SampleDesc.Count = 1, td.Usage = D3D11_USAGE_DEFAULT, td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+				td.MiscFlags = D3D11_RESOURCE_MISC_GENERATE_MIPS;
+				if (FAILED(dev->CreateTexture2D(&td, nullptr, &mip))) return false;
+				dev->CreateShaderResourceView(mip, nullptr, &mipView);
+				D3D11_RENDER_TARGET_VIEW_DESC rd{ td.Format, D3D11_RTV_DIMENSION_TEXTURE2D };
+				dev->CreateRenderTargetView(mip, &rd, &mipTarget);
+				if (!mipView || !mipTarget) return false;
+			}
+			for (auto &s : staging)
+			{
+				D3D11_TEXTURE2D_DESC sd;
+				if (s && (s->GetDesc(&sd), int(sd.Width) != hw || int(sd.Height) != hh)) s->Release(), s = nullptr, staged[0] = staged[1] = false;
+				if (s) continue;
+				D3D11_TEXTURE2D_DESC td{};
+				td.Width = UINT(hw), td.Height = UINT(hh), td.MipLevels = 1, td.ArraySize = 1, td.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+				td.SampleDesc.Count = 1, td.Usage = D3D11_USAGE_STAGING, td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+				if (FAILED(dev->CreateTexture2D(&td, nullptr, &s))) return false;
+			}
+			// copy this rectangle (the part on this screen) in, halve it, and into one read-back copy...
+			int sx = x - desk.left, sy = y - desk.top;
+			int l = std::max(0, sx), t = std::max(0, sy), r = std::clamp(sx + bw, 0, sw), b = std::clamp(sy + bh, 0, sh);
+			if (l != sx || t != sy || r != sx + bw || b != sy + bh)
+			{
+				const float black[4] = {};
+				ctx->ClearRenderTargetView(mipTarget, black);
+			}
+			if (r > l && b > t)
+			{
+				D3D11_BOX box{ UINT(l), UINT(t), 0, UINT(r), UINT(b), 1 };
+				ctx->CopySubresourceRegion(mip, 0, UINT(l - sx), UINT(t - sy), 0, frame, 0, &box);
+			}
+			ctx->GenerateMips(mipView);
+			ctx->CopySubresourceRegion(staging[cur], 0, 0, 0, 0, mip, 1, nullptr);
+			stagedAt[cur] = { x, y };
+			staged[cur] = true;
+			// ...and read the other, shifted by how far the window has moved since (the first time: this one)
+			int read = staged[cur ^ 1] ? cur ^ 1 : cur;
+			cur ^= 1;
+			D3D11_MAPPED_SUBRESOURCE m;
+			if (FAILED(ctx->Map(staging[read], 0, D3D11_MAP_READ, 0, &m))) return false;
+			int dx = (x - stagedAt[read].x) / 2, dy = (y - stagedAt[read].y) / 2; // dst (i, j) is the copy's (i + dx, j + dy)
+			int i0 = std::max(0, -dx), i1 = std::min(hw, hw - dx);
+			std::fill(dst, dst + size_t(hw) * hh, 0);
+			if (i1 > i0)
+				for (int j = std::max(0, -dy); j < std::min(hh, hh - dy); j++)
+					memcpy(dst + size_t(j) * hw + i0, (uint8_t *)m.pData + size_t(j + dy) * m.RowPitch + size_t(i0 + dx) * 4, size_t(i1 - i0) * 4);
+			ctx->Unmap(staging[read], 0);
+			return true;
+		}
+	};
+
 	// An OS look (pref Overlay.Theme). The theme draws the frame, caption buttons, push buttons and popups; tabs,
 	// list items, check boxes, group boxes and the status bar are drawn here in its colours. Sizes are unscaled.
 	struct Theme
@@ -333,6 +501,26 @@ namespace
 		virtual void Frame(Canvas &cv, int titleH, int border, const std::wstring &title) = 0;
 		virtual void CaptionButton(Canvas &cv, RECT rc, bool hover, CaptionKind kind) = 0;
 		virtual void Button(Canvas &cv, int x, int y, int w, int h, int state) = 0; // 0 normal, 1 hover, 2 pressed/selected
+		int stripAlpha = 255; // the tab strip's background (0: the frame shows through)
+		// Live glass (see Glass): the window is kept out of screen captures. A paint records the glass shapes it wants
+		// and Bake turns them into per-pixel samples; every display refresh Prepare grabs what's behind the window and
+		// Underlay puts the glass under the cached UI.
+		struct Shape { int x, y, w, h, r; float frost; uint32_t tint; float lens; };
+		struct Baked { uint32_t idx, src[3], tint; uint8_t cover, frost, dark, white; }; // src: backdrop pixel per channel
+		// One window's view of what's behind it: px is the window plus a margin all round; scratch is the glass layer.
+		struct Backdrop
+		{
+			DesktopGrab grab;
+			std::vector<uint32_t> px, scratch, small; // small: px at half size, blurred (what the glass samples)
+			int w = 0, h = 0;
+		};
+		std::vector<Shape> shapes;
+		virtual bool Live() const { return false; }
+		virtual void Bake(Backdrop &bd, const Canvas &ui, std::vector<Baked> &out) { (void)bd, (void)ui, (void)out; }
+		// Grabs what's behind; true when the look should change with it (a repaint).
+		virtual bool Prepare(Backdrop &bd, HWND hwnd, int w, int h) { (void)bd, (void)hwnd, (void)w, (void)h; return false; }
+		virtual uint32_t TabInk(bool on) const { (void)on; return ink; }
+		virtual void Underlay(Backdrop &bd, Canvas &cv, const Canvas &ui, const std::vector<Baked> &baked) { (void)bd, (void)cv, (void)ui, (void)baked; }
 		virtual void Popup(Canvas &cv)
 		{
 			cv.RoundRect(0, 0, cv.w, cv.h, S(float(radius)), page, page, 250);
@@ -354,8 +542,15 @@ namespace
 			return {};
 		}
 
+		// The navigation pane's background, with its edge on the right.
+		virtual void NavPane(Canvas &cv, int x, int y, int w, int h)
+		{
+			cv.RoundRect(x, y, w, h, 0, nav[0], nav[1], 255);
+			for (int j = y; j < y + h; j++) cv.Blend(x + w, j, nav[2], 255);
+		}
+
 		// A navigation-pane item: plain, hovered (1) or selected (2).
-		void NavItem(Canvas &cv, int x, int y, int w, int h, int state)
+		virtual void NavItem(Canvas &cv, int x, int y, int w, int h, int state)
 		{
 			if (state == 0) return;
 			auto *c = state == 2 ? navSel : navHot;
@@ -364,7 +559,7 @@ namespace
 		}
 
 		// A tab on the strip; the selected one's rectangle reaches the page.
-		void Tab(Canvas &cv, RECT rc, bool on, bool hot)
+		virtual void Tab(Canvas &cv, RECT rc, bool on, bool hot)
 		{
 			int w = rc.right - rc.left, h = rc.bottom - rc.top;
 			if (segmentTabs)
@@ -577,7 +772,7 @@ namespace
 	{
 		ClassicMac()
 		{
-			name = L"Classic Mac";
+			name = L"Mac OS 8-9";
 			page = 0xDDDDDD, pressedInk = 0xFFFFFF, heading = 0x000000, navInk = 0x000000, edge = 0x666666, groupEdge = 0x888888, strip = 0xDDDDDD;
 			tabOff[0] = 0xCCCCCC, tabOff[1] = 0xBBBBBB, tabHot[0] = 0xE6E6E6, tabHot[1] = 0xD0D0D0, tabHotEdge = 0x000000;
 			status[0] = status[1] = 0xDDDDDD, status[2] = 0x888888;
@@ -643,7 +838,7 @@ namespace
 	{
 		ModernMac()
 		{
-			name = L"macOS";
+			name = L"macOS 11-15";
 			page = 0xFFFFFF, pressedInk = 0xFFFFFF, heading = 0x6E6E73, navInk = 0x000000, edge = 0xD0D0D0, groupEdge = 0xDCDCDC, strip = 0xECECEC;
 			segmentTabs = true;
 			status[0] = status[1] = 0xECECEC, status[2] = 0xD8D8D8;
@@ -1016,6 +1211,467 @@ namespace
 		}
 	};
 
+	// System 1-6: black and white, a striped title bar, the close box on the left and the zoom box on the right.
+	struct System6 : ClassicMac
+	{
+		uint32_t stripe = 0x000000, stripeGap = 0xFFFFFF, boxFill = 0xFFFFFF;
+
+		System6()
+		{
+			name = L"System 1-6";
+			page = 0xFFFFFF, pressedInk = 0xFFFFFF, heading = 0x000000, navInk = 0x000000, navSelInk = 0xFFFFFF, edge = 0x000000, groupEdge = 0x000000, strip = 0xFFFFFF;
+			tabOff[0] = tabOff[1] = tabHot[0] = tabHot[1] = 0xFFFFFF, tabHotEdge = 0x000000;
+			status[0] = status[1] = 0xFFFFFF, status[2] = 0x000000;
+			nav[0] = nav[1] = 0xFFFFFF, nav[2] = 0x000000;
+			navHot[0] = navHot[1] = 0xFFFFFF, navHot[2] = 0x000000, navSel[0] = navSel[1] = navSel[2] = 0x000000;
+			box[0] = box[1] = boxHot[0] = boxHot[1] = 0xFFFFFF, box[2] = boxHot[2] = 0x000000;
+			radius = 6, boxRadius = 0;
+			capW[0] = capW[1] = capW[2] = 11, capH = 11, capTop = 7, capGap = 4, capInset = 8;
+		}
+
+		void Frame(Canvas &cv, int titleH, int border, const std::wstring &title) override
+		{
+			Line(cv, 0, 0, cv.w, cv.h, page);
+			cv.RoundFrame(0, 0, cv.w - 1, cv.h - 1, 0, 0x000000, 255);
+			Line(cv, cv.w - 1, 1, 1, cv.h - 1, 0x000000), Line(cv, 1, cv.h - 1, cv.w - 1, 1, 0x000000); // the drop shadow
+			Line(cv, 1, 1, cv.w - 3, titleH - 2, stripeGap);
+			for (int y = S(5); y < titleH - S(5); y += 2) Line(cv, S(3), y, cv.w - S(3) * 2 - 1, 1, stripe);
+			auto size = text->Measure(title, true);
+			int tx = std::max(S(30), (cv.w - int(size.cx)) / 2);
+			Line(cv, tx - S(8), S(3), std::min(int(size.cx), cv.w - S(110)) + S(16), titleH - S(6), stripeGap);
+			text->Draw(cv, tx, (titleH - size.cy) / 2, title, 0x000000, true, cv.w - S(110));
+			cv.RoundFrame(border - 1, titleH - 1, cv.w - 2 * border + 1, cv.h - titleH - border + 1, 0, 0x000000, 255);
+		}
+
+		void CaptionButton(Canvas &cv, RECT rc, bool hover, CaptionKind kind) override
+		{
+			int w = rc.right - rc.left, h = rc.bottom - rc.top;
+			Line(cv, rc.left - S(2), rc.top - S(2), w + S(4), h + S(4), stripeGap); // clear of the stripes
+			Line(cv, rc.left, rc.top, w, h, hover ? 0x000000 : boxFill);
+			cv.RoundFrame(rc.left, rc.top, w, h, 0, 0x000000, 255);
+			uint32_t ink = hover ? 0xFFFFFF : 0x000000;
+			if (kind == CaptionMax) cv.RoundFrame(rc.left, rc.top, w / 2 + 1, h / 2 + 1, 0, ink, 255);
+			if (kind == CaptionMin) Line(cv, rc.left + S(2), rc.top + h / 2, w - S(4), 1, ink);
+		}
+
+		void Button(Canvas &cv, int x, int y, int w, int h, int state) override
+		{
+			int r = S(6);
+			cv.RoundRect(x, y, w, h, r, state == 2 ? 0x000000 : boxFill, state == 2 ? 0x000000 : boxFill, 255);
+			cv.RoundFrame(x, y, w, h, r, 0x000000, 255);
+			if (state == 1) cv.RoundFrame(x + 1, y + 1, w - 2, h - 2, r - 1, 0x000000, 255);
+		}
+
+		void Popup(Canvas &cv) override
+		{
+			Line(cv, 0, 0, cv.w, cv.h, 0xFFFFFF);
+			cv.RoundFrame(0, 0, cv.w - 1, cv.h - 1, 0, 0x000000, 255);
+			Line(cv, cv.w - 1, 1, 1, cv.h - 1, 0x000000), Line(cv, 1, cv.h - 1, cv.w - 1, 1, 0x000000);
+		}
+	};
+
+	// System 7: the same shapes, with grey stripes, light grey dialogs and a lavender highlight.
+	struct System7 : System6
+	{
+		System7()
+		{
+			name = L"System 7";
+			stripe = 0x999999, stripeGap = 0xDDDDDD, boxFill = 0xEEEEEE;
+			page = 0xEEEEEE, strip = 0xDDDDDD, navSelInk = 0x000000;
+			tabOff[0] = tabOff[1] = 0xDDDDDD, tabHot[0] = tabHot[1] = 0xEEEEEE;
+			status[0] = status[1] = 0xDDDDDD, nav[0] = nav[1] = 0xFFFFFF;
+			navHot[0] = navHot[1] = 0xEEEEFF, navSel[0] = navSel[1] = 0xCCCCFF, navSel[2] = 0x6666AA;
+		}
+	};
+
+	// A glossy round light (Aqua gel), lighter at the top with a highlight.
+	void Gel(Canvas &cv, int x, int y, int w, int h, int r, uint32_t c, uint32_t rim, int shine)
+	{
+		cv.RoundRect(x, y, w, h, r, Canvas::Mix(c, 0xFFFFFF, 0.45f), c, 255);
+		cv.RoundFrame(x, y, w, h, r, rim, 255);
+		if (shine) cv.RoundRect(x + w / 5, y + 1, w - 2 * (w / 5), h * 2 / 5, std::min(r, h / 5), 0xFFFFFF, 0xFFFFFF, shine);
+	}
+
+	// Mac OS X 10.0-10.6 (Aqua): pinstripes, glossy gel lights and pill buttons, blue gel for the picked one.
+	struct Aqua : ModernMac
+	{
+		Aqua()
+		{
+			name = L"Mac OS X 10.0-10.6";
+			page = 0xF2F2F2, strip = 0xE8E8E8, heading = 0x000000;
+			status[0] = status[1] = 0xE8E8E8;
+			nav[0] = 0xE8EDF5, nav[1] = 0xD6DDE5, navSel[0] = 0x6AA2E8, navSel[1] = navSel[2] = 0x3B7DD8, navSelInk = 0xFFFFFF;
+			boxOn = 0x3D8EF0, radius = 6, boxRadius = 3;
+			capW[0] = capW[1] = capW[2] = 14, capH = 14, capTop = 6, capGap = 7, capInset = 10;
+		}
+
+		void Frame(Canvas &cv, int titleH, int border, const std::wstring &title) override
+		{
+			int r = S(6);
+			cv.RoundRect(0, 0, cv.w, cv.h, r, 0xECECEC, 0xECECEC, 255, true);
+			for (int y = r; y < cv.h - 1; y += 2) Line(cv, 1, y, cv.w - 2, 1, 0xF8F8F8); // the pinstripes
+			cv.RoundFrame(0, 0, cv.w, cv.h, r, 0x000000, 110, true);
+			auto size = text->Measure(title);
+			text->Draw(cv, std::max(S(80), (cv.w - int(size.cx)) / 2), (titleH - size.cy) / 2, title, 0x000000, false, cv.w - S(160));
+			cv.RoundFrame(border - 1, titleH - 1, cv.w - 2 * border + 2, cv.h - titleH - border + 2, 0, 0xA0A0A0, 255);
+		}
+
+		void CaptionButton(Canvas &cv, RECT rc, bool hover, CaptionKind kind) override
+		{
+			static const uint32_t fill[] = { 0xE8A92B, 0x5DB33B, 0xD9332A }, rim[] = { 0x9A6A10, 0x2F7A1C, 0x8E1A14 };
+			int d = rc.right - rc.left;
+			Gel(cv, rc.left, rc.top, d, d, d / 2, fill[kind], rim[kind], 200);
+			if (hover) Glyph(cv, rc.left + d / 2, rc.top + d / 2 + 1, kind, 0x4A1A00, S(6), std::max(1, S(1.2f)), true);
+		}
+
+		void Button(Canvas &cv, int x, int y, int w, int h, int state) override
+		{
+			bool on = state == 2;
+			Gel(cv, x, y, w, h, h / 2, on ? 0x3D8EF0 : state == 1 ? 0xE6E6E6 : 0xDADADA, on ? 0x1A4D9A : 0x8A8A8A, 150);
+		}
+
+		void Popup(Canvas &cv) override
+		{
+			cv.RoundRect(0, 0, cv.w, cv.h, S(4), 0xF8F8F8, 0xF8F8F8, 240);
+			cv.RoundFrame(0, 0, cv.w, cv.h, S(4), 0x000000, 80);
+		}
+	};
+
+	// OS X 10.7-10.9: a grey gradient title bar, softer lights, white gradient buttons, blue gradient when picked.
+	struct Lion : ModernMac
+	{
+		Lion()
+		{
+			name = L"OS X 10.7-10.9";
+			page = 0xEDEDED, strip = 0xE3E3E3, heading = 0x333333;
+			nav[0] = 0xE6EBF0, nav[1] = 0xDCE2E8, navSel[0] = 0x6CB3FA, navSel[1] = navSel[2] = 0x2A7BE0, navSelInk = 0xFFFFFF;
+			box[0] = 0xFFFFFF, box[1] = 0xE8E8E8, box[2] = 0x8E8E8E, boxOn = 0, mark = 0x000000, dot[0] = 0x6CB3FA, dot[1] = 0x0D7BF2;
+			radius = 4, boxRadius = 3;
+		}
+
+		void Frame(Canvas &cv, int titleH, int border, const std::wstring &title) override
+		{
+			int r = S(5);
+			cv.RoundRect(0, 0, cv.w, cv.h, r, 0xEDEDED, 0xEDEDED, 255, true);
+			cv.RoundRect(0, 0, cv.w, titleH, r, 0xEBEBEB, 0xD5D5D5, 255, true);
+			cv.RoundFrame(0, 0, cv.w, cv.h, r, 0x000000, 100, true);
+			auto size = text->Measure(title);
+			text->Draw(cv, std::max(S(80), (cv.w - int(size.cx)) / 2), (titleH - size.cy) / 2, title, 0x4D4D4D, false, cv.w - S(160));
+			cv.RoundFrame(border - 1, titleH - 1, cv.w - 2 * border + 2, cv.h - titleH - border + 2, 0, 0xAAAAAA, 255);
+		}
+
+		void CaptionButton(Canvas &cv, RECT rc, bool hover, CaptionKind kind) override
+		{
+			static const uint32_t fill[] = { 0xFDBC40, 0x34C84A, 0xFC605C }, rim[] = { 0xDE9F34, 0x27AA35, 0xDE4A47 };
+			int d = rc.right - rc.left;
+			Gel(cv, rc.left, rc.top, d, d, d / 2, fill[kind], rim[kind], 70);
+			if (hover) Glyph(cv, rc.left + d / 2, rc.top + d / 2, kind, 0x5A2A00, S(6), std::max(1, S(1.2f)), true);
+		}
+
+		void Button(Canvas &cv, int x, int y, int w, int h, int state) override
+		{
+			static const uint32_t top[] = { 0xFFFFFF, 0xFFFFFF, 0x6CB3FA }, bottom[] = { 0xF1F1F1, 0xE6E6E6, 0x0D7BF2 }, edge[] = { 0xA6A6A6, 0x8E8E8E, 0x2A68C8 };
+			int r = S(4);
+			cv.RoundRect(x, y, w, h, r, top[state], bottom[state], 255);
+			cv.RoundFrame(x, y, w, h, r, edge[state], 255);
+		}
+	};
+
+	// OS X 10.10-10.15: flat, a plain light title bar with a regular-weight title, flat lights, flat blue when picked.
+	struct Yosemite : ModernMac
+	{
+		Yosemite()
+		{
+			name = L"OS X 10.10-10.15";
+			radius = 5, boxRadius = 3;
+		}
+
+		void Frame(Canvas &cv, int titleH, int border, const std::wstring &title) override
+		{
+			int r = S(5);
+			cv.RoundRect(0, 0, cv.w, cv.h, r, 0xECECEC, 0xECECEC, 255);
+			cv.RoundFrame(0, 0, cv.w, cv.h, r, 0x000000, 70);
+			auto size = text->Measure(title);
+			text->Draw(cv, std::max(S(80), (cv.w - int(size.cx)) / 2), (titleH - size.cy) / 2, title, 0x4D4D4D, false, cv.w - S(160));
+			cv.RoundFrame(border - 1, titleH - 1, cv.w - 2 * border + 2, cv.h - titleH - border + 2, 0, 0xD0D0D0, 255);
+		}
+
+		void Button(Canvas &cv, int x, int y, int w, int h, int state) override
+		{
+			uint32_t fill = state == 2 ? 0x1E8BFF : state == 1 ? 0xF7F7F7 : 0xFFFFFF;
+			int r = S(4);
+			cv.RoundRect(x, y, w, h, r, fill, fill, 255);
+			cv.RoundFrame(x, y, w, h, r, state == 2 ? 0x0A70F0 : 0xC8C8C8, 255);
+		}
+
+		void Popup(Canvas &cv) override
+		{
+			cv.RoundRect(0, 0, cv.w, cv.h, S(5), 0xF2F2F2, 0xF2F2F2, 245);
+			cv.RoundFrame(0, 0, cv.w, cv.h, S(5), 0x000000, 45);
+		}
+	};
+
+	// macOS 26 (Liquid Glass): real glass. The window is kept out of screen captures; every display refresh the
+	// screen behind it is grabbed and lightly blurred, and the glass shapes show it bent like a lens towards their
+	// rounded edges with a little colour split, a specular rim lit from the top left (and its bounce bottom right).
+	// The frame and the floating sidebar are glass; capsule tabs and buttons catch the light. Where each glass pixel
+	// samples from is worked out once per paint (Bake), so a refresh is only the grab and a gather.
+	struct Glass : ModernMac
+	{
+
+		Glass()
+		{
+			name = L"macOS 26";
+			page = 0xFFFFFF, heading = 0x86868B, navInk = 0x1D1D1F, edge = 0xE3E3E8, groupEdge = 0xE8E8ED, stripAlpha = 0;
+			navSel[0] = navSel[1] = 0xFFFFFF, navHot[0] = navHot[1] = 0xFFFFFF;
+			box[2] = 0xC7C7CC, boxOn = 0x0088FF, radius = 18, boxRadius = 5;
+			capW[0] = capW[1] = capW[2] = 14, capH = 14, capTop = 9, capGap = 9, capInset = 18;
+		}
+
+		// Apple's "regular" Liquid Glass (HIG, Materials): the backdrop is blurred and its luminosity pulled into a
+		// band labels read over, and the whole look turns dark (white labels) over dark content.
+		std::atomic<bool> dark{ false };
+		bool Live() const override { return true; }
+		uint32_t TabInk(bool on) const override { (void)on; return dark ? 0xF5F5F7 : 0x1D1D1F; }
+		bool Prepare(Backdrop &bd, HWND hwnd, int w, int h) override
+		{
+			RECT wr;
+			GetWindowRect(hwnd, &wr);
+			int m = S(24); // room for the lens to reach past the edge
+			int bw = w + 2 * m, bh = h + 2 * m;
+			int hw = bw / 2, hh = bh / 2;
+			auto &half = bd.small;
+			half.resize(size_t(hw) * hh);
+			if (!bd.grab.Grab(wr.left - m, wr.top - m, bw, bh, half.data()))
+			{
+				auto &backdrop = bd.px;
+				backdrop.resize(size_t(bw) * bh);
+				// no desktop duplication (remote desktop, old driver): GDI, much slower
+				HDC screen = GetDC(nullptr), dc = CreateCompatibleDC(screen);
+				BITMAPINFO bi{};
+				bi.bmiHeader = { sizeof(bi.bmiHeader), bw, -bh, 1, 32, BI_RGB };
+				void *bits;
+				auto dib = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+				auto old = SelectObject(dc, dib);
+				BitBlt(dc, 0, 0, bw, bh, screen, wr.left - m, wr.top - m, SRCCOPY);
+				memcpy(backdrop.data(), bits, backdrop.size() * 4);
+				SelectObject(dc, old);
+				DeleteObject(dib);
+				DeleteDC(dc);
+				ReleaseDC(nullptr, screen);
+				for (int j = 0; j < hh; j++)
+					for (int i = 0; i < hw; i++)
+					{
+						int sum[3] = {};
+						for (int y = 0; y < 2; y++)
+							for (int x = 0; x < 2; x++)
+							{
+								uint32_t p = backdrop[size_t(2 * j + y) * bw + 2 * i + x];
+								sum[0] += p & 0xFF, sum[1] += p >> 8 & 0xFF, sum[2] += p >> 16 & 0xFF;
+							}
+						half[size_t(j) * hw + i] = uint32_t(sum[0] / 4) | uint32_t(sum[1] / 4) << 8 | uint32_t(sum[2] / 4) << 16;
+					}
+			}
+			// two box blurs each way (about a gaussian): shapes show through, fine detail like text goes soft
+			for (int pass = 0; pass < 2; pass++) Blur(half, bd.scratch, hw, hh, std::max(1, S(2)));
+			// light or dark: the mean luma behind the window, with some hysteresis
+			// ponytail: one look per window; macOS decides per bar
+			int64_t sum = 0, n = 0;
+			for (size_t i = 0; i < half.size(); i += 7, n++) sum += Luma(half[i]);
+			int mean = int(sum / std::max<int64_t>(1, n));
+			bool was = dark;
+			if (mean < 100) dark = true;
+			else if (mean > 125) dark = false;
+			return dark != was;
+		}
+		static int Luma(uint32_t c) { return int((c >> 16 & 0xFF) * 54 + (c >> 8 & 0xFF) * 183 + (c & 0xFF) * 19) >> 8; }
+
+		// A box blur of radius r, w by h, both ways; tmp is scratch. Running sums, rows only (cache friendly).
+		static void Blur(std::vector<uint32_t> &px, std::vector<uint32_t> &tmp, int w, int h, int r)
+		{
+			tmp.resize(px.size());
+			uint32_t inv = 65536 / (2 * r + 1);
+			auto pack = [inv](const int *s) { return (uint32_t(s[0]) * inv >> 16) | (uint32_t(s[1]) * inv >> 16) << 8 | (uint32_t(s[2]) * inv >> 16) << 16; };
+			auto add = [](int *s, uint32_t c, int k) { s[0] += k * int(c & 0xFF), s[1] += k * int(c >> 8 & 0xFF), s[2] += k * int(c >> 16 & 0xFF); };
+			for (int y = 0; y < h; y++) // across: px to tmp
+			{
+				const uint32_t *row = &px[size_t(y) * w];
+				uint32_t *out = &tmp[size_t(y) * w];
+				int s[3] = {};
+				for (int i = -r; i <= r; i++) add(s, row[std::clamp(i, 0, w - 1)], 1);
+				for (int x = 0; x < w; x++)
+				{
+					out[x] = pack(s);
+					add(s, row[std::min(x + r + 1, w - 1)], 1), add(s, row[std::max(x - r, 0)], -1);
+				}
+			}
+			std::vector<int> s(size_t(w) * 3); // down: tmp to px, a running sum per column
+			for (int i = -r; i <= r; i++)
+				for (int x = 0; x < w; x++) add(&s[3 * x], tmp[size_t(std::clamp(i, 0, h - 1)) * w + x], 1);
+			for (int y = 0; y < h; y++)
+			{
+				const uint32_t *in = &tmp[size_t(std::min(y + r + 1, h - 1)) * w], *outgoing = &tmp[size_t(std::max(y - r, 0)) * w];
+				uint32_t *out = &px[size_t(y) * w];
+				for (int x = 0; x < w; x++)
+				{
+					out[x] = pack(&s[3 * x]);
+					add(&s[3 * x], in[x], 1), add(&s[3 * x], outgoing[x], -1);
+				}
+			}
+		}
+
+		// Calls f(x, y, cover, nx, ny, depth) for each canvas pixel inside the shape: coverage, the outward normal
+		// and the distance in from the rounded edge.
+		template<class F> static void Walk(const Shape &s, int cw, int ch, F f)
+		{
+			float hw = s.w / 2.f, hh = s.h / 2.f;
+			for (int j = std::max(0, -s.y); j < s.h && s.y + j < ch; j++)
+				for (int i = std::max(0, -s.x); i < s.w && s.x + i < cw; i++)
+				{
+					float px = i + 0.5f - hw, py = j + 0.5f - hh;
+					float qx = std::abs(px) - (hw - s.r), qy = std::abs(py) - (hh - s.r);
+					float ox = std::max(qx, 0.f), oy = std::max(qy, 0.f), ol = std::hypot(ox, oy);
+					float dist = ol + std::min(std::max(qx, qy), 0.f) - s.r;
+					float cover = std::clamp(0.5f - dist, 0.f, 1.f);
+					if (cover <= 0) continue;
+					float nx, ny;
+					if (ol > 0) nx = ox / ol, ny = oy / ol;
+					else if (qx > qy) nx = 1, ny = 0;
+					else nx = 0, ny = 1;
+					f(s.x + i, s.y + j, cover, px < 0 ? -nx : nx, py < 0 ? -ny : ny, -dist);
+				}
+		}
+
+		// A glass rounded rectangle: frost (0-1) mixes in the tint, lens is how far the edge bends the view. While
+		// painting it only cuts a hole in the UI; Underlay fills it every refresh.
+		void GlassRect(Canvas &cv, int x, int y, int w, int h, int r, float frost, uint32_t tint, float lens)
+		{
+			shapes.push_back({ x, y, w, h, r, frost, tint, lens });
+			Walk(shapes.back(), cv.w, cv.h, [&](int px, int py, float cover, float, float, float) {
+				auto &p = cv.px[size_t(py) * cv.w + px];
+				uint32_t keep = uint32_t(256 * (1 - cover));
+				p = ((p & 0xFF00FF) * keep >> 8 & 0xFF00FF) | ((p >> 8 & 0xFF00FF) * keep & 0xFF00FF00);
+			});
+		}
+
+		void Bake(Backdrop &bd, const Canvas &ui, std::vector<Baked> &out) override
+		{
+			(void)bd;
+			int m = S(24), hw = (ui.w + 2 * m) / 2, hh = (ui.h + 2 * m) / 2;
+			float band = float(S(26));
+			auto at = [&](float x, float y) { // a pixel of the half-size backdrop
+				return uint32_t(std::clamp(int(y + m) / 2, 0, hh - 1) * hw + std::clamp(int(x + m) / 2, 0, hw - 1));
+			};
+			for (auto &s : shapes)
+				Walk(s, ui.w, ui.h, [&](int x, int y, float cover, float nx, float ny, float depth) {
+					uint32_t idx = uint32_t(y) * ui.w + x;
+					if (ui.px[idx] >> 24 == 255) return; // under solid UI: nothing to see
+					float k = depth < band ? 1 - depth / band : 0;
+					float bend = s.lens * (1 - std::sqrt(std::max(0.f, 1 - k * k))); // a dome: flat inside, steep at the rim
+					// specular: a thin bright rim where the light (top left) or its bounce (bottom right) hits, a soft
+					// glow just inside it, and a faint darker band where the lens turns
+					float rim = std::clamp(1 - depth / S(1.8f), 0.f, 1.f), light = std::abs(-0.6f * nx - 0.8f * ny);
+					float glow = std::clamp(1 - depth / S(7), 0.f, 1.f);
+					float dark = 0.10f * k * (1 - k) * 4 * (1 - light), white = std::min(1.f, rim * (0.35f + 0.65f * light) + 0.3f * glow * glow * light);
+					out.push_back({ idx,
+						{ at(x - nx * bend * 1.18f, y - ny * bend * 1.18f), at(x - nx * bend, y - ny * bend), at(x - nx * bend * 0.82f, y - ny * bend * 0.82f) }, // red bends most, blue least
+						s.tint, uint8_t(255 * cover), uint8_t(255 * s.frost), uint8_t(255 * dark), uint8_t(255 * white) });
+				});
+		}
+
+		void Underlay(Backdrop &bd, Canvas &cv, const Canvas &ui, const std::vector<Baked> &baked) override
+		{
+			auto &half = bd.small, &scratch = bd.scratch;
+			cv.w = ui.w, cv.h = ui.h, cv.px = ui.px;
+			scratch.resize(cv.px.size());
+			auto mix = [](uint32_t a, uint32_t b, uint32_t t) { // t of 255 toward b
+				uint32_t o = 0;
+				for (int sh = 0; sh < 24; sh += 8) o |= ((a >> sh & 0xFF) * (255 - t) + (b >> sh & 0xFF) * t) / 255 << sh;
+				return o;
+			};
+			bool isDark = dark;
+			for (auto &b : baked) scratch[b.idx] = 0;
+			for (auto &b : baked) // the glass, shapes in paint order (premultiplied)
+			{
+				uint32_t c = (half[b.src[0]] & 0xFF0000) | (half[b.src[1]] & 0xFF00) | (half[b.src[2]] & 0xFF);
+				// luminosity into a band: 43-100% light, 8-73% dark; hue and saturation kept
+				int y = Luma(c), d = (isDark ? 20 : 110) + y * 165 / 255 - y;
+				uint32_t lum = 0;
+				for (int sh = 0; sh < 24; sh += 8) lum |= uint32_t(std::clamp(int(c >> sh & 0xFF) + d, 0, 255)) << sh;
+				c = mix(mix(mix(lum, isDark ? 0x2C2C2E : b.tint, b.frost), 0, b.dark), 0xFFFFFF, b.white);
+				uint32_t &g = scratch[b.idx], keep = 255 - b.cover, o = 0;
+				for (int sh = 0; sh < 24; sh += 8) o |= ((c >> sh & 0xFF) * b.cover + (g >> sh & 0xFF) * keep) / 255 << sh;
+				g = o | (b.cover + (g >> 24) * keep / 255) << 24;
+			}
+			for (auto &b : baked) // the UI over it
+			{
+				uint32_t u = ui.px[b.idx], g = scratch[b.idx], keep = 255 - (u >> 24), o = 0;
+				for (int sh = 0; sh < 32; sh += 8) o |= ((u >> sh & 0xFF) + (g >> sh & 0xFF) * keep / 255) << sh;
+				cv.px[b.idx] = o;
+			}
+		}
+
+		// A capsule or panel over the page: a milky fill, a white rim brightest at the top, a faint dark outline.
+		static void Pane(Canvas &cv, int x, int y, int w, int h, int r, uint32_t top, uint32_t bottom, int a)
+		{
+			cv.RoundRect(x, y, w, h, r, top, bottom, a);
+			cv.RoundFrame(x, y, w, h, r, 0x000000, 28);
+			cv.RoundFrame(x + 1, y + 1, w - 2, h - 2, std::max(0, r - 1), 0xFFFFFF, 200);
+			cv.RoundRect(x + r, y + 1, w - 2 * r, 1, 0, 0xFFFFFF, 0xFFFFFF, 255); // the top glint
+		}
+
+		void Frame(Canvas &cv, int titleH, int border, const std::wstring &title) override
+		{
+			navInk = TabInk(false);
+			GlassRect(cv, 0, 0, cv.w, cv.h, S(18), 0.04f, 0xFAFAFC, float(S(24)));
+			cv.RoundFrame(0, 0, cv.w, cv.h, S(18), 0x000000, 40);
+			auto size = text->Measure(title, true);
+			text->Draw(cv, std::max(S(100), (cv.w - int(size.cx)) / 2), (titleH - size.cy) / 2, title, TabInk(false), true, cv.w - S(200));
+			(void)border;
+		}
+
+		void CaptionButton(Canvas &cv, RECT rc, bool hover, CaptionKind kind) override
+		{
+			static const uint32_t fill[] = { 0xFFBD2E, 0x28C941, 0xFF5F57 }, ink[] = { 0x985712, 0x0B650D, 0x4D0000 };
+			int d = rc.right - rc.left;
+			cv.RoundRect(rc.left, rc.top, d, d, d / 2, Canvas::Mix(fill[kind], 0xFFFFFF, 0.15f), fill[kind], 255);
+			cv.RoundFrame(rc.left, rc.top, d, d, d / 2, 0x000000, 35);
+			if (hover) Glyph(cv, rc.left + d / 2, rc.top + d / 2, kind, ink[kind], S(6), std::max(1, S(1.3f)), true);
+		}
+
+		void Button(Canvas &cv, int x, int y, int w, int h, int state) override
+		{
+			if (state == 2) Pane(cv, x, y, w, h, h / 2, 0x3DA2FF, 0x0077F0, 255);
+			else Pane(cv, x, y, w, h, h / 2, state == 1 ? 0xFFFFFF : 0xFBFBFD, state == 1 ? 0xF0F0F5 : 0xF2F2F6, 235);
+		}
+
+		void Tab(Canvas &cv, RECT rc, bool on, bool hot) override
+		{
+			int w = rc.right - rc.left, h = rc.bottom - rc.top - S(4);
+			if (on && dark) Pane(cv, rc.left, rc.top + S(1), w, h, h / 2, 0x6C6C70, 0x5A5A5E, 230);
+			else if (on) Pane(cv, rc.left, rc.top + S(1), w, h, h / 2, 0xFFFFFF, 0xF4F4F8, 230);
+			else if (hot) cv.RoundRect(rc.left, rc.top + S(1), w, h, h / 2, 0xFFFFFF, 0xFFFFFF, dark ? 40 : 110);
+		}
+
+		void NavPane(Canvas &cv, int x, int y, int w, int h) override
+		{
+			cv.RoundRect(x, y, w + 1, h, 0, page, page, 255);
+			GlassRect(cv, x + S(6), y + S(6), w - S(10), h - S(12), S(14), 0.3f, 0xF4F4F7, float(S(20)));
+		}
+
+		void NavItem(Canvas &cv, int x, int y, int w, int h, int state) override
+		{
+			if (state == 0) return;
+			cv.RoundRect(x + S(4), y, w - S(8), h, S(8), 0xFFFFFF, 0xFFFFFF, dark ? (state == 2 ? 70 : 35) : (state == 2 ? 200 : 110));
+		}
+
+		void Popup(Canvas &cv) override
+		{
+			GlassRect(cv, 0, 0, cv.w, cv.h, S(16), 0.3f, 0xFAFAFC, float(S(20)));
+			cv.RoundFrame(0, 0, cv.w, cv.h, S(16), 0x000000, 40);
+		}
+	};
+
 	Three threeTheme;
 	NinetyFive ninetyFiveTheme;
 	NinetyEight ninetyEightTheme;
@@ -1028,7 +1684,16 @@ namespace
 	ClassicMac classicMacTheme;
 	ModernMac modernMacTheme;
 	Temple templeTheme;
-	Theme *const themes[] = { &threeTheme, &ninetyFiveTheme, &ninetyEightTheme, &xpTheme, &vistaTheme, &sevenTheme, &eightTheme, &tenTheme, &elevenTheme, &classicMacTheme, &modernMacTheme, &templeTheme };
+	System6 system6Theme;
+	System7 system7Theme;
+	Aqua aquaTheme;
+	Lion lionTheme;
+	Yosemite yosemiteTheme;
+	Glass glassTheme;
+	Theme *const themes[] = { &threeTheme, &ninetyFiveTheme, &ninetyEightTheme, &xpTheme, &vistaTheme, &sevenTheme, &eightTheme, &tenTheme, &elevenTheme, &classicMacTheme, &modernMacTheme, &templeTheme,
+		&system6Theme, &system7Theme, &aquaTheme, &lionTheme, &yosemiteTheme, &glassTheme }; // new ones at the end: the pref is the index
+	const std::vector<int> windowsThemes = { 0, 1, 2, 3, 4, 5, 6, 7, 8 }, macThemes = { 12, 13, 9, 14, 15, 16, 10, 17 };
+	constexpr int templeIndex = 11;
 	constexpr int defaultTheme = 4; // Vista
 	Theme *theme = &vistaTheme;
 
@@ -1039,7 +1704,71 @@ namespace
 		Canvas cv;
 		ByteString name;
 		std::wstring title;
-		bool dirty = true;
+		std::atomic<bool> dirty{ true }; // the vsync thread sets it too
+		bool excluded = false; // a live (glass) theme: kept out of screen captures, recomposed every display refresh
+		// Live: the last paint (with holes where the glass goes) and its baked glass, what's behind, and the composed
+		// frame. A thread recomposes and shows it every display refresh (DwmFlush), whatever TPT's own loop is doing;
+		// liveLock keeps a repaint from swapping ui and baked under it.
+		Canvas ui, out;
+		std::vector<Theme::Baked> baked;
+		Theme::Backdrop backdrop;
+		std::mutex liveLock;
+		std::thread vsync;
+		std::atomic<bool> vsyncRun{ false };
+
+		void StartVsync()
+		{
+			vsyncRun = true;
+			vsync = std::thread([this] {
+				// the vertical blank of the screen the window is on; DwmFlush if there's none
+				// ponytail: picked once, so a window dragged to a screen with another refresh rate keeps the first's
+				IDXGIOutput *screen = nullptr;
+				RECT wr;
+				GetWindowRect(hwnd, &wr);
+				POINT c{ (wr.left + wr.right) / 2, (wr.top + wr.bottom) / 2 };
+				IDXGIFactory1 *factory;
+				if (SUCCEEDED(CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void **)&factory)))
+				{
+					IDXGIAdapter1 *adapter;
+					for (UINT i = 0; !screen && factory->EnumAdapters1(i, &adapter) == S_OK; i++)
+					{
+						IDXGIOutput *output;
+						for (UINT j = 0; !screen && adapter->EnumOutputs(j, &output) == S_OK; j++)
+						{
+							DXGI_OUTPUT_DESC d;
+							output->GetDesc(&d);
+							if (PtInRect(&d.DesktopCoordinates, c)) screen = output;
+							else output->Release();
+						}
+						adapter->Release();
+					}
+					factory->Release();
+				}
+				while (vsyncRun)
+				{
+					auto t0 = std::chrono::steady_clock::now();
+					if (!screen || FAILED(screen->WaitForVBlank())) DwmFlush();
+					if (std::chrono::steady_clock::now() - t0 < std::chrono::milliseconds(1)) Sleep(4); // no vblank to wait for
+					Compose();
+				}
+				if (screen) screen->Release();
+			});
+		}
+
+		void Compose()
+		{
+			std::lock_guard lock(liveLock);
+			if (!theme->Live() || ui.px.empty()) return; // switching away: the next Present stops this
+			if (theme->Prepare(backdrop, hwnd, ui.w, ui.h)) dirty = true;
+			theme->Underlay(backdrop, out, ui, baked);
+			Show(out);
+		}
+
+		void StopVsync()
+		{
+			vsyncRun = false;
+			if (vsync.joinable()) vsync.join();
+		}
 		int opacity = 255;
 		// An app window: taskbar button, normal z-order, resizable, minimise/maximise. Otherwise a small on-top popup
 		// (notifications).
@@ -1050,6 +1779,7 @@ namespace
 
 		virtual ~Panel()
 		{
+			StopVsync();
 			if (hwnd)
 			{
 				SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
@@ -1098,12 +1828,39 @@ namespace
 
 		void Present()
 		{
+			if (theme->Live() != excluded)
+			{
+				excluded = theme->Live();
+				// WDA_EXCLUDEFROMCAPTURE (Windows 10 2004+) or WDA_NONE; looked up because the SDK target predates it
+				static auto setAffinity = reinterpret_cast<BOOL(WINAPI *)(HWND, DWORD)>(GetProcAddress(GetModuleHandleW(L"user32.dll"), "SetWindowDisplayAffinity"));
+				if (setAffinity) setAffinity(hwnd, excluded ? 0x11 : 0);
+				if (!excluded) StopVsync(); // started below, once there's a paint to show
+				dirty = true;
+			}
 			if (dirty)
 			{
+				theme->shapes.clear();
 				std::fill(cv.px.begin(), cv.px.end(), 0);
 				Paint();
 				dirty = false;
+				if (excluded)
+				{
+					std::lock_guard lock(liveLock);
+					ui = cv;
+					baked.clear();
+					theme->Bake(backdrop, ui, baked);
+				}
 			}
+			if (excluded)
+			{
+				if (!vsync.joinable()) StartVsync();
+				return; // the vsync thread shows it
+			}
+			Show(cv);
+		}
+
+		void Show(const Canvas &cv)
+		{
 			HDC screen = GetDC(nullptr), dc = CreateCompatibleDC(screen);
 			BITMAPINFO bi{};
 			bi.bmiHeader = { sizeof(bi.bmiHeader), cv.w, -cv.h, 1, 32, BI_RGB };
@@ -1261,6 +2018,7 @@ namespace
 	// clickable rectangles (hits) that the mouse handler uses.
 	void OpenTorn(int tab);
 	void ThemeChanged(); // repaint every window
+	void SetTheme(int i);
 	void Restart(int scale, bool windowed, bool force = false);
 	void LoadSceneTiles();
 
@@ -1425,8 +2183,7 @@ namespace
 		void PaintElements()
 		{
 			auto c = Content();
-			cv.RoundRect(c.left, c.top, navW, c.bottom - c.top, 0, theme->nav[0], theme->nav[1], 255);
-			for (int j = c.top; j < c.bottom; j++) cv.Blend(c.left + navW, j, theme->nav[2], 255);
+			theme->NavPane(cv, c.left, c.top, navW, c.bottom - c.top);
 			auto sections = Sections();
 			for (int i = 0; i < int(sections.size()); i++)
 			{
@@ -2055,17 +2812,33 @@ namespace
 			PushButton(x + S(200), top, S(40), L"\u2212", [setScale] { setScale(uiScale - 0.25f); }, L"Smaller windows and text");
 			PushButton(x + S(246), top, S(40), L"+", [setScale] { setScale(uiScale + 0.25f); }, L"Bigger windows and text");
 			y += S(116);
-			top = Group(x, y, w, S(136), L"Look");
-			int lx = x + S(12), ly = top;
-			for (int i = 0; i < int(std::size(themes)); i++)
-			{
-				if (i && i % 3 == 0) lx = x + S(12), ly += S(28);
-				lx += Toggle(lx, ly, themes[i]->name, theme == themes[i], true, [i] {
-					theme = themes[i];
-					GlobalPrefs::Ref().Set("Overlay.Theme", i);
-					ThemeChanged();
-				}, L"Windows and menus look like this system's") + S(18);
-			}
+			top = Group(x, y, w, S(108), L"Look");
+			int current = int(std::find(std::begin(themes), std::end(themes), theme) - std::begin(themes));
+			auto family = [&](int row, const wchar_t *label, const std::vector<int> &ids) {
+				int by = top + row * S(32), bx = x + S(200), bw = S(220);
+				bool in = std::count(ids.begin(), ids.end(), current) > 0;
+				Caption(x + S(12), by, label);
+				PushButton(bx, by, bw, std::wstring(in ? themes[current]->name : L"\u2014"), [this, &ids, bx, by, bw] {
+					later = [this, &ids, rc = RECT{ bx, by, bx + bw, by + S(23) }] { PickTheme(ids, rc); };
+				}, L"Windows and menus look like this system's");
+				for (int i = 0, k = S(4), ax = bx + bw - S(20), ay = by + S(10); i <= k; i++) Line(cv, ax + i, ay + i, 2 * (k - i) + 1, 1, theme->ink); // the arrow
+			};
+			family(0, L"Windows", windowsThemes);
+			family(1, L"Mac", macThemes);
+			Toggle(x + S(12), top + 2 * S(32), L"TempleOS", current == templeIndex, true, [] { SetTheme(templeIndex); }, L"Windows and menus look like TempleOS");
+		}
+
+		// A theme family's list as a menu under its button.
+		void PickTheme(const std::vector<int> &ids, RECT rc)
+		{
+			HMENU m = CreatePopupMenu();
+			for (int i : ids) AppendMenuW(m, MF_STRING | (theme == themes[i] ? MF_CHECKED : 0), UINT(i + 1), themes[i]->name);
+			POINT p{ rc.left, rc.bottom };
+			ClientToScreen(hwnd, &p);
+			// ponytail: modal here, so the sim waits while the menu is open; NativeMenu's thread if that matters
+			int cmd = TrackPopupMenu(m, TPM_RETURNCMD | TPM_NONOTIFY, p.x, p.y, 0, hwnd, nullptr);
+			DestroyMenu(m);
+			if (cmd > 0) SetTheme(cmd - 1);
 		}
 
 		void Paint() override
@@ -2082,7 +2855,7 @@ namespace
 
 			// The tab strip: the selected tab joined to the page.
 			int tx = border + S(4);
-			cv.RoundRect(border, titleH, cv.w - 2 * border, tabH, 0, theme->strip, theme->strip, 255);
+			cv.RoundRect(border, titleH, cv.w - 2 * border, tabH, 0, theme->strip, theme->strip, theme->stripAlpha);
 			for (int i = 0; i < int(std::size(tabNames)); i++)
 			{
 				if (fixedTab >= 0 && i != fixedTab) continue;
@@ -2091,7 +2864,7 @@ namespace
 				RECT rc{ tx, titleH + (on ? S(2) : S(4)), tx + tw, titleH + tabH + (on ? 1 : 0) };
 				bool hot = !on && Hovered(rc);
 				theme->Tab(cv, rc, on, hot);
-				text->Draw(cv, tx + S(10), rc.top + (rc.bottom - rc.top - text->Measure(tabNames[i]).cy) / 2 - (theme->segmentTabs ? S(1) : 0), tabNames[i], theme->ink);
+				text->Draw(cv, tx + S(10), rc.top + (rc.bottom - rc.top - text->Measure(tabNames[i]).cy) / 2 - (theme->segmentTabs ? S(1) : 0), tabNames[i], theme->TabInk(i == tab));
 				if (fixedTab < 0) Add(rc, [this, i] { tab = i, scroll = 0; }, L"Right-click: open this tab in its own window", [i] { OpenTorn(i); });
 				tx += tw + S(1);
 			}
@@ -2827,6 +3600,13 @@ namespace
 	};
 	std::vector<std::unique_ptr<HostWindow>> hosts;
 
+	void SetTheme(int i)
+	{
+		theme = themes[i];
+		GlobalPrefs::Ref().Set("Overlay.Theme", i);
+		ThemeChanged();
+	}
+
 	void ThemeChanged()
 	{
 		DirtyAll();
@@ -3198,6 +3978,12 @@ void OverlayWindows::Tick()
 	SyncHosts();
 	TickMenu();
 	TickRecording();
+	if (later)
+	{
+		auto run = std::move(later);
+		later = nullptr;
+		run();
+	}
 	if (rebuildPalette)
 	{
 		rebuildPalette = false;

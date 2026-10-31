@@ -186,12 +186,17 @@ Assessment, in the order I'd do it (effort: S = an hour or two, M = a session, L
 6. [x] **More OS themes** (M each). Done 2026-10-30: `Theme` interface (frame, caption buttons, buttons, popups,
    colours) with Windows 3.1, 95, 98, XP, Vista, 7, 8, 10, 11, Classic Mac (Platinum), macOS and TempleOS. Overlay
    tab -> Look (Overlay.Theme, live switch). Linux skins not done (add when wanted).
-   - [ ] **Look as two dropdowns** (user request 2026-10-30): a Windows dropdown (every Windows version above) and a
-     macOS dropdown, instead of one radio list.
-   - [ ] **The 8 eras of Mac UI** (user request 2026-10-30), each its own entry in the macOS dropdown: System 1-6
+   - [x] **Look as two dropdowns** (user request 2026-10-30): a Windows dropdown (every Windows version above) and a
+     macOS dropdown, instead of one radio list. Done 2026-10-30 (native popup menus; TempleOS is its own toggle).
+   - [x] **The 8 eras of Mac UI** (user request 2026-10-30), each its own entry in the macOS dropdown: System 1-6
      (1-bit), System 7 (colour), Mac OS 8-9 Platinum, Mac OS X 10.0-10.6 (Aqua), 10.7-10.9 (Lion-Mavericks grey),
      10.10-10.15 (Yosemite-Catalina flat), 11-15 (Big Sur-Sequoia), 26 (Liquid Glass). Eras 4-8 as the user
-     defined them. The current Classic Mac = Platinum (era 3) and macOS = 11-15 (era 7).
+     defined them. The current Classic Mac = Platinum (era 3) and macOS = 11-15 (era 7). Done 2026-10-30.
+     macOS 26 is real Liquid Glass, Apple's "regular" variant (HIG Materials): what's behind the window, via DXGI
+     desktop duplication (the GPU halves it), blurred, luminosity pulled into a band labels read over, lens and
+     specular rim at the edges; light or dark (white labels) by the brightness behind. A thread recomposes it every
+     display refresh. The window is kept out of screen captures and recordings while macOS 26 is on (else it would
+     see itself). Open: light/dark per bar rather than per window.
 7. [x] Black particles inside the zoom window (S); menus fade when unused (S). Done 2026-10-30: the zoom box is opaque
    (a magnifier); TPT's own menus, when shown, fade out after 3 s without the mouse over them.
 8. [-] Other platforms: X11 / Wayland input regions, macOS (L; only if someone needs them). Deferred by the
