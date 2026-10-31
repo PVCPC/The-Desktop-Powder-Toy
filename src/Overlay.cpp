@@ -37,6 +37,13 @@ namespace
 	OverlayInput input = OverlayInput::Auto;
 	bool fullScreenApp = false; // a full-screen app or game is in front: clicks pass through whatever the mode
 	OverlayLayer layer = OverlayLayer::OnTop;
+	// Behind the icons takes no clicks (the icons' view covers it), so Locked there is drawing mode: the layer comes up
+	// over the icons, under windows, until the input goes back to Auto or Pass-through.
+	OverlayLayer Shown()
+	{
+		return layer == OverlayLayer::BehindIcons && input == OverlayInput::Locked ? OverlayLayer::UnderWindows : layer;
+	}
+	void ApplyLayer();
 
 	// A global hotkey ("Ctrl+Alt+O"), polled each frame so it works while the window is unfocused.
 	struct Hotkey
@@ -80,7 +87,7 @@ namespace
 
 	void ApplyPassThrough()
 	{
-		bool pass = input == OverlayInput::PassThrough || fullScreenApp || layer == OverlayLayer::BehindIcons;
+		bool pass = input == OverlayInput::PassThrough || fullScreenApp || Shown() == OverlayLayer::BehindIcons;
 		OverlayWindows::SetPassThrough(fullScreenApp);
 		auto ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
 		ex = pass ? ex | WS_EX_TRANSPARENT : ex & ~LONG_PTR(WS_EX_TRANSPARENT);
@@ -90,6 +97,7 @@ namespace
 	void SetInput(OverlayInput newInput, bool announce = true)
 	{
 		input = newInput;
+		if (layer == OverlayLayer::BehindIcons) ApplyLayer(); // in or out of drawing mode
 		ApplyPassThrough();
 		if (announce)
 		{
@@ -120,10 +128,10 @@ namespace
 	void ApplyLayer()
 	{
 		static RECT screen; // where the layer sits as a top-level window
-		auto [desk, under] = layer == OverlayLayer::BehindIcons ? WallpaperLayer() : std::pair<HWND, HWND>{};
+		auto [desk, under] = Shown() == OverlayLayer::BehindIcons ? WallpaperLayer() : std::pair<HWND, HWND>{};
 		// SDL re-applies its own always-on-top whenever it moves or raises the window, which would lift the lower
 		// layers (the wallpaper one over the icons)
-		SDL_SetWindowAlwaysOnTop(sdlWindow, layer == OverlayLayer::OnTop ? SDL_TRUE : SDL_FALSE);
+		SDL_SetWindowAlwaysOnTop(sdlWindow, Shown() == OverlayLayer::OnTop ? SDL_TRUE : SDL_FALSE);
 		auto style = GetWindowLongPtrW(hwnd, GWL_STYLE);
 		if (desk && !GetParent(hwnd))
 		{
@@ -164,7 +172,7 @@ namespace
 			ScreenToClient(desk, &origin);
 			SetWindowPos(hwnd, under ? under : HWND_TOP, origin.x, origin.y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
 		}
-		else if (layer == OverlayLayer::OnTop)
+		else if (Shown() == OverlayLayer::OnTop)
 		{
 			SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
 		}
@@ -181,13 +189,13 @@ namespace
 	void TickLayer()
 	{
 		static int frames = 0;
-		if (layer == OverlayLayer::BehindIcons && GetParent(hwnd) && !(++frames % 10))
+		if (Shown() == OverlayLayer::BehindIcons && GetParent(hwnd) && !(++frames % 10))
 		{
 			HWND icons = FindWindowExW(GetParent(hwnd), nullptr, L"SHELLDLL_DefView", nullptr);
 			if (icons && GetWindow(hwnd, GW_HWNDPREV) != icons)
 				SetWindowPos(hwnd, icons, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 		}
-		if (layer == OverlayLayer::UnderWindows && !(++frames % 10) && GetWindow(hwnd, GW_HWNDNEXT))
+		if (Shown() == OverlayLayer::UnderWindows && !(++frames % 10) && GetWindow(hwnd, GW_HWNDNEXT))
 		{
 			// ponytail: anything after us in the z-order counts; fine as long as nothing else pins itself to the bottom
 			HWND next = GetWindow(hwnd, GW_HWNDNEXT);

@@ -212,6 +212,9 @@ Assessment, in the order I'd do it (effort: S = an hour or two, M = a session, L
    Pushing never tunnels through another window or icon (that threw sand off the top edge in void mode).
    Behind-icons layer on 24H2+: UpdateLayeredWindow fails (87) on a child of Progman, so it's colour-keyed and
    BitBlt-ed; placed at the monitor corner and kept under SHELLDLL_DefView (SDL's always-on-top cleared).
+   That layer takes no clicks, so Locked input there is drawing mode: it comes up as the under-windows layer
+   until Auto/Pass-through. Icon rects: GetItemPosition is the icon's own left (no centring in the spacing
+   cell); top = position + 6 px, matched against sand resting on real icons.
    Speed: the scale-up runs in parallel bands (std::execution::par). Per frame now ~10 ms of overlay work:
    ~4.5 ms is UpdateLayeredWindow's 32 MB copy (needs a GPU presenter, DirectComposition, to get 120 fps).
    2026-10-30 later: pixel-exact and every frame (user: "smoother, less blocky"). Windows are no longer WL_WALL

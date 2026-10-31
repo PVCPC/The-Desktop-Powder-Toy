@@ -4653,7 +4653,7 @@ static std::vector<DeskIcon> ReadDesktopIcons(IFolderView2 *&view, HWND &list)
 			if (SUCCEEDED(view->GetItemPosition(item, &p)))
 			{
 				ClientToScreen(list, &p);
-				int x = p.x + (spacing.x - size) / 2, y = p.y + 2;
+				int x = p.x, y = p.y + 6; // matched by eye against sand resting on icons
 				icons.push_back({ { x, y, x + size, y + size }, IconShape(folder, item, size, budget) });
 			}
 			CoTaskMemFree(item);
