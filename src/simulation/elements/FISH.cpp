@@ -2,6 +2,7 @@
 #include "Boids.h"
 
 static int update(UPDATE_FUNC_ARGS);
+static void create(ELEMENT_CREATE_FUNC_ARGS);
 
 void Element::Element_FISH()
 {
@@ -44,9 +45,17 @@ void Element::Element_FISH()
 	HighTemperatureTransition = PT_DUST;
 
 	Update = &update;
+	Create = &create;
 }
 
-// life: ticks spent out of liquid
+static void create(ELEMENT_CREATE_FUNC_ARGS)
+{
+	static const uint32_t kinds[] = { 0xFFFF8C1A, 0xFFFFD21A, 0xFFC0C8D0, 0xFF3A8FE0, 0xFFE04A4A, 0xFF9AE05A };
+	sim->parts[i].dcolour = kinds[sim->rng.between(0, 5)];
+	sim->parts[i].tmp = sim->rng.chance(1, 5); // a loner
+}
+
+// life: ticks spent out of liquid; tmp 1: a loner
 static int update(UPDATE_FUNC_ARGS)
 {
 	auto &elements = SimulationData::CRef().elements;
@@ -58,7 +67,7 @@ static int update(UPDATE_FUNC_ARGS)
 	if (wet(x, y - 1) || wet(x, y + 1) || wet(x - 1, y) || wet(x + 1, y))
 	{
 		parts[i].life = 0;
-		Flock(sim, parts[i], i, x, y, 0.7f, wet);
+		Flock(sim, parts[i], i, x, y, 0.7f, parts[i].tmp ? 0 : 0.35f, wet);
 		parts[i].vy -= elements[PT_FISH].Gravity; // swimming, not sinking
 		return 0;
 	}

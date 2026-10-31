@@ -4,8 +4,9 @@
 
 // Flocking for BIRD and FISH: steer toward the neighbours' heading and middle, away from ones too close, wander a
 // little, and turn before running into anything `free` says no to. Sets the particle's velocity at `speed`.
+// social scales how much it follows the others (0 = a loner that only keeps its distance).
 template<class Free>
-static void Flock(Simulation *sim, Particle &p, int i, int x, int y, float speed, Free free)
+static void Flock(Simulation *sim, Particle &p, int i, int x, int y, float speed, float social, Free free)
 {
 	float ax = 0, ay = 0, cx = 0, cy = 0, sx = 0, sy = 0;
 	int n = 0;
@@ -23,8 +24,8 @@ static void Flock(Simulation *sim, Particle &p, int i, int x, int y, float speed
 	float vx = p.vx, vy = p.vy;
 	if (n)
 	{
-		vx += (ax / n - vx) * 0.15f + cx / n * 0.03f + sx * 0.06f;
-		vy += (ay / n - vy) * 0.15f + cy / n * 0.03f + sy * 0.06f;
+		vx += ((ax / n - vx) * 0.15f + cx / n * 0.03f) * social + sx * 0.06f;
+		vy += ((ay / n - vy) * 0.15f + cy / n * 0.03f) * social + sy * 0.06f;
 	}
 	float turn = (sim->rng.uniform01() - 0.5f) * 0.12f; // wander
 	float c = std::cos(turn), s = std::sin(turn);

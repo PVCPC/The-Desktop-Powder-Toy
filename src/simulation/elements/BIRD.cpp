@@ -48,7 +48,7 @@ void Element::Element_BIRD()
 
 static int update(UPDATE_FUNC_ARGS)
 {
-	Flock(sim, parts[i], i, x, y, 1.5f, [sim](int fx, int fy) {
+	Flock(sim, parts[i], i, x, y, 1.5f, 1, [sim](int fx, int fy) {
 		unsigned r = 0;
 		return sim->eval_move(PT_BIRD, fx, fy, &r) || TYP(r) == PT_BIRD;
 	});
