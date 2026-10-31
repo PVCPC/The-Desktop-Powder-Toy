@@ -119,20 +119,22 @@ namespace
 		return double(c.QuadPart) / f.QuadPart;
 	}
 
-	// The particles that moved between the last two sim frames (OverlayFrameParts): the pixel each is drawn at in the
-	// newest, and how far back (in sim pixels) it was in the one before. Frames drawn between sim ticks slide them
-	// across, so the screen shows the sim one tick late but in motion at the screen's rate.
+	// The particles that moved between the last two sim frames (OverlayFrameParts): the pixel each is at in the newest,
+	// and how far (sim pixels) it went since the one before. Frames drawn between sim ticks carry them on at that speed,
+	// so the newest frame is shown right away (no tick of latency) and still moves at the screen's rate.
 	struct Moving
 	{
-		float x, y, dx, dy;
+		float x, y, vx, vy;
 	};
 	std::vector<Moving> moving;
-	std::vector<uint8_t> frameOccupied; // XRES x YRES (sized at the first sim frame: the sim size is set at start-up): the pixels the shown frame has particles on
+	// XRES x YRES, of the shown frame (sized at the first sim frame: the sim size is set at start-up)
+	enum : uint8_t { OnParticle = 1, OnWall = 2, Moves = 4 };
+	std::vector<uint8_t> frameOccupied;
 	double framePeriod = 1 / 60.0, frameAt = 0; // seconds between sim frames, and when the newest came
 
 	// Frames on the GPU: a click-through window just over ours shows a screen-sized swap chain (DirectComposition):
 	// the frame goes up sim-sized and the GPU scales it (nearest pixel), with the moving particles taken out and drawn
-	// as squares between where they were and where they are. That replaces UpdateLayeredWindow's full-screen copy
+	// as squares where they're heading, and sand on a window that moved since the sim read it moved along. That replaces UpdateLayeredWindow's full-screen copy
 	// (~4.5 ms at 5120x1440). Ours stays, at alpha 1 of 255, to take the clicks: see-through pixels pass them on by
 	// turning it click-through while the mouse is over one. Null without DirectComposition (Windows 7), a D3D11
 	// device or the shader compiler: UpdateLayeredWindow then.
@@ -162,12 +164,12 @@ namespace
 	Gpu *gpu = nullptr;
 	struct Part
 	{
-		float x, y, dx, dy;
+		float x, y; // sim pixels
 		uint32_t colour;
 	};
 
 	constexpr char shaders[] = R"(
-cbuffer C : register(b0) { float2 scale; float2 screen; float t; float3 pad; };
+cbuffer C : register(b0) { float2 scale; float2 screen; };
 Texture2D<float4> frame : register(t0);
 struct V { float4 pos : SV_Position; float4 col : COLOR; };
 V Bg(uint id : SV_VertexID)
@@ -179,9 +181,9 @@ V Bg(uint id : SV_VertexID)
 	return o;
 }
 float4 BgPs(V i) : SV_Target { return frame.Load(int3(i.pos.xy / scale, 0)); }
-V Part(uint id : SV_VertexID, float2 at : AT, float2 d : DELTA, float4 col : COLOR)
+V Part(uint id : SV_VertexID, float2 at : AT, float4 col : COLOR)
 {
-	float2 p = round((at + d * (1 - t)) * scale) + float2(id & 1, id >> 1) * scale;
+	float2 p = round(at * scale) + float2(id & 1, id >> 1) * scale;
 	V o;
 	o.pos = float4(p / screen * float2(2, -2) + float2(-1, 1), 0, 1);
 	o.col = col.bgra;
@@ -213,6 +215,8 @@ float4 PartPs(V i) : SV_Target { return i.col; }
 		          SUCCEEDED(adapter->GetParent(IID_PPV_ARGS(&g->factory))) && SUCCEEDED(create(dxgi, IID_PPV_ARGS(&g->comp))) &&
 		          SUCCEEDED(g->comp->CreateTargetForHwnd(g->view, TRUE, &g->compTarget)) && SUCCEEDED(g->comp->CreateVisual(&g->visual)) &&
 		          SUCCEEDED(g->compTarget->SetRoot(g->visual));
+		IDXGIDevice1 *dxgi1 = nullptr; // one frame queued, not three: each would show the sim a frame later
+		if (ok && SUCCEEDED(dxgi->QueryInterface(IID_PPV_ARGS(&dxgi1)))) dxgi1->SetMaximumFrameLatency(1), dxgi1->Release();
 		if (adapter) adapter->Release();
 		if (dxgi) dxgi->Release();
 		auto shader = [&](const char *entry, const char *target) {
@@ -231,8 +235,7 @@ float4 PartPs(V i) : SV_Target { return i.col; }
 			bgVs = shader("Bg", "vs_4_0"), bgPs = shader("BgPs", "ps_4_0"), partVs = shader("Part", "vs_4_0"), partPs = shader("PartPs", "ps_4_0");
 			D3D11_INPUT_ELEMENT_DESC layout[] = {
 				{ "AT", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-				{ "DELTA", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D11_INPUT_PER_INSTANCE_DATA, 1 },
-				{ "COLOR", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, 16, D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+				{ "COLOR", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, 8, D3D11_INPUT_PER_INSTANCE_DATA, 1 },
 			};
 			D3D11_BLEND_DESC blend{};
 			blend.RenderTarget[0] = { TRUE, D3D11_BLEND_ONE, D3D11_BLEND_INV_SRC_ALPHA, D3D11_BLEND_OP_ADD,
@@ -247,7 +250,7 @@ float4 PartPs(V i) : SV_Target { return i.col; }
 			     SUCCEEDED(g->device->CreatePixelShader(bgPs->GetBufferPointer(), bgPs->GetBufferSize(), nullptr, &g->bgPs)) &&
 			     SUCCEEDED(g->device->CreateVertexShader(partVs->GetBufferPointer(), partVs->GetBufferSize(), nullptr, &g->partVs)) &&
 			     SUCCEEDED(g->device->CreatePixelShader(partPs->GetBufferPointer(), partPs->GetBufferSize(), nullptr, &g->partPs)) &&
-			     SUCCEEDED(g->device->CreateInputLayout(layout, 3, partVs->GetBufferPointer(), partVs->GetBufferSize(), &g->partLayout)) &&
+			     SUCCEEDED(g->device->CreateInputLayout(layout, 2, partVs->GetBufferPointer(), partVs->GetBufferSize(), &g->partLayout)) &&
 			     SUCCEEDED(g->device->CreateBlendState(&blend, &g->over)) &&
 			     SUCCEEDED(g->device->CreateRasterizerState(&raster, &g->noCull)) &&
 			     SUCCEEDED(g->device->CreateBuffer(&cb, nullptr, &g->constants));
@@ -350,16 +353,37 @@ float4 PartPs(V i) : SV_Target { return i.col; }
 			g.w = w, g.h = h;
 		}
 
-		// the moving particles: out of the frame, into squares
+		// out of the frame, into squares: first the sand on top of a window that rose since the sim last read it (it
+		// would sink into the window by up to a tick), lifted with it. Only rising: the sim doesn't carry a pile
+		// sideways (the window slides out from under it) and a falling window leaves it to gravity.
 		static std::vector<Part> parts;
 		parts.clear();
+		for (auto &s : OverlayWindows::WindowShifts())
+			for (int x = std::max(s.x0, 0); s.dy < 0 && x < std::min(s.x1, w); x++)
+				for (int y = std::min(s.y0, h) - 1; y >= 0; y--)
+				{
+					auto &px = argb[size_t(y) * w + x];
+					if (px >> 24 < 2) break; // the top of the pile
+					parts.push_back({ float(x), y + s.dy, px });
+					px = empty;
+				}
+		// then the moving particles, carried on at their speed (one tick at most); not into a still particle or a
+		// wall, where the sim will stop them: overshooting and snapping back would flicker
+		float t = float(std::clamp((Now() - frameAt) / framePeriod, 0.0, 1.0));
 		for (auto &m : moving)
 		{
 			int x = int(m.x), y = int(m.y);
 			if (x < 0 || y < 0 || x >= w || y >= h) continue;
 			auto &px = argb[size_t(y) * w + x];
 			if (px >> 24 < 2) continue; // under a window or a panel, or already taken
-			parts.push_back({ m.x, m.y, m.dx, m.dy, px });
+			int nx = int(std::lround(m.x + m.vx)), ny = int(std::lround(m.y + m.vy));
+			bool open = nx >= 0 && ny >= 0 && nx < XRES && ny < YRES && size_t(ny) * XRES + nx < frameOccupied.size();
+			if (open)
+			{
+				auto o = frameOccupied[size_t(ny) * XRES + nx];
+				open = !(o & OnWall) && (!(o & OnParticle) || (o & Moves));
+			}
+			parts.push_back({ open ? m.x + m.vx * t : m.x, open ? m.y + m.vy * t : m.y, px });
 			px = empty;
 		}
 		if (int(parts.size()) > g.partsCap)
@@ -375,10 +399,9 @@ float4 PartPs(V i) : SV_Target { return i.col; }
 			std::memcpy(map.pData, parts.data(), parts.size() * sizeof(Part));
 			g.context->Unmap(g.parts, 0);
 		}
-		float t = float(std::clamp((Now() - frameAt) / framePeriod, 0.0, 1.0));
 		if (SUCCEEDED(g.context->Map(g.constants, 0, D3D11_MAP_WRITE_DISCARD, 0, &map)))
 		{
-			float c[8] = { float(ww) / w, float(wh) / h, float(ww), float(wh), t };
+			float c[8] = { float(ww) / w, float(wh) / h, float(ww), float(wh) };
 			std::memcpy(map.pData, c, sizeof(c));
 			g.context->Unmap(g.constants, 0);
 		}
@@ -715,18 +738,20 @@ void OverlayFrameParts(const RenderableSimulation &sim, bool zoom)
 	{
 		auto &p = sim.parts[i];
 		// the same slot and type a frame ago, and close: the same particle (a reused slot is a new one)
+		int x = int(p.x + 0.5f), y = int(p.y + 0.5f);
+		bool moves = false;
 		if (p.type && p.type == lastType[i])
 		{
-			float dx = lastX[i] - p.x, dy = lastY[i] - p.y;
+			float vx = p.x - lastX[i], vy = p.y - lastY[i];
 			// not with the zoom window up: it would be a magnified copy of the unmoved frame
-			if (!zoom && (dx != 0 || dy != 0) && std::abs(dx) < 8 && std::abs(dy) < 8)
-				moving.push_back({ float(int(p.x + 0.5f)), float(int(p.y + 0.5f)), dx, dy });
+			if (!zoom && (vx != 0 || vy != 0) && std::abs(vx) < 8 && std::abs(vy) < 8)
+				moving.push_back({ float(x), float(y), vx, vy }), moves = true;
 		}
 		lastType[i] = p.type, lastX[i] = p.x, lastY[i] = p.y;
-		int x = int(p.x + 0.5f), y = int(p.y + 0.5f);
-		if (p.type && x >= 0 && y >= 0 && x < XRES && y < YRES) frameOccupied[y * XRES + x] = 1;
+		if (p.type && x >= 0 && y >= 0 && x < XRES && y < YRES) frameOccupied[y * XRES + x] = OnParticle | (moves ? Moves : 0);
 	}
 	std::fill(lastType.begin() + n, lastType.end(), 0);
+	OverlayWindows::FrameWalls(frameOccupied, OnWall);
 #else
 	(void)sim, (void)zoom;
 #endif
@@ -769,11 +794,13 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 	bool catchEmpty = input == OverlayInput::Locked || (input == OverlayInput::Auto && fg == GetCurrentProcessId());
 	uint32_t empty = catchEmpty ? 0x01000000 : 0;
 	argb.resize(size_t(w) * h);
-	for (int i = 0; i < w * h; i++)
-	{
-		auto c = vid[i] & 0xFFFFFF;
-		argb[i] = c ? c | 0xFF000000 : empty;
-	}
+	OverlayBands(h, [&](int y0, int y1) {
+		for (int i = y0 * w; i < y1 * w; i++)
+		{
+			auto c = vid[i] & 0xFFFFFF;
+			argb[i] = c ? c | 0xFF000000 : empty;
+		}
+	});
 	if (w == WINDOWW && h == WINDOWH)
 	{
 		if (frameOccupied.size() < size_t(XRES) * YRES) frameOccupied.assign(size_t(XRES) * YRES, 0);

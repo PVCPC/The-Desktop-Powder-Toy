@@ -2,7 +2,19 @@
 #include <SDL.h>
 #include <cstdint>
 #include <utility>
+#include <array>
+#include <execution>
+#include <numeric>
 #include "common/Vec2.h"
+
+// f(y0, y1) for rows [0, h) in 32 bands, on all cores
+template<class F>
+void OverlayBands(int h, F f)
+{
+	constexpr int bands = 32;
+	static const auto ids = [] { std::array<int, bands> a; std::iota(a.begin(), a.end(), 0); return a; }();
+	std::for_each(std::execution::par, ids.begin(), ids.end(), [&](int b) { f(h * b / bands, h * (b + 1) / bands); });
+}
 
 // overlay:on: a borderless, always-on-top window over the desktop. Empty (black) pixels are see-through; what
 // clicks do depends on the mode (OVERLAY.md). Windows only so far.

@@ -2183,7 +2183,9 @@ void GameView::OnDraw()
 {
 	Graphics * g = GetGraphics();
 
-	auto threadedRenderingAllowed = c->ThreadedRenderingAllowed();
+	// Not on the desktop overlay: the render thread shows the frame it drew from the sim a tick ago, and there that's
+	// a tick of lag between a moving window and the sand on it.
+	auto threadedRenderingAllowed = c->ThreadedRenderingAllowed() && !(overlayMode && !overlayWindowed);
 	if (wantFrame)
 	{
 		wantFrame = false;

@@ -4562,7 +4562,8 @@ void OverlayWindows::ApplySimMasks(uint32_t *argb, int w, const uint8_t *occupie
 	// The zoom window is a magnifier: opaque, its frame included, black particles and all.
 	auto zoom = RectSized(model->GetZoomWindowPosition() - Vec2{ 2, 2 }, Vec2{ 1, 1 } * (model->GetZoomSize() * model->GetZoomFactor() + 4));
 	bool zoomOn = model->GetZoomEnabled();
-	for (int y = 0; y < YRES; y++)
+	OverlayBands(YRES, [&](int y0, int y1) {
+	for (int y = y0; y < y1; y++)
 		for (int x = 0; x < XRES; x++)
 		{
 			auto &p = argb[y * w + x];
@@ -4570,7 +4571,7 @@ void OverlayWindows::ApplySimMasks(uint32_t *argb, int w, const uint8_t *occupie
 			{
 				p |= 0xFF000000;
 			}
-			else if (sim->PixelWall(x, y))
+			else if (occupied[y * XRES + x] & 2) // the walls as of the frame: the live ones may have moved since
 			{
 				p = 0; // a window's wall: the window shows through
 			}
@@ -4578,11 +4579,12 @@ void OverlayWindows::ApplySimMasks(uint32_t *argb, int w, const uint8_t *occupie
 			{
 				p = 0;
 			}
-			else if (!(p & 0xFFFFFF) && occupied[y * XRES + x]) // a black particle: solid
+			else if (!(p & 0xFFFFFF) && (occupied[y * XRES + x] & 1)) // a black particle: solid
 			{
 				p = 0xFF000000;
 			}
 		}
+	});
 	if (!full)
 	{
 		// A faint frame just outside the area, so you can see where it ends.
@@ -4753,6 +4755,37 @@ static std::vector<DeskIcon> DesktopIcons()
 // pile on title bars and flow around windows. A window moving onto particles shoves each one along its move to the
 // first free pixel past it, at the window's speed; one that appeared or grew lifts them out over its top. One with
 // no room left stays put, hidden under the window (never deleted).
+static std::map<HWND, RECT> wallRects, frameRects; // the wall windows when the sim last read them / at the frame drawn
+
+void OverlayWindows::FrameWalls(std::vector<uint8_t> &mask, uint8_t bit)
+{
+	frameRects = wallRects;
+	if (!&GameController::Ref()) return;
+	auto &walls = GameController::Ref().GetModel()->GetSimulation()->pixelWalls;
+	for (size_t i = 0; i < walls.size() && i < mask.size(); i++)
+		if (walls[i]) mask[i] |= bit;
+}
+
+std::vector<OverlayWindows::WindowShift> OverlayWindows::WindowShifts()
+{
+	std::vector<WindowShift> out;
+	RECT sr;
+	GetWindowRect(mainWindow, &sr);
+	int sw = sr.right - sr.left, sh = sr.bottom - sr.top;
+	if (sw <= 0 || sh <= 0) return out;
+	auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); }; // as TickWindowWalls
+	for (auto &[hwnd, at] : frameRects)
+	{
+		RECT r;
+		if (DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &r, sizeof(r)) != S_OK) GetWindowRect(hwnd, &r);
+		if (r.left == at.left && r.top == at.top) continue;
+		out.push_back({ px(at.left - sr.left, WINDOWW, sw), px(at.top - sr.top, WINDOWH, sh), px(at.right - sr.left, WINDOWW, sw),
+		                px(at.bottom - sr.top, WINDOWH, sh), float(double(r.left - at.left) * WINDOWW / sw),
+		                float(double(r.top - at.top) * WINDOWH / sh) });
+	}
+	return out;
+}
+
 static void TickWindowWalls()
 {
 	auto *sim = GameController::Ref().GetModel()->GetSimulation();
@@ -4761,7 +4794,7 @@ static void TickWindowWalls()
 	static int lastTick = -1, skipped = 0;
 	if (sim->currentTick == lastTick && ++skipped < 2) return;
 	lastTick = sim->currentTick, skipped = 0;
-	static std::map<HWND, RECT> last; // where each window was on the last frame
+	// wallRects: where each window was on the last tick
 	struct Win { int x0, y0, x1, y1, mx, my; const DeskIcon *icon = nullptr; };
 	std::vector<Win> wins;
 	RECT sr;
@@ -4773,7 +4806,7 @@ static void TickWindowWalls()
 	if (overlayWindowed || (!doWindows && !doIcons) || sw <= 0 || sh <= 0)
 	{
 		sim->pixelWalls.clear();
-		last.clear();
+		wallRects.clear();
 		return;
 	}
 	std::map<HWND, RECT> now;
@@ -4799,7 +4832,7 @@ static void TickWindowWalls()
 		       std::min(XRES, px(r.right - c.sr.left, WINDOWW, c.sw)), std::min(YRES, px(r.bottom - c.sr.top, WINDOWH, c.sh)), 0, 0 };
 		(*c.now)[hwnd] = r;
 		if (w.x1 <= w.x0 || w.y1 <= w.y0) return TRUE;
-		if (auto it = last.find(hwnd); it != last.end())
+		if (auto it = wallRects.find(hwnd); it != wallRects.end())
 		{
 			w.mx = px(r.left - it->second.left, WINDOWW, c.sw);
 			w.my = px(r.top - it->second.top, WINDOWH, c.sh);
@@ -4807,7 +4840,7 @@ static void TickWindowWalls()
 		c.wins->push_back(w);
 		return TRUE;
 	}, LPARAM(&ctx));
-	last = std::move(now);
+	wallRects = std::move(now);
 	auto icons = doIcons ? DesktopIcons() : std::vector<DeskIcon>{};
 	if (doIcons)
 		for (auto &icon : icons)
@@ -5232,6 +5265,8 @@ void OverlayWindows::SetPassThrough(bool) {}
 void OverlayWindows::Notify(const char *) {}
 bool OverlayWindows::HideTPTMenus() { return false; }
 void OverlayWindows::ApplySimMasks(uint32_t *, int, const uint8_t *) {}
+void OverlayWindows::FrameWalls(std::vector<uint8_t> &, uint8_t) {}
+std::vector<OverlayWindows::WindowShift> OverlayWindows::WindowShifts() { return {}; }
 void OverlayWindows::ClearUnderWindows(uint32_t *, int, int, int, int) {}
 void OverlayWindows::SetPlayArea(int, int, int, int) {}
 bool OverlayWindows::AreaMouse(int, int, int) { return false; }

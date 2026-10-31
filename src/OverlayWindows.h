@@ -15,8 +15,19 @@ namespace OverlayWindows
 	bool HideTPTMenus(); // TPT's own side bar and tool strip, replaced by the Elements window while it's open
 	// Sim-aware touches to a w-wide 0xAARRGGBB frame whose top-left XRES x YRES is the sim: black particles opaque,
 	// everything outside the playable area clear, a faint frame around the area.
-	// occupied: XRES x YRES, nonzero where the shown frame has a particle (it lags the live sim)
+	// occupied: XRES x YRES, of the shown frame (it lags the live sim): bit 1 a particle, bit 2 a wall
 	void ApplySimMasks(uint32_t *argb, int w, const uint8_t *occupied);
+	// At each sim frame drawn: notes where the walls are for WindowShifts, and ORs `bit` into `mask` (XRES x YRES)
+	// on wall pixels.
+	void FrameWalls(std::vector<uint8_t> &mask, uint8_t bit);
+	// The windows that moved since the last frame drawn read them: where the sim had them, and how far they've gone
+	// since (sim pixels).
+	struct WindowShift
+	{
+		int x0, y0, x1, y1;
+		float dx, dy;
+	};
+	std::vector<WindowShift> WindowShifts();
 	// Clears the w x h frame where our app windows are, the frame being shown at ww x wh: the sim layer sits on top,
 	// so this keeps sand off them and lets clicks reach them.
 	void ClearUnderWindows(uint32_t *argb, int w, int h, int ww, int wh);
