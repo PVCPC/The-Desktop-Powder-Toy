@@ -118,6 +118,8 @@ overlay, and TPT only runs the top screen, so **the sim freezes while any dialog
        Render options is a whole-screen view: Window::InPlace draws it on the sim layer instead of hosting it.
        Left: half-scrolled rows vanish instead of clipping; text caret is always at the end
 5. **Notifications** (S): startup notices, update news and errors to toasts and a list in the main window.
+   - [x] Done 2026-10-30: TPT's notifications (update news, server notices) are a toast each and a yellow row at the
+     top of the Welcome tab (Open, Dismiss) instead of buttons over the desktop. Errors stay TPT's own dialogs (hosted).
 6. **Sim layer position setting** (S-M): on top / under windows / behind the desktop icons.
 7. **Themes** (M each): the frame and controls as a theme interface, then XP, 7, 10/11, Mac, Linux.
 

@@ -1,4 +1,5 @@
 #include "GameView.h"
+#include "Overlay.h"
 
 #include "Brush.h"
 #include "tool/DecorationTool.h"
@@ -1914,6 +1915,10 @@ void GameView::NotifyNotificationsChanged(GameModel * sender)
 	notificationComponents.clear();
 
 	std::vector<Notification*> notifications = sender->GetNotifications();
+	if (overlayMode)
+	{
+		return; // toasts and the Welcome tab's list instead of buttons over the desktop
+	}
 
 	int currentY = YRES-23;
 	for (auto *notification : notifications)

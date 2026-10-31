@@ -5,6 +5,7 @@
 #include "Overlay.h"
 #include "gui/game/GameController.h"
 #include "gui/game/GameModel.h"
+#include "gui/game/Notification.h"
 #include "client/SaveFile.h"
 #include "client/SaveInfo.h"
 #include "gui/game/GameView.h"
@@ -1070,7 +1071,8 @@ namespace
 			page.Resize(pw, ph);
 			page.RoundRect(0, 0, pw, ph, 0, 0xFFFFFF, 0xFFFFFF, 255);
 			std::swap(cv, page);
-			std::vector<std::pair<RECT, std::wstring>> links;
+			struct Link { RECT rc; std::function<void()> go; std::wstring tip; };
+			std::vector<Link> links;
 
 			int x0 = S(18), x1 = pw - S(18), y = S(14);
 			const Style title{ 22, FW_LIGHT, false, false, 0x1E395B }, subtitle{ 12, FW_NORMAL, true, false, 0x6D6D6D },
@@ -1109,10 +1111,36 @@ namespace
 			{
 				auto size = text->Measure(label, link);
 				text->Draw(cv, lx, y, label, link);
-				links.push_back({ RECT{ lx, y, lx + int(size.cx), y + int(size.cy) }, url });
+				links.push_back({ RECT{ lx, y, lx + int(size.cx), y + int(size.cy) },
+				                  [url = std::wstring(url)] { ShellExecuteW(nullptr, L"open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL); }, url });
 				lx += size.cx + S(18);
 			}
 			y += S(30);
+
+			// TPT's notifications (update news, server messages): a yellow row each, with Open and Dismiss.
+			for (auto *n : GameController::Ref().GetModel()->GetNotifications())
+			{
+				int rh = S(30);
+				cv.RoundRect(x0, y, x1 - x0, rh, S(3), 0xFFFBE5, 0xFFF4C4, 255);
+				cv.RoundFrame(x0, y, x1 - x0, rh, S(3), 0xE5C365, 255);
+				cv.RoundRect(x0 + S(8), y + S(7), S(16), S(16), S(8), 0xF0B030, 0xC08000, 255);
+				text->Draw(cv, x0 + S(14), y + S(7), L"!", Style{ 11, FW_BOLD, false, false, 0xFFFFFF });
+				int lx = x1 - S(10);
+				for (auto [label, dismiss] : { std::pair{ L"Dismiss", true }, std::pair{ L"Open", false } })
+				{
+					auto size = text->Measure(label, link);
+					lx -= size.cx;
+					text->Draw(cv, lx, y + S(6), label, link);
+					links.push_back({ RECT{ lx, y + S(6), lx + int(size.cx), y + S(6) + int(size.cy) }, [n, dismiss] {
+						if (dismiss) GameController::Ref().RemoveNotification(n);
+						else n->Action();
+					}, dismiss ? L"Remove this notice" : L"Open it" });
+					lx -= S(14);
+				}
+				text->Draw(cv, x0 + S(32), y + S(6), Wide(n->Message), 0x1A1A1A, false, lx - x0 - S(36));
+				y += rh + S(6);
+			}
+			if (!GameController::Ref().GetModel()->GetNotifications().empty()) y += S(10);
 
 			// Headers: H1 is the title, H2 a part of the page (with a rule), H3 a group of shortcuts.
 			auto header = [&](const wchar_t *name) {
@@ -1240,12 +1268,12 @@ namespace
 			{
 				std::copy_n(page.px.data() + size_t(row + scroll) * pw, pw, cv.px.data() + size_t(c.top + 1 + row) * cv.w + c.left);
 			}
-			for (auto &[rc, url] : links)
+			for (auto &l : links)
 			{
-				RECT on{ rc.left + c.left, rc.top + c.top + 1 - scroll, rc.right + c.left, rc.bottom + c.top + 1 - scroll };
+				RECT on{ l.rc.left + c.left, l.rc.top + c.top + 1 - scroll, l.rc.right + c.left, l.rc.bottom + c.top + 1 - scroll };
 				if (on.top >= c.top && on.bottom <= c.bottom)
 				{
-					Add(on, [url = url] { ShellExecuteW(nullptr, L"open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL); }, url);
+					Add(on, l.go, l.tip);
 				}
 			}
 		}
@@ -2220,6 +2248,15 @@ void OverlayWindows::Tick()
 	if (!mainWindow || !&GameController::Ref())
 	{
 		return;
+	}
+	static std::vector<Notification *> seen;
+	auto notes = GameController::Ref().GetModel()->GetNotifications();
+	if (notes != seen)
+	{
+		for (auto *n : notes)
+			if (std::find(seen.begin(), seen.end(), n) == seen.end()) Notify(n->Message.ToUtf8().c_str());
+		seen = notes;
+		if (palette) palette->dirty = true;
 	}
 	static bool areaRestored = false;
 	if (!areaRestored)
