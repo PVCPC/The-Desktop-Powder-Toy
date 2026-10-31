@@ -6,10 +6,10 @@ Windows desktop**: sand piles up on your open windows and desktop icons, water p
 everything you don't draw stays see-through and clickable. All of the original game is still here; the original
 README follows below.
 
-Our work is on the [`overlay`](../../tree/overlay) branch. Details, design notes and the to-do list are in
-[OVERLAY.md](OVERLAY.md).
+Our work is on the [`overlay`](https://github.com/PVCPC/The-Desktop-Powder-Toy/tree/overlay) branch. Details, design notes and the to-do list are in
+[OVERLAY.md](https://github.com/PVCPC/The-Desktop-Powder-Toy/blob/overlay/OVERLAY.md).
 
-![Sand piled on an open window, water running off another](docs/overlay/sand-on-windows.png)
+![Sand piled on an open window, water running off another](https://raw.githubusercontent.com/PVCPC/The-Desktop-Powder-Toy/overlay/docs/overlay/sand-on-windows.png)
 
 What's new
 ----------
@@ -34,11 +34,11 @@ What's new
   physics steps, so there's no added frame of lag, and sand stays on a moving window.
 - `overlay:window` runs TPT in its normal window but with the new side windows and tray.
 
-![The side windows: Tools, Simulation, Display, Saves and the main window with its Welcome tab](docs/overlay/desktop.png)
+![The side windows: Tools, Simulation, Display, Saves and the main window with its Welcome tab](https://raw.githubusercontent.com/PVCPC/The-Desktop-Powder-Toy/overlay/docs/overlay/desktop.png)
 
 | Simulation | Display |
 |---|---|
-| ![Simulation window](docs/overlay/simulation-window.png) | ![Display window](docs/overlay/display-window.png) |
+| ![Simulation window](https://raw.githubusercontent.com/PVCPC/The-Desktop-Powder-Toy/overlay/docs/overlay/simulation-window.png) | ![Display window](https://raw.githubusercontent.com/PVCPC/The-Desktop-Powder-Toy/overlay/docs/overlay/display-window.png) |
 
 Windows only for now. Build as below, then run `powder.exe overlay:on`.
 
