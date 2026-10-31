@@ -163,6 +163,13 @@ public:
 	// Loop edges: wraps a position into the play area, less its outer ring of cells (as stock TPT does at the
 	// screen edge). True if it wrapped.
 	bool LoopWrap(float &x, float &y) const;
+	// XRES x YRES, or empty: 1 where something outside the sim (the overlay's desktop windows) blocks particles,
+	// pixel by pixel. Nothing moves or is drawn into it; unlike walls it never deletes what's already there.
+	std::vector<uint8_t> pixelWalls;
+	bool PixelWall(int x, int y) const
+	{
+		return !pixelWalls.empty() && pixelWalls[size_t(y) * XRES + x];
+	}
 	int gravityMode = GRAV_VERTICAL;
 	float customGravityX = 0;
 	float customGravityY = 0;

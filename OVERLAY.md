@@ -184,9 +184,9 @@ Assessment, in the order I'd do it (effort: S = an hour or two, M = a session, L
      home yet; the Saves tab's Online group has browse, upload, vote, tags and sign in
    - [x] Welcome tab (2026-10-30): TPT's startup text, rewritten as a Vista start page (headers, keycaps, tip
      bar, links) instead of drawn over the game; the side window opens on it
-2. [ ] **Desktop UI** (L, user request 2026-10-30): see "Desktop UI design" above. Steps: window foundation; sim
+2. [x] **Desktop UI** (L, user request 2026-10-30): see "Desktop UI design" above. Steps: window foundation; sim
    keeps running under dialogs; re-host every TPT dialog; native replacements; notifications; sim layer position;
-   themes (= item 6).
+   themes (= item 6). All done 2026-10-30.
 3. [x] **Full-screen sim** (M): pick RES at build time (a meson option sized to the screen at the chosen pixel
    size). The windows already scale on their own, so the old "separate UI scale" item is no longer needed. RES at
    runtime (every static XRES/YRES array) stays a later L job, only if switching screens without a rebuild matters.
@@ -205,6 +205,10 @@ Assessment, in the order I'd do it (effort: S = an hour or two, M = a session, L
    every other frame (moving windows push particles out along the move at the window's speed, 2026-10-30; tested:
    a pile rides up on a rising window, ~2% of the pushed grains lost; the taskbar is a floor), only in empty cells and only those given back; a moved or closed window drops its sand. Simulation
    tab toggle (Overlay.WindowWalls). Desktop icons and files: not done (no concrete idea yet; add when wanted).
+   2026-10-30 later: pixel-exact and every frame (user: "smoother, less blocky"). Windows are no longer WL_WALL
+   cells but Simulation::pixelWalls, a per-pixel mask eval_move and brush drawing respect; unlike walls it never
+   deletes particles, which fixes the ~2% grain loss. Tested: a pile rides a rising window with a smooth edge,
+   2416/2416 grains kept through rise and sideways slide.
 5. [x] **Auto pass-through while a game or full-screen app has focus** (S). Done 2026-10-30: SHQueryUserNotificationState
    twice a second (busy / D3D full screen / presentation, foreground not TPT); the input mode itself is kept.
    Overlay tab checkbox, Overlay.AutoPassThrough.

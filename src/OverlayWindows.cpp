@@ -73,7 +73,6 @@ namespace
 {
 	float uiScale = 1;
 	bool windowWalls = true;            // open windows are walls to particles (Overlay.WindowWalls)
-	std::vector<uint8_t> ourWalls;      // XCELLS x YCELLS: 1 where a window put a wall (not the user)
 	HWND mainWindow = nullptr;    // TPT's own window
 	std::string recording;        // Overlay.Keys.<name> being recorded in the Overlay tab, or empty
 	std::function<void()> later; // run on the next tick, outside any window's message handling
@@ -4513,7 +4512,7 @@ void OverlayWindows::ApplySimMasks(uint32_t *argb, int w)
 			{
 				p |= 0xFF000000;
 			}
-			else if (!ourWalls.empty() && ourWalls[size_t(y / CELL) * XCELLS + x / CELL])
+			else if (sim->PixelWall(x, y))
 			{
 				p = 0; // a window's wall: the window shows through
 			}
@@ -4543,109 +4542,90 @@ void OverlayWindows::ApplySimMasks(uint32_t *argb, int w)
 	}
 }
 
-// A moving window shoves the particles in its way: each one goes along the move to the first free pixel past the
-// window, at the window's speed.
-static void PushOut(Simulation *sim, int cx, int cy, int mx, int my, const std::vector<uint8_t> &want)
-{
-	float len = std::hypot(float(mx), float(my));
-	float sx = mx / len * CELL, sy = my / len * CELL;
-	float vx = std::clamp(mx / 2.f, -10.f, 10.f), vy = std::clamp(my / 2.f, -10.f, 10.f); // per frame; this runs every other one
-	for (int py = cy * CELL; py < (cy + 1) * CELL; py++)
-		for (int px = cx * CELL; px < (cx + 1) * CELL; px++)
-		{
-			int r = sim->pmap[py][px];
-			if (!r) continue;
-			for (int k = 1; k < 128; k++)
-			{
-				int tx = int(std::lround(px + sx * k)), ty = int(std::lround(py + sy * k));
-				if (tx < 0 || ty < 0 || tx >= XRES || ty >= YRES) break; // nowhere to go: stays (buried in the wall)
-				if (want[size_t(ty / CELL) * XCELLS + tx / CELL] || sim->bmap[ty / CELL][tx / CELL] || sim->pmap[ty][tx]) continue;
-				auto &part = sim->parts[ID(r)];
-				part.x = float(tx);
-				part.y = float(ty);
-				part.vx = vx;
-				part.vy = vy;
-				sim->pmap[ty][tx] = r;
-				sim->pmap[py][px] = 0;
-				break;
-			}
-		}
-}
-
-// Every other frame: every visible window's rectangle becomes wall cells, so particles pile on title bars and
-// flow around windows, and moving windows push them. Only empty cells are taken, and only those are given back.
-// ponytail: a save made meanwhile includes these walls; strip them in the save path if that bothers anyone.
+// Every frame: every visible window's rectangle, in sim pixels, blocks particles (Simulation::pixelWalls), so they
+// pile on title bars and flow around windows. A window moving onto particles shoves each one along its move to the
+// first free pixel past it, at the window's speed; one that appeared or grew lifts them out over its top. One with
+// no room left stays put, hidden under the window (never deleted).
 static void TickWindowWalls()
 {
-	if (overlayWindowed) return; // no desktop to have windows on
-	static int frames = 0;
-	if (++frames % 2) return;
-	static std::map<HWND, RECT> last; // where each window was on the last tick
-	std::map<HWND, RECT> now;
 	auto *sim = GameController::Ref().GetModel()->GetSimulation();
-	ourWalls.resize(size_t(XCELLS) * YCELLS);
-	std::vector<uint8_t> want(ourWalls.size());
-	std::vector<std::pair<int16_t, int16_t>> moved(ourWalls.size()); // the covering window's move since last tick, sim pixels
+	static std::map<HWND, RECT> last; // where each window was on the last frame
+	struct Win { int x0, y0, x1, y1, mx, my; };
+	std::vector<Win> wins;
 	RECT sr;
 	GetWindowRect(mainWindow, &sr);
 	int sw = sr.right - sr.left, sh = sr.bottom - sr.top;
-	if (windowWalls && OverlayGetLayer() == OverlayLayer::OnTop && sw > 0 && sh > 0)
+	if (overlayWindowed || !windowWalls || OverlayGetLayer() != OverlayLayer::OnTop || sw <= 0 || sh <= 0)
 	{
-		struct Ctx { std::vector<uint8_t> *want; std::vector<std::pair<int16_t, int16_t>> *moved; std::map<HWND, RECT> *last, *now; RECT sr; int sw, sh; } ctx{ &want, &moved, &last, &now, sr, sw, sh };
-		EnumWindows([](HWND hwnd, LPARAM lp) -> BOOL {
-			auto &c = *(Ctx *)lp;
-			auto ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-			BOOL cloaked = FALSE;
-			DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof(cloaked));
-			wchar_t cls[32];
-			GetClassNameW(hwnd, cls, 32);
-			if (hwnd == mainWindow || !IsWindowVisible(hwnd) || IsIconic(hwnd) || cloaked || (ex & WS_EX_TRANSPARENT) ||
-			    ((ex & WS_EX_TOOLWINDOW) && GetWindowThreadProcessId(hwnd, nullptr) != GetCurrentThreadId() &&
-			     wcscmp(cls, L"Shell_TrayWnd") && wcscmp(cls, L"Shell_SecondaryTrayWnd")) || // the taskbar is a floor
-			    !wcscmp(cls, L"Progman") || !wcscmp(cls, L"WorkerW"))
-			{
-				return TRUE;
-			}
-			RECT r; // the visible frame, without the invisible resize borders
-			if (DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &r, sizeof(r)) != S_OK) GetWindowRect(hwnd, &r);
-			// screen -> sim pixels -> cells, rounded to the nearest cell edge
-			auto cell = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw / CELL)); };
-			int x0 = std::max(0, cell(r.left - c.sr.left, WINDOWW, c.sw)), x1 = std::min(XCELLS, cell(r.right - c.sr.left, WINDOWW, c.sw));
-			int y0 = std::max(0, cell(r.top - c.sr.top, WINDOWH, c.sh)), y1 = std::min(YCELLS, cell(r.bottom - c.sr.top, WINDOWH, c.sh));
-			(*c.now)[hwnd] = r;
-			int16_t mx = 0, my = 0;
-			if (auto it = c.last->find(hwnd); it != c.last->end())
-			{
-				mx = int16_t((r.left - it->second.left) * WINDOWW / c.sw);
-				my = int16_t((r.top - it->second.top) * WINDOWH / c.sh);
-			}
-			for (int y = y0; y < y1; y++)
-				for (int x = x0; x < x1; x++)
-				{
-					(*c.want)[size_t(y) * XCELLS + x] = 1;
-					(*c.moved)[size_t(y) * XCELLS + x] = { mx, my };
-				}
-			return TRUE;
-		}, LPARAM(&ctx));
+		sim->pixelWalls.clear();
+		last.clear();
+		return;
 	}
-	for (int y = 0; y < YCELLS; y++)
-		for (int x = 0; x < XCELLS; x++)
+	std::map<HWND, RECT> now;
+	struct Ctx { std::vector<Win> *wins; std::map<HWND, RECT> *now; RECT sr; int sw, sh; } ctx{ &wins, &now, sr, sw, sh };
+	EnumWindows([](HWND hwnd, LPARAM lp) -> BOOL {
+		auto &c = *(Ctx *)lp;
+		auto ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+		BOOL cloaked = FALSE;
+		DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof(cloaked));
+		wchar_t cls[32];
+		GetClassNameW(hwnd, cls, 32);
+		if (hwnd == mainWindow || !IsWindowVisible(hwnd) || IsIconic(hwnd) || cloaked || (ex & WS_EX_TRANSPARENT) ||
+		    ((ex & WS_EX_TOOLWINDOW) && GetWindowThreadProcessId(hwnd, nullptr) != GetCurrentThreadId() &&
+		     wcscmp(cls, L"Shell_TrayWnd") && wcscmp(cls, L"Shell_SecondaryTrayWnd")) || // the taskbar is a floor
+		    !wcscmp(cls, L"Progman") || !wcscmp(cls, L"WorkerW"))
 		{
-			auto i = size_t(y) * XCELLS + x;
-			auto &b = sim->bmap[y][x];
-			if (want[i] && !ourWalls[i] && !b)
-			{
-				if (auto [mx, my] = moved[i]; mx || my) PushOut(sim, x, y, mx, my, want);
-				b = WL_WALL;
-				ourWalls[i] = 1;
-			}
-			else if (!want[i] && ourWalls[i])
-			{
-				if (b == WL_WALL) b = 0;
-				ourWalls[i] = 0;
-			}
+			return TRUE;
 		}
+		RECT r; // the visible frame, without the invisible resize borders
+		if (DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &r, sizeof(r)) != S_OK) GetWindowRect(hwnd, &r);
+		auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); }; // screen -> sim pixels
+		Win w{ std::max(0, px(r.left - c.sr.left, WINDOWW, c.sw)), std::max(0, px(r.top - c.sr.top, WINDOWH, c.sh)),
+		       std::min(XRES, px(r.right - c.sr.left, WINDOWW, c.sw)), std::min(YRES, px(r.bottom - c.sr.top, WINDOWH, c.sh)), 0, 0 };
+		(*c.now)[hwnd] = r;
+		if (w.x1 <= w.x0 || w.y1 <= w.y0) return TRUE;
+		if (auto it = last.find(hwnd); it != last.end())
+		{
+			w.mx = px(r.left - it->second.left, WINDOWW, c.sw);
+			w.my = px(r.top - it->second.top, WINDOWH, c.sh);
+		}
+		c.wins->push_back(w);
+		return TRUE;
+	}, LPARAM(&ctx));
 	last = std::move(now);
+
+	auto old = std::move(sim->pixelWalls);
+	auto &mask = sim->pixelWalls;
+	mask.assign(size_t(XRES) * YRES, 0);
+	for (auto &w : wins)
+		for (int y = w.y0; y < w.y1; y++) std::fill(&mask[size_t(y) * XRES + w.x0], &mask[size_t(y) * XRES + w.x1], 1);
+	for (auto &w : wins)
+	{
+		int mx = w.mx, my = w.my;
+		if (!mx && !my) my = -1;
+		float len = std::hypot(float(mx), float(my)), sx = mx / len, sy = my / len;
+		float vx = std::clamp(mx * 1.f, -10.f, 10.f), vy = std::clamp(my * 1.f, -10.f, 10.f); // the window's speed, per frame
+		for (int y = w.y0; y < w.y1; y++)
+			for (int x = w.x0; x < w.x1; x++)
+			{
+				int r = sim->pmap[y][x];
+				if (!r || (!old.empty() && old[size_t(y) * XRES + x])) continue; // only what the window just moved onto
+				for (int k = 1; k < XRES + YRES; k++)
+				{
+					int tx = int(std::lround(x + sx * k)), ty = int(std::lround(y + sy * k));
+					if (tx < 0 || ty < 0 || tx >= XRES || ty >= YRES) break; // nowhere to go: stays, under the window
+					if (mask[size_t(ty) * XRES + tx] || sim->pmap[ty][tx] || sim->IsWallBlocking(tx, ty, TYP(r))) continue;
+					auto &part = sim->parts[ID(r)];
+					part.x = float(tx);
+					part.y = float(ty);
+					part.vx = vx;
+					part.vy = vy;
+					sim->pmap[ty][tx] = r;
+					sim->pmap[y][x] = 0;
+					break;
+				}
+			}
+	}
 }
 
 void OverlayWindows::ClearUnderWindows(uint32_t *argb, int w, int h, int ww, int wh)

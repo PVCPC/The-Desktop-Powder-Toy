@@ -1129,7 +1129,7 @@ int Simulation::eval_move(int pt, int nx, int ny, unsigned *rr) const
 	unsigned r;
 	int result;
 
-	if (nx<0 || ny<0 || nx>=XRES || ny>=YRES)
+	if (nx<0 || ny<0 || nx>=XRES || ny>=YRES || PixelWall(nx, ny))
 		return 0;
 
 	r = pmap[ny][nx];
@@ -1897,7 +1897,7 @@ int Simulation::create_part(int p, int x, int y, int t, int v)
 				elements[drawOn].CtypeDraw(this, ID(pmap[y][x]), t, v);
 			return -1;
 		}
-		else if (IsWallBlocking(x, y, t))
+		else if (IsWallBlocking(x, y, t) || PixelWall(x, y))
 			return -1;
 		else if (photons[y][x] && (elements[t].Properties & TYPE_ENERGY))
 			return -1;
