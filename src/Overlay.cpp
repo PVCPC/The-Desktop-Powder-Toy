@@ -221,9 +221,21 @@ namespace
 		if (overlayAutoPass && SHQueryUserNotificationState(&state) == S_OK)
 		{
 			DWORD pid = 0;
-			GetWindowThreadProcessId(GetForegroundWindow(), &pid);
-			now = (state == QUNS_BUSY || state == QUNS_RUNNING_D3D_FULL_SCREEN || state == QUNS_PRESENTATION_MODE) &&
-			      pid != GetCurrentProcessId();
+			HWND fg = GetForegroundWindow();
+			GetWindowThreadProcessId(fg, &pid);
+			// "Busy" is any full-screen window, TPT's own sim included: it only counts when the window in front fills
+			// its screen itself (the desktop doesn't).
+			auto fills = [fg] {
+				wchar_t cls[16]{};
+				GetClassNameW(fg, cls, 16);
+				MONITORINFO mi{ sizeof(mi) };
+				RECT r;
+				return wcscmp(cls, L"Progman") && wcscmp(cls, L"WorkerW") && GetWindowRect(fg, &r) &&
+				       GetMonitorInfoW(MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST), &mi) && r.left <= mi.rcMonitor.left &&
+				       r.top <= mi.rcMonitor.top && r.right >= mi.rcMonitor.right && r.bottom >= mi.rcMonitor.bottom;
+			};
+			now = fg && pid != GetCurrentProcessId() &&
+			      (state == QUNS_RUNNING_D3D_FULL_SCREEN || state == QUNS_PRESENTATION_MODE || (state == QUNS_BUSY && fills()));
 		}
 		if (now == fullScreenApp) return;
 		fullScreenApp = now;
