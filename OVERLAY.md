@@ -165,7 +165,9 @@ Assessment, in the order I'd do it (effort: S = an hour or two, M = a session, L
 4. [ ] **Particles collide with open windows** (M, needs 3): the visible windows' rectangles as walls, refreshed a
    few times a second. Then react to the active window (e.g. it shakes off sand when moved). Desktop icons (S-M,
    read from Explorer's icon list view). Files: undecided, needs a concrete idea first.
-5. [ ] **Auto pass-through while a game or full-screen app has focus** (S).
+5. [x] **Auto pass-through while a game or full-screen app has focus** (S). Done 2026-10-30: SHQueryUserNotificationState
+   twice a second (busy / D3D full screen / presentation, foreground not TPT); the input mode itself is kept.
+   Overlay tab checkbox, Overlay.AutoPassThrough.
 6. [ ] **More OS themes** (M each): XP, 7, 10/11, classic Mac OS, macOS, Linux. Start by turning the `vista::`
    drawing into a theme interface when the second theme starts. Theme choice in Overlay settings.
 7. [ ] Black particles inside the zoom window (S); menus fade when unused (S).

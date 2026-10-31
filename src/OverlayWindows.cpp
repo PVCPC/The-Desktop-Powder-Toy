@@ -1265,12 +1265,16 @@ namespace
 				Toggle(x + S(12), top + i * S(24), modes[i], int(OverlayGetInput()) == i, true, [i] { OverlaySetInput(OverlayInput(i)); });
 			}
 			y += S(108);
-			top = Group(x, y, w, S(44), L"Window");
+			top = Group(x, y, w, S(68), L"Window");
 			Toggle(x + S(12), top, L"Show TPT's own menus too", showTPTMenus, false, [] {
 				showTPTMenus = !showTPTMenus;
 				GlobalPrefs::Ref().Set("Overlay.ShowTPTMenus", showTPTMenus);
 			});
-			y += S(52);
+			Toggle(x + S(12), top + S(24), L"Pass clicks through while a full-screen app or game is in front", overlayAutoPass, false, [] {
+				overlayAutoPass = !overlayAutoPass;
+				GlobalPrefs::Ref().Set("Overlay.AutoPassThrough", overlayAutoPass);
+			});
+			y += S(76);
 			top = Group(x, y, w, S(140), L"Shortcuts (any app)");
 			std::wstring rows[][2] = {
 				{ L"Next input mode", key("CycleInput", "Ctrl+Alt+O") },

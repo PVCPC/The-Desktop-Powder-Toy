@@ -8,16 +8,21 @@
 #ifdef _WIN32
 # include <SDL_syswm.h>
 # define WIN32_LEAN_AND_MEAN
+# undef _WIN32_WINNT
+# define _WIN32_WINNT 0x0601 // SHQueryUserNotificationState (the build targets XP)
 # include <windows.h>
+# include <shellapi.h>
 #endif
 
 bool overlayMode = false;
+bool overlayAutoPass = true;
 
 #ifdef _WIN32
 namespace
 {
 	HWND hwnd = nullptr;
 	OverlayInput input = OverlayInput::Auto;
+	bool fullScreenApp = false; // a full-screen app or game is in front: clicks pass through whatever the mode
 
 	// A global hotkey ("Ctrl+Alt+O"), polled each frame so it works while the window is unfocused.
 	struct Hotkey
@@ -59,19 +64,45 @@ namespace
 	};
 	Hotkey cycleInput, passThroughKey, lockedKey, paletteKey;
 
+	void ApplyPassThrough()
+	{
+		bool pass = input == OverlayInput::PassThrough || fullScreenApp;
+		OverlayWindows::SetPassThrough(pass);
+		auto ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+		ex = pass ? ex | WS_EX_TRANSPARENT : ex & ~LONG_PTR(WS_EX_TRANSPARENT);
+		SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex);
+	}
+
 	void SetInput(OverlayInput newInput, bool announce = true)
 	{
 		input = newInput;
-		OverlayWindows::SetPassThrough(input == OverlayInput::PassThrough);
+		ApplyPassThrough();
 		if (announce)
 		{
 			static const char *names[] = { "Input: Auto", "Input: Pass-through", "Input: Locked to TPT" };
 			OverlayWindows::Notify(names[int(input)]);
 		}
-		auto ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-		ex = input == OverlayInput::PassThrough ? ex | WS_EX_TRANSPARENT : ex & ~LONG_PTR(WS_EX_TRANSPARENT);
-		SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex);
 		GlobalPrefs::Ref().Set("Overlay.Input", int(input));
+	}
+
+	// Twice a second: is a full-screen app (a game, a video, a presentation) in front of the desktop?
+	void TickFullScreen()
+	{
+		static int frames = 0;
+		if (++frames % 30) return;
+		bool now = false;
+		QUERY_USER_NOTIFICATION_STATE state;
+		if (overlayAutoPass && SHQueryUserNotificationState(&state) == S_OK)
+		{
+			DWORD pid = 0;
+			GetWindowThreadProcessId(GetForegroundWindow(), &pid);
+			now = (state == QUNS_BUSY || state == QUNS_RUNNING_D3D_FULL_SCREEN || state == QUNS_PRESENTATION_MODE) &&
+			      pid != GetCurrentProcessId();
+		}
+		if (now == fullScreenApp) return;
+		fullScreenApp = now;
+		ApplyPassThrough();
+		OverlayWindows::Notify(now ? "Full-screen app: clicks pass through" : "Full-screen app closed: clicks back to normal");
 	}
 
 	// A top-down 32-bit DIB the frame is scaled into, then handed to UpdateLayeredWindow.
@@ -128,6 +159,7 @@ void ApplyOverlay(SDL_Window *window)
 	auto &prefs = GlobalPrefs::Ref();
 	OverlayLoadKeys();
 	OverlayWindows::Init(hwnd);
+	overlayAutoPass = prefs.Get("Overlay.AutoPassThrough", true);
 	SetInput(prefs.Get("Overlay.Input", OverlayInput::Count, OverlayInput::Auto), false);
 #else
 	(void)window; // ponytail: Windows only; X11/Wayland/macOS each need their own shape/input-region code
@@ -161,6 +193,7 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 	{
 		OverlayWindows::TogglePalette();
 	}
+	TickFullScreen();
 	OverlayWindows::Tick();
 
 	int ww, wh;
