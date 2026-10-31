@@ -301,7 +301,8 @@ tray menu: the tray menu stays native on purpose.
 - [-] Water clinging to windows: DROPPED (user 2026-10-31: TPT doesn't do it in game, so no new mechanics that
   rewrite TPT's physics).
 - [x] Destructible windows and icons (2026-10-31; Simulation tab switch, off by default; acid/blast strength sliders):
-  acid eats ragged holes (yellow-green rim), blasts tear round chunks (pressure over 3; ember + char rim). `MarkHole` in
+  acid eats ragged holes (yellow-green rim); blast shock waves (pressure over 3 AND jumping up) tear round chunks,
+  bombs blow small ones, DEST and singularities destroy, 2000 C+ (plasma, thermite, lightning) burns slowly (ember + char rim). `MarkHole` in
   `Simulation::windowMarks`, taken out of the sim's walls; holes show the wallpaper (IDesktopWallpaper + WIC, per
   monitor, drawn as fill). Overlay only, cleared with the sim. Tested on my test window with acid and real C-4 (PLEX).
 - [ ] Explosions shake nearby windows a few pixels (moves other apps' windows: off by default, a switch to enable).

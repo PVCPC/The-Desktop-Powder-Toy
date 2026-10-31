@@ -2548,7 +2548,7 @@ namespace
 				{ L"Acid etching", L"How fast acid pits the windows it touches (cleared with the sim)", &overlayFeel.acid, 3, "Acid" },
 				{ L"Water streaks", L"How much water streaks the windows it runs over (they dry)", &overlayFeel.water, 3, "Water" },
 				{ L"Acid eats windows", L"How fast acid eats holes in windows and icons (with Destructible on)", &overlayFeel.acidEat, 3, "AcidEat" },
-				{ L"Blasts break windows", L"How big a hole explosions blow in windows and icons (with Destructible on)", &overlayFeel.blast, 3, "Blast" },
+				{ L"Blasts and burning", L"How hard explosions, bombs, DEST, singularities and anything 2000 C or hotter break windows and icons (with Destructible on)", &overlayFeel.blast, 3, "Blast" },
 			};
 			top = Group(x, y, w, S(26) * int(std::size(feel)) + S(34), L"Desktop physics");
 			Toggle(x + S(12), top, L"Destructible windows and icons", overlayFeel.destructible, false, [] {

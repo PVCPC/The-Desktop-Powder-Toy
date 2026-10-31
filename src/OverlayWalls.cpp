@@ -68,41 +68,65 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 				return;
 			}
 	};
-	if (overlayFeel.destructible && overlayFeel.acidEat > 0)
+	// what touches a window: acid eats it, DEST and singularities destroy it, a bomb blows a chunk out, and anything
+	// 2000 C or hotter (plasma, burning thermite, lightning) burns through it
+	auto chunk = [&](int cx, int cy, float r, uint8_t how) {
+		int n = int(r) + 2;
+		for (int y = std::max(0, cy - n); y < std::min(YRES, cy + n); y++)
+			for (int x = std::max(0, cx - n); x < std::min(XRES, cx + n); x++)
+			{
+				float d = std::hypot(float(x - cx), float(y - cy)), edge = r + 1.5f * std::sin(x * 1.7f + y * 2.3f) * std::cos(x * 0.9f - y * 1.3f);
+				if (d < edge && mask[size_t(y) * XRES + x]) eat(x, y, how);
+			}
+	};
+	if (overlayFeel.destructible)
 		for (int i = 0; i <= sim->parts.active; i++)
 		{
 			auto &p = sim->parts[i];
-			if (p.type != PT_ACID) continue;
+			int t = p.type;
+			bool acid = t == PT_ACID && overlayFeel.acidEat > 0, hot = p.temp >= 2273.15f && overlayFeel.blast > 0;
+			bool destroys = (t == PT_DEST || t == PT_SING || t == PT_BOMB) && overlayFeel.blast > 0;
+			if (!acid && !hot && !destroys) continue;
 			int x = int(p.x + 0.5f), y = int(p.y + 0.5f);
 			for (auto [dx, dy] : { std::pair{ 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } })
 			{
 				int nx = x + dx, ny = y + dy;
-				if (nx < 0 || ny < 0 || nx >= XRES || ny >= YRES || !mask[size_t(ny) * XRES + nx] || sim->rng.uniform01() >= 0.1f * overlayFeel.acidEat) continue;
-				eat(nx, ny, Eaten);
-				if (sim->rng.uniform01() < 0.4f) // ragged: now and then a bit more crumbles
+				if (nx < 0 || ny < 0 || nx >= XRES || ny >= YRES || !mask[size_t(ny) * XRES + nx]) continue;
+				if (acid)
 				{
-					int ex = nx + sim->rng.between(-1, 1), ey = ny + sim->rng.between(-1, 1);
-					if (ex >= 0 && ey >= 0 && ex < XRES && ey < YRES && mask[size_t(ey) * XRES + ex]) eat(ex, ey, Eaten);
+					if (sim->rng.uniform01() >= 0.1f * overlayFeel.acidEat) continue;
+					eat(nx, ny, Eaten);
+					if (sim->rng.uniform01() < 0.4f) // ragged: now and then a bit more crumbles
+					{
+						int ex = nx + sim->rng.between(-1, 1), ey = ny + sim->rng.between(-1, 1);
+						if (ex >= 0 && ey >= 0 && ex < XRES && ey < YRES && mask[size_t(ey) * XRES + ex]) eat(ex, ey, Eaten);
+					}
+					if (sim->rng.uniform01() < 0.3f) sim->kill_part(i); // used up, like acid eating anything else
 				}
-				if (sim->rng.uniform01() < 0.3f) sim->kill_part(i); // used up, like acid eating anything else
+				else if (t == PT_BOMB)
+				{
+					chunk(nx, ny, 6 * overlayFeel.blast, Blasted);
+					sim->kill_part(i); // it went off
+				}
+				else if (sim->rng.uniform01() < (t == PT_DEST || t == PT_SING ? 0.3f : 0.03f) * overlayFeel.blast)
+					chunk(nx, ny, t == PT_SING ? 2.5f : 1.5f, Blasted); // DEST, a singularity, or (slowly) burning through
 				break;
 			}
 		}
+	// a blast's shock wave (pressure jumping up, not pressure that lingers after) tears out a ragged round chunk, bigger
+	// the harder it hits (a small C-4 charge peaks ~6 in its own cells)
+	static std::vector<float> lastPressure;
+	lastPressure.resize(size_t(XCELLS) * YCELLS, 0.f);
 	if (overlayFeel.destructible && overlayFeel.blast > 0)
 		for (int cy = 0; cy < YCELLS; cy++)
 			for (int cx = 0; cx < XCELLS; cx++)
 			{
-				// a blast tears out a ragged round chunk, bigger the harder it hits (a small C-4 charge peaks ~6 in its own cells)
-				float r = std::min(24.f, (sim->pv[cy][cx] - 3) * 5 * overlayFeel.blast);
-				if (r <= 0) continue;
-				int ccx = cx * CELL + CELL / 2, ccy = cy * CELL + CELL / 2, n = int(r) + 2;
-				for (int y = std::max(0, ccy - n); y < std::min(YRES, ccy + n); y++)
-					for (int x = std::max(0, ccx - n); x < std::min(XRES, ccx + n); x++)
-					{
-						float d = std::hypot(float(x - ccx), float(y - ccy)), edge = r + 1.5f * std::sin(x * 1.7f + y * 2.3f) * std::cos(x * 0.9f - y * 1.3f);
-						if (d < edge && mask[size_t(y) * XRES + x]) eat(x, y, Blasted);
-					}
+				float pv = sim->pv[cy][cx], jump = pv - lastPressure[size_t(cy) * XCELLS + cx];
+				float r = std::min(24.f, (pv - 3) * 5 * overlayFeel.blast);
+				if (r > 0 && jump > 1) chunk(cx * CELL + CELL / 2, cy * CELL + CELL / 2, r, Blasted);
 			}
+	for (int cy = 0; cy < YCELLS; cy++)
+		for (int cx = 0; cx < XCELLS; cx++) lastPressure[size_t(cy) * XCELLS + cx] = sim->pv[cy][cx];
 	// What rests on a window rides along when it moves (friction): each column's stack of particles on its old top
 	// edge goes the same way. Big jumps (snapping, maximising) leave it behind. When the window slows, stops or turns,
 	// the riders keep the speed it lost: shake a window and the sand flies off.
