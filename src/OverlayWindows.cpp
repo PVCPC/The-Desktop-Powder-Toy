@@ -540,6 +540,23 @@ namespace
 				case WM_EXITSIZEMOVE:
 					self->SavePosition();
 					return 0;
+				case WM_MOVING:
+					if (self->appWindow)
+					{
+						// Dock: within a few pixels of a screen edge, the window sticks to it.
+						auto *r = (RECT *)lp;
+						MONITORINFO mi{ sizeof(mi) };
+						GetMonitorInfoW(MonitorFromRect(r, MONITOR_DEFAULTTONEAREST), &mi);
+						auto wk = mi.rcWork;
+						int snap = S(16), dx = 0, dy = 0;
+						if (std::abs(r->left - wk.left) < snap) dx = wk.left - r->left;
+						else if (std::abs(r->right - wk.right) < snap) dx = wk.right - r->right;
+						if (std::abs(r->top - wk.top) < snap) dy = wk.top - r->top;
+						else if (std::abs(r->bottom - wk.bottom) < snap) dy = wk.bottom - r->bottom;
+						OffsetRect(r, dx, dy);
+						return TRUE;
+					}
+					break;
 				case WM_MOUSEMOVE:
 				{
 					TRACKMOUSEEVENT tme{ sizeof(tme), TME_LEAVE, hwnd, 0 };
@@ -578,6 +595,8 @@ namespace
 	// navigation pane) and the section's tools as Vista buttons; left click picks the primary tool, right click the
 	// secondary, as in TPT. The other tabs are immediate-mode Vista controls: each paint rebuilds the list of
 	// clickable rectangles (hits) that the mouse handler uses.
+	void OpenTorn(int tab);
+
 	struct SideWindow : Panel
 	{
 		struct Hit
@@ -589,6 +608,8 @@ namespace
 		std::vector<Hit> hits;
 		int hover = -1;
 		int tab = 0, section = 0, scroll = 0;
+		int fixedTab = -1;    // a tab torn off into its own window: shows only that one
+		bool closing = false; // closed: Tick drops it (not from inside its own click)
 		int titleH, border, tabH, navW, statusH, tileW, tileH, gap;
 		uint64_t shownState = 0;
 		static constexpr const wchar_t *tabNames[] = { L"Elements", L"Tools", L"Simulation", L"Display", L"Saves", L"Overlay", L"Welcome" };
@@ -1359,19 +1380,21 @@ namespace
 		void Paint() override
 		{
 			hits.clear();
-			vista::Frame(cv, titleH, border, L"The Powder Toy");
+			vista::Frame(cv, titleH, border, fixedTab >= 0 ? tabNames[fixedTab] : L"The Powder Toy");
 			vista::CaptionButton(cv, MinRect(), Hovered(MinRect()), vista::CaptionMin);
 			vista::CaptionButton(cv, MaxRect(), Hovered(MaxRect()), vista::CaptionMax);
 			vista::CaptionButton(cv, CloseRect(), Hovered(CloseRect()), vista::CaptionClose);
 			Add(MinRect(), [this] { ShowWindow(hwnd, SW_MINIMIZE); }, L"Minimise to the taskbar");
 			Add(MaxRect(), [this] { ShowWindow(hwnd, IsZoomed(hwnd) ? SW_RESTORE : SW_MAXIMIZE); }, IsZoomed(hwnd) ? L"Restore" : L"Maximise");
-			Add(CloseRect(), [] { OverlayWindows::TogglePalette(); }, L"Close (the tray icon or Ctrl+Alt+E brings it back)");
+			if (fixedTab >= 0) Add(CloseRect(), [this] { closing = true; }, L"Close (the tab is still in the main window)");
+			else Add(CloseRect(), [] { OverlayWindows::TogglePalette(); }, L"Close (the tray icon or Ctrl+Alt+E brings it back)");
 
 			// The tab strip: grey tabs on the glass, the selected one white and joined to the page.
 			int tx = border + S(4);
 			cv.RoundRect(border, titleH, cv.w - 2 * border, tabH, 0, 0xF0F0F0, 0xF0F0F0, 255);
 			for (int i = 0; i < int(std::size(tabNames)); i++)
 			{
+				if (fixedTab >= 0 && i != fixedTab) continue;
 				int tw = text->Measure(tabNames[i]).cx + S(20);
 				bool on = i == tab;
 				RECT rc{ tx, titleH + (on ? S(2) : S(4)), tx + tw, titleH + tabH + (on ? 1 : 0) };
@@ -1379,7 +1402,7 @@ namespace
 				cv.RoundRect(rc.left, rc.top, tw, rc.bottom - rc.top, S(3), on ? 0xFFFFFF : (hot ? 0xEAF6FD : 0xF2F2F2), on ? 0xFFFFFF : (hot ? 0xA7D9F5 : 0xE3E3E3), 255, true);
 				cv.RoundFrame(rc.left, rc.top, tw, rc.bottom - rc.top + S(3), S(3), on ? 0x898C95 : (hot ? 0x3C7FB1 : 0x898C95), 255, true);
 				text->Draw(cv, tx + S(10), rc.top + (rc.bottom - rc.top - text->Measure(tabNames[i]).cy) / 2, tabNames[i], 0x000000);
-				Add(rc, [this, i] { tab = i, scroll = 0; });
+				if (fixedTab < 0) Add(rc, [this, i] { tab = i, scroll = 0; }, L"Right-click: open this tab in its own window", [i] { OpenTorn(i); });
 				tx += tw + S(1);
 			}
 			// The page.
@@ -1388,7 +1411,7 @@ namespace
 			for (int i = c.left; i < c.right; i++) cv.Blend(i, c.top, 0x898C95, 255);
 			// The selected tab's bottom edge opens into the page.
 			int sx = border + S(4);
-			for (int i = 0; i < tab; i++) sx += text->Measure(tabNames[i]).cx + S(21);
+			for (int i = 0; i < tab && fixedTab < 0; i++) sx += text->Measure(tabNames[i]).cx + S(21);
 			for (int i = sx + 1; i < sx + text->Measure(tabNames[tab]).cx + S(19); i++) cv.Blend(i, c.top, 0xFFFFFF, 255);
 
 			switch (tab)
@@ -1552,6 +1575,72 @@ namespace
 
 	HWND mainWindow = nullptr;
 	std::unique_ptr<SideWindow> palette;
+	std::vector<std::unique_ptr<SideWindow>> torn; // tabs in their own windows (Overlay.Windows.Torn, a bit per tab)
+
+	void DirtyAll()
+	{
+		if (palette) palette->dirty = true;
+		for (auto &t : torn) t->dirty = true;
+	}
+
+	void SaveTorn()
+	{
+		int mask = 0;
+		for (auto &t : torn) mask |= 1 << t->fixedTab;
+		GlobalPrefs::Ref().Set("Overlay.Windows.Torn", mask);
+	}
+
+	// A window's saved spot and size (Overlay.Windows.<name>.*), else the default, kept on its monitor's work area.
+	RECT PlaceWindow(const ByteString &name, int x, int y, int w, int h, int minW, int minH)
+	{
+		auto &prefs = GlobalPrefs::Ref();
+		POINT saved{ prefs.Get("Overlay.Windows." + name + ".X", x), prefs.Get("Overlay.Windows." + name + ".Y", y) };
+		POINT grip{ saved.x + w / 2, saved.y + S(10) }; // the title bar must be on a monitor
+		if (MonitorFromPoint(grip, MONITOR_DEFAULTTONULL))
+		{
+			x = saved.x;
+			y = saved.y;
+		}
+		w = std::max(prefs.Get("Overlay.Windows." + name + ".W", w), minW);
+		h = std::max(prefs.Get("Overlay.Windows." + name + ".H", h), minH);
+		// The whole window on its monitor's work area (a saved spot can hang off the edge).
+		MONITORINFO mi{ sizeof(mi) };
+		GetMonitorInfoW(MonitorFromPoint({ x + w / 2, y + S(10) }, MONITOR_DEFAULTTONEAREST), &mi);
+		auto work = mi.rcWork;
+		w = std::min(w, int(work.right - work.left));
+		h = std::min(h, int(work.bottom - work.top));
+		x = std::clamp(x, int(work.left), int(work.right) - w);
+		y = std::clamp(y, int(work.top), int(work.bottom) - h);
+		return { x, y, x + w, y + h };
+	}
+
+	void ApplyPassThrough(Panel &panel);
+
+	void OpenTorn(int tab)
+	{
+		for (auto &t : torn)
+			if (t->fixedTab == tab)
+			{
+				SetWindowPos(t->hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+				return;
+			}
+		auto w = std::make_unique<SideWindow>();
+		w->fixedTab = w->tab = tab;
+		w->name = ByteString("Tab") + ByteString(std::to_string(tab));
+		w->title = SideWindow::tabNames[tab];
+		POINT cur;
+		GetCursorPos(&cur);
+		auto r = PlaceWindow(w->name, cur.x - S(60), cur.y - S(12), S(560), S(560), S(360), S(300));
+		w->grip = w->border;
+		w->minSize = { S(360), S(300) };
+		w->Create(r.left, r.top, r.right - r.left, r.bottom - r.top);
+		w->Present();
+		ShowWindow(w->hwnd, SW_SHOWNOACTIVATE);
+		SetWindowPos(w->hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+		ApplyPassThrough(*w);
+		torn.push_back(std::move(w));
+		SaveTorn();
+	}
 	std::unique_ptr<Toast> toast;
 	bool passThrough = false;
 
@@ -2274,7 +2363,7 @@ void OverlayWindows::Tick()
 		for (auto *n : notes)
 			if (std::find(seen.begin(), seen.end(), n) == seen.end()) Notify(n->Message.ToUtf8().c_str());
 		seen = notes;
-		if (palette) palette->dirty = true;
+		DirtyAll();
 	}
 	static bool areaRestored = false;
 	if (!areaRestored)
@@ -2297,6 +2386,20 @@ void OverlayWindows::Tick()
 			palette->Present();
 		}
 	}
+	static bool tornRestored = false;
+	if (!tornRestored)
+	{
+		tornRestored = true;
+		int mask = GlobalPrefs::Ref().Get("Overlay.Windows.Torn", 0);
+		for (int i = 0; i < int(std::size(SideWindow::tabNames)); i++)
+			if (mask & (1 << i)) OpenTorn(i);
+	}
+	for (auto &t : torn)
+	{
+		t->Tick();
+		if (t->dirty) t->Present();
+	}
+	if (std::erase_if(torn, [](auto &t) { return t->closing; })) SaveTorn();
 	if (toast)
 	{
 		toast->Tick();
@@ -2309,6 +2412,8 @@ void OverlayWindows::Tick()
 		rebuildPalette = false;
 		reopenTab = palette ? palette->tab : -1;
 		palette.reset();
+		torn.clear(); // reopened at the new scale from the saved mask
+		tornRestored = false;
 		text->SetScale();
 		TogglePalette();
 	}
@@ -2327,7 +2432,7 @@ static void TickRecording()
 	if (down(VK_ESCAPE))
 	{
 		recording.clear();
-		if (palette) palette->dirty = true;
+		DirtyAll();
 		return;
 	}
 	int key = 0;
@@ -2346,7 +2451,7 @@ static void TickRecording()
 	GlobalPrefs::Ref().Set("Overlay.Keys." + recording, combo);
 	recording.clear();
 	OverlayLoadKeys();
-	if (palette) palette->dirty = true;
+	DirtyAll();
 }
 
 void OverlayWindows::TogglePalette()
@@ -2376,27 +2481,10 @@ void OverlayWindows::TogglePalette()
 			x = rc.left + S(8);
 			y = rc.top + S(8);
 		}
-		auto &prefs = GlobalPrefs::Ref();
-		POINT saved{ prefs.Get("Overlay.Windows.Palette.X", x), prefs.Get("Overlay.Windows.Palette.Y", y) };
-		POINT grip{ saved.x + w / 2, saved.y + S(10) }; // the title bar must be on a monitor
-		if (MonitorFromPoint(grip, MONITOR_DEFAULTTONULL))
-		{
-			x = saved.x;
-			y = saved.y;
-		}
-		w = std::max(prefs.Get("Overlay.Windows.Palette.W", w), S(360));
-		h = std::max(prefs.Get("Overlay.Windows.Palette.H", h), S(300));
-		// The whole window on its monitor's work area (a saved spot can hang off the edge).
-		MONITORINFO mi{ sizeof(mi) };
-		GetMonitorInfoW(MonitorFromPoint({ x + w / 2, y + S(10) }, MONITOR_DEFAULTTONEAREST), &mi);
-		auto work = mi.rcWork;
-		w = std::min(w, int(work.right - work.left));
-		h = std::min(h, int(work.bottom - work.top));
-		x = std::clamp(x, int(work.left), int(work.right) - w);
-		y = std::clamp(y, int(work.top), int(work.bottom) - h);
+		auto r = PlaceWindow(palette->name, x, y, w, h, S(360), S(300));
 		palette->grip = palette->border;
 		palette->minSize = { S(360), S(300) };
-		palette->Create(x, y, w, h);
+		palette->Create(r.left, r.top, r.right - r.left, r.bottom - r.top);
 	}
 	palette->dirty = true;
 	palette->Present();
@@ -2411,6 +2499,7 @@ void OverlayWindows::SetPassThrough(bool on)
 	{
 		ApplyPassThrough(*palette);
 	}
+	for (auto &t : torn) ApplyPassThrough(*t);
 }
 
 void OverlayWindows::Notify(const char *message)
@@ -2561,6 +2650,7 @@ void OverlayWindows::ClearUnderWindows(uint32_t *argb, int w, int h, int ww, int
 		}
 	};
 	clear(palette ? palette->hwnd : nullptr);
+	for (auto &t : torn) clear(t->hwnd);
 	for (auto &host : hosts)
 	{
 		clear(host->hwnd);

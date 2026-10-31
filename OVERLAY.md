@@ -149,7 +149,9 @@ Assessment, in the order I'd do it (effort: S = an hour or two, M = a session, L
    - [x] Saves and stamps: buttons that open TPT's own browsers (a native Vista save list is a later step)
    - [x] Overlay settings: input mode, TPT's menus, shortcut list
    - [x] Hotkey recording and UI scale in the Overlay tab
-   - [ ] Tear tabs off into their own windows; dock the window to a screen edge
+   - [x] Tear tabs off into their own windows; dock the window to a screen edge (2026-10-30: right-click a tab =
+     its own window, reopened at start (Overlay.Windows.Torn); app windows stick to work-area edges within 16 px.
+     Tested: opens, pref saved, close clears it. Dragging a tab out: not done, right-click covers it)
    - [x] Play area: drag its edges or corners on the desktop (2026-10-30; resize cursor, snaps to cells, min 8;
      logic tested with a hook, real-mouse drag for the user to try). Loop wrap: done, see below.
    - [x] Bottom button row hidden with the rest (2026-10-30); its save name, vote and tags have no side-window
