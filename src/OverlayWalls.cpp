@@ -2,6 +2,7 @@
 #include "simulation/Simulation.h"
 #include "SimulationConfig.h"
 #include "simulation/ElementClasses.h"
+#include "simulation/SimulationData.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -243,6 +244,7 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 	for (auto &w : walls)
 	{
 		int mx = w.mx, my = w.my, fx = 0, fy = 0;
+		float jolt = 0; // how sharply its speed changed (px per tick): steady moves carry everything, jolts shear
 		if (w.id && !w.solid && std::abs(mx) <= 40 && std::abs(my) <= 40) // icons jump when dropped: nothing to fling
 		{
 			auto &h = moves[w.id] = lastMoves[w.id];
@@ -252,6 +254,7 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 			for (int i = 0; i < 4; i++) ax += h[i].first / 4.f, ay += h[i].second / 4.f;
 			for (int i = 4; i < 6; i++) bx += h[i].first / 2.f, by += h[i].second / 2.f;
 			float was = std::hypot(ax, ay), now = std::hypot(bx, by);
+			jolt = std::hypot(bx - ax, by - ay);
 			if (was >= 3 && (now < was * 0.4f || ax * bx + ay * by < 0)) // it stopped short or turned back
 			{
 				fx = int(std::lround(ax - bx)), fy = int(std::lround(ay - by));
@@ -260,7 +263,14 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 		}
 		// a dropped icon takes its pile with it however far it went; a window jumping (snapping, maximising) leaves it
 		if (!w.id || (!mx && !my && !fx && !fy) || (!w.solid && (std::abs(mx) > 40 || std::abs(my) > 40))) continue;
-		struct Rider { int r, x, y; };
+		// Friction, layer by layer: what touches the window grips it; each layer up is a little more likely to slip (more so
+		// when the window starts, stops or turns) and only gets a nudge, so even a slow drag shears a tall pile. Solids go as one block, heavy powders grip better than light ones,
+		// liquids drag only their bottom and slosh, gas isn't carried. A window going down carries nothing down: what's
+		// on it falls on its own (and is only dragged sideways while it still presses on a slow one).
+		auto &elements = SimulationData::CRef().elements;
+		int cy = my < 0 ? my : 0;
+		bool dragged = my <= 2;
+		struct Rider { int r, x, y, dx, dy; };
 		std::vector<Rider> riders;
 		for (int x = std::max(0, w.x0 - mx); x < std::min(XRES, w.x1 - mx); x++)
 		{
@@ -271,17 +281,31 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 				if (top + 1 >= w.y1 - my) continue; // nothing of it in this column
 			}
 			if (top >= YRES) continue;
-			for (int y = top; y >= 0 && sim->pmap[y][x]; y--) riders.push_back({ sim->pmap[y][x], x, y });
+			float hold = overlayFeel.grip; // chance this layer moves with the one under it
+			for (int y = top; y >= 0 && sim->pmap[y][x]; y--)
+			{
+				int r = sim->pmap[y][x];
+				auto &el = elements[TYP(r)];
+				if (el.Properties & (TYPE_GAS | TYPE_ENERGY)) break;
+				if (el.Properties & TYPE_LIQUID) hold *= y == top ? std::pow(0.9f, jolt * 0.35f) : std::pow(0.6f, 1 + jolt * 0.35f); // above the wet layer it sloshes even when steady
+				else if (!(el.Properties & TYPE_SOLID) && y != top) hold *= std::pow(0.93f + 0.05f * std::clamp(el.Weight / 100.f, 0.f, 1.f), 0.4f + jolt * 0.35f);
+				bool held = dragged && sim->rng.uniform01() < hold;
+				if (!held && mx && dragged) sim->parts[ID(r)].vx += mx * 0.5f * std::sqrt(hold); // slipped: still tugged a little
+				if (held || cy) riders.push_back({ r, x, y, held ? mx : 0, cy });
+			}
 		}
 		// front ones first: a rider's old spot is then never taken by one moved before it, so a blocked one stays put
 		std::sort(riders.begin(), riders.end(), [mx, my](const Rider &a, const Rider &b) { return a.x * mx + a.y * my > b.x * mx + b.y * my; });
 		for (auto &p : riders) sim->pmap[p.y][p.x] = 0;
+		auto open = [&](int x, int y, int r) {
+			return x >= 0 && y >= 0 && x < XRES && y < YRES && !sim->pmap[y][x] && !mask[size_t(y) * XRES + x] && !sim->IsWallBlocking(x, y, TYP(r));
+		};
 		for (auto &p : riders)
 		{
-			int tx = p.x + mx, ty = p.y + my;
-			bool free = tx >= 0 && ty >= 0 && tx < XRES && ty < YRES && !sim->pmap[ty][tx] && !mask[size_t(ty) * XRES + tx] &&
-			            !sim->IsWallBlocking(tx, ty, TYP(p.r));
-			if (!free || (overlayFeel.grip < 1 && sim->rng.uniform01() >= overlayFeel.grip)) tx = p.x, ty = p.y; // blocked (another window, a wall) or slipped: scraped off
+			int tx = p.x + p.dx, ty = p.y + p.dy;
+			if (!open(tx, ty, p.r)) tx = p.x; // blocked (another window, a wall): scraped off sideways
+			if (!open(tx, ty, p.r)) ty = p.y;
+			while (ty > 0 && sim->pmap[ty][tx]) ty--; // its own spot taken by a neighbour that moved: on top of it
 			auto &part = sim->parts[ID(p.r)];
 			part.x = float(tx);
 			part.y = float(ty);
