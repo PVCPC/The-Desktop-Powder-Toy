@@ -2,6 +2,8 @@
 // software with per-pixel alpha. The look is a Theme (Windows Vista, 7, 8, 10, Classic Mac, macOS).
 #include "OverlayWindows.h"
 #ifdef _WIN32
+#undef _WIN32_WINNT
+#define _WIN32_WINNT 0x0601 // IFolderView2 for the desktop icons (the build targets XP)
 #include "Overlay.h"
 #include "gui/game/GameController.h"
 #include "gui/game/GameModel.h"
@@ -62,6 +64,10 @@
 #pragma comment(lib, "dwmapi.lib")
 #include <commdlg.h>
 #pragma comment(lib, "comdlg32.lib")
+#include <shlobj.h>
+#include <exdisp.h>
+#pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "oleaut32.lib")
 #include <d3d11.h>
 #include <dxgi1_2.h>
 #pragma comment(lib, "d3d11.lib")
@@ -73,6 +79,7 @@ namespace
 {
 	float uiScale = 1;
 	bool windowWalls = true;            // open windows are walls to particles (Overlay.WindowWalls)
+	bool iconWalls = true;              // and so are the desktop icons (Overlay.IconWalls)
 	HWND mainWindow = nullptr;    // TPT's own window
 	std::string recording;        // Overlay.Keys.<name> being recorded in the Overlay tab, or empty
 	std::function<void()> later; // run on the next tick, outside any window's message handling
@@ -2408,11 +2415,15 @@ namespace
 			PushButton(x + S(12) + 3 * (bw4 + S(6)), top, bw4, L"Clear", [] { GameController::Ref().ClearSim(); }, L"Empty the sim");
 			y += S(68);
 
-			top = Group(x, y, w, S(76), L"Edges");
+			top = Group(x, y, w, S(100), L"Edges");
 			Toggle(x + S(12), top + S(24), L"Open windows are walls (sand piles on title bars)", windowWalls, false, [] {
 				windowWalls = !windowWalls;
 				GlobalPrefs::Ref().Set("Overlay.WindowWalls", windowWalls);
 			}, L"Only while the sim is on top of every window");
+			Toggle(x + S(12), top + S(48), L"Desktop icons are walls too", iconWalls, false, [] {
+				iconWalls = !iconWalls;
+				GlobalPrefs::Ref().Set("Overlay.IconWalls", iconWalls);
+			}, L"Sand piles on your icons (only while the sim is on top)");
 			const wchar_t *edges[] = { L"Void", L"Solid", L"Loop" };
 			const wchar_t *edgeTips[] = { L"Particles and air leave at the edges", L"The edges are walls", L"Particles wrap around (whole screen only for now)" };
 			int ex = x + S(12);
@@ -2420,7 +2431,7 @@ namespace
 			{
 				ex += Toggle(ex, top, edges[i], gc.GetEdgeMode() == i, true, [i] { GameController::Ref().SetEdgeMode(i); }, edgeTips[i]) + S(18);
 			}
-			y += S(84);
+			y += S(108);
 
 			top = Group(x, y, w, S(76), L"Gravity");
 			const wchar_t *gravs[] = { L"Vertical", L"Off", L"Radial", L"Custom" };
@@ -4296,6 +4307,7 @@ void OverlayWindows::Init(void *mainHwnd)
 	mainWindow = HWND(mainHwnd);
 	auto &prefs = GlobalPrefs::Ref();
 	windowWalls = prefs.Get("Overlay.WindowWalls", true);
+	iconWalls = prefs.Get("Overlay.IconWalls", true);
 	// Default UI scale: the larger of Windows' display scaling (TPT is DPI aware) and screen height / 1080, in
 	// quarter steps. Overridable.
 	HDC screen = GetDC(nullptr);
@@ -4542,6 +4554,71 @@ void OverlayWindows::ApplySimMasks(uint32_t *argb, int w)
 	}
 }
 
+// The desktop icons' screen rectangles (the icon, not its label), through the desktop's IFolderView. Re-read twice
+// a second; empty when Explorer isn't there.
+static const std::vector<RECT> &DesktopIcons()
+{
+	static std::vector<RECT> icons;
+	static IFolderView2 *view = nullptr;
+	static HWND list = nullptr;
+	static int frames = 0;
+	if (frames++ % 30) return icons;
+	icons.clear();
+	if (!view)
+	{
+		static bool com = SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED)) || true; // SDL may have done it
+		(void)com;
+		IShellWindows *windows = nullptr;
+		if (FAILED(CoCreateInstance(CLSID_ShellWindows, nullptr, CLSCTX_ALL, IID_PPV_ARGS(&windows)))) return icons;
+		VARIANT loc{}, root{};
+		loc.vt = VT_I4, loc.lVal = CSIDL_DESKTOP;
+		long found = 0;
+		IDispatch *disp = nullptr;
+		IServiceProvider *services = nullptr;
+		IShellBrowser *browser = nullptr;
+		IShellView *shellView = nullptr;
+		if (windows->FindWindowSW(&loc, &root, SWC_DESKTOP, &found, SWFO_NEEDDISPATCH, &disp) == S_OK &&
+		    SUCCEEDED(disp->QueryInterface(IID_PPV_ARGS(&services))) &&
+		    SUCCEEDED(services->QueryService(SID_STopLevelBrowser, IID_PPV_ARGS(&browser))) &&
+		    SUCCEEDED(browser->QueryActiveShellView(&shellView)) && SUCCEEDED(shellView->QueryInterface(IID_PPV_ARGS(&view))))
+		{
+			HWND defView = nullptr;
+			shellView->GetWindow(&defView);
+			list = FindWindowExW(defView, nullptr, L"SysListView32", nullptr);
+		}
+		for (IUnknown *p : std::initializer_list<IUnknown *>{ shellView, browser, services, disp, windows })
+			if (p) p->Release();
+		if (!view) return icons;
+	}
+	FOLDERVIEWMODE mode;
+	int size = 0;
+	POINT spacing{};
+	IEnumIDList *items = nullptr;
+	if (FAILED(view->GetViewModeAndIconSize(&mode, &size)) || FAILED(view->GetSpacing(&spacing)) || FAILED(view->Items(SVGIO_ALLVIEW, IID_PPV_ARGS(&items))))
+	{
+		view->Release(), view = nullptr; // Explorer restarted: find it again next time
+		return icons;
+	}
+	// ponytail: the icon is assumed centred at the top of its spacing cell (no per-item rect from IFolderView)
+	if (IsWindowVisible(list))
+	{
+		PITEMID_CHILD item;
+		while (items->Next(1, &item, nullptr) == S_OK)
+		{
+			POINT p;
+			if (SUCCEEDED(view->GetItemPosition(item, &p)))
+			{
+				ClientToScreen(list, &p);
+				int x = p.x + (spacing.x - size) / 2, y = p.y + 2;
+				icons.push_back({ x, y, x + size, y + size });
+			}
+			CoTaskMemFree(item);
+		}
+	}
+	items->Release();
+	return icons;
+}
+
 // Every frame: every visible window's rectangle, in sim pixels, blocks particles (Simulation::pixelWalls), so they
 // pile on title bars and flow around windows. A window moving onto particles shoves each one along its move to the
 // first free pixel past it, at the window's speed; one that appeared or grew lifts them out over its top. One with
@@ -4593,6 +4670,14 @@ static void TickWindowWalls()
 		return TRUE;
 	}, LPARAM(&ctx));
 	last = std::move(now);
+	if (iconWalls)
+		for (auto &r : DesktopIcons())
+		{
+			auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); };
+			Win w{ std::max(0, px(r.left - sr.left, WINDOWW, sw)), std::max(0, px(r.top - sr.top, WINDOWH, sh)),
+			       std::min(XRES, px(r.right - sr.left, WINDOWW, sw)), std::min(YRES, px(r.bottom - sr.top, WINDOWH, sh)), 0, 0 };
+			if (w.x1 > w.x0 && w.y1 > w.y0) wins.push_back(w);
+		}
 
 	auto old = std::move(sim->pixelWalls);
 	auto &mask = sim->pixelWalls;
