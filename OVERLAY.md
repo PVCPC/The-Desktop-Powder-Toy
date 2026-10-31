@@ -21,6 +21,13 @@ The hotkeys are global (polled each frame, so they work while TPT is unfocused) 
 current mode is saved as `Overlay.Input`. A fading glass notice shows the new mode. Ctrl+Alt+C
 (`Overlay.Keys.Clear`) clears the sim.
 
+Desktop physics (OverlayWalls.cpp, shared by every platform): sand on a window rides along when it moves and is
+flung off when it stops short or turns back (window speed averaged over ticks, since positions don't arrive in step
+with them); a moving window shoves what it moves onto; hot particles (300 C and up) touching a window leave scorch marks
+(`Simulation::windowSoot`, cleared with the sim); the mouse stirs the air where the overlay lets clicks through. The
+Simulation tab's "Desktop physics" sliders scale each (`Overlay.Feel.Grip/Fling/Push/Wind/Scorch`). Windows only so
+far for scorch drawing and the mouse breeze (macOS: ApplySimMasks/cursor hook still to do).
+
 The scene is kept between runs: quitting (or Windows shutting down) saves it as `overlay-scene-*.cps` tiles next to
 `powder.pref`, and the next start loads and deletes them.
 

@@ -1035,6 +1035,7 @@ void Parts::Reset()
 
 void Simulation::clear_sim(void)
 {
+	windowSoot.clear();
 	for (auto i = 0; i < parts.active; i++)
 	{
 		if (parts[i].type)

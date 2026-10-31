@@ -91,7 +91,6 @@ namespace
 	float uiScale = 1;
 	bool windowWalls = true;            // open windows are walls to particles (Overlay.WindowWalls)
 	bool iconWalls = true;              // and so are the desktop icons (Overlay.IconWalls)
-	bool cursorWind = true;             // the mouse stirs the air where the sim lets clicks through (Overlay.CursorWind)
 	HWND mainWindow = nullptr;    // TPT's own window
 	std::string recording;        // Overlay.Keys.<name> being recorded in the Overlay tab, or empty
 	std::function<void()> later; // run on the next tick, outside any window's message handling
@@ -2125,6 +2124,7 @@ namespace
 			RECT rc;
 			std::function<void()> left, right;
 			std::wstring tip;
+			bool drag = false; // left also runs while the button is held and the mouse moves (sliders)
 		};
 		std::vector<Hit> hits;
 		int hover = -1;
@@ -2365,6 +2365,26 @@ namespace
 			text->Draw(cv, x, y + (S(20) - text->Measure(s).cy) / 2, s, rgb);
 		}
 
+		// A track with a knob for v in [lo, hi]; a click on the track puts it there.
+		void Slider(int x, int y, int w, float v, float lo, float hi, std::function<void(float)> set, const std::wstring &tip = L"")
+		{
+			RECT rc{ x, y, x + w, y + S(20) };
+			bool hot = Hovered(rc);
+			int kw = S(9), mid = y + S(10), tx = x + int((w - kw) * std::clamp((v - lo) / (hi - lo), 0.f, 1.f));
+			cv.RoundRect(x, mid - S(2), w, S(4), S(2), 0xE7EAEA, 0xE7EAEA, 255);
+			cv.RoundFrame(x, mid - S(2), w, S(4), S(2), 0xB0B0B0, 255);
+			cv.RoundRect(x, mid - S(2), tx - x + kw / 2, S(4), S(2), theme->boxOn ? theme->boxOn : 0x3C7FB1, theme->boxOn ? theme->boxOn : 0x3C7FB1, 255);
+			cv.RoundRect(tx, y + S(2), kw, S(16), S(2), hot ? 0xEAF6FD : 0xF2F2F2, hot ? 0xA7D9F5 : 0xD5D5D5, 255);
+			cv.RoundFrame(tx, y + S(2), kw, S(16), S(2), hot ? 0x3C7FB1 : 0x707070, 255);
+			Add(rc, [this, x, w, kw, lo, hi, set] {
+				POINT p;
+				GetCursorPos(&p);
+				ScreenToClient(hwnd, &p);
+				set(lo + (hi - lo) * std::clamp(float(p.x - x - kw / 2) / (w - kw), 0.f, 1.f));
+			}, tip);
+			hits.back().drag = true;
+		}
+
 		// --- tabs
 
 		void PaintElements()
@@ -2495,7 +2515,7 @@ namespace
 			PushButton(x + S(12) + 3 * (bw4 + S(6)), top, bw4, L"Clear", [] { GameController::Ref().ClearSim(); }, L"Empty the sim");
 			y += S(68);
 
-			top = Group(x, y, w, S(124), L"Edges");
+			top = Group(x, y, w, S(100), L"Edges");
 			Toggle(x + S(12), top + S(24), L"Open windows are walls (sand piles on title bars)", windowWalls, false, [] {
 				windowWalls = !windowWalls;
 				GlobalPrefs::Ref().Set("Overlay.WindowWalls", windowWalls);
@@ -2504,10 +2524,6 @@ namespace
 				iconWalls = !iconWalls;
 				GlobalPrefs::Ref().Set("Overlay.IconWalls", iconWalls);
 			}, L"Sand piles on your icons, shaped like each icon (not when the sim is behind them)");
-			Toggle(x + S(12), top + S(72), L"Your mouse blows the sand (where clicks go to the desktop)", cursorWind, false, [] {
-				cursorWind = !cursorWind;
-				GlobalPrefs::Ref().Set("Overlay.CursorWind", cursorWind);
-			}, L"Moving the mouse stirs the air like TPT's wind tool");
 			const wchar_t *edges[] = { L"Void", L"Solid", L"Loop" };
 			const wchar_t *edgeTips[] = { L"Particles and air leave at the edges", L"The edges are walls", L"Particles wrap around (whole screen only for now)" };
 			int ex = x + S(12);
@@ -2515,7 +2531,32 @@ namespace
 			{
 				ex += Toggle(ex, top, edges[i], gc.GetEdgeMode() == i, true, [i] { GameController::Ref().SetEdgeMode(i); }, edgeTips[i]) + S(18);
 			}
-			y += S(132);
+			y += S(108);
+
+			// How the desktop pushes the sim around: multipliers on the overlay's own physics
+			struct FeelRow { const wchar_t *name, *tip; float *v; float hi; const char *pref; };
+			FeelRow feel[] = {
+				{ L"Window grip", L"How well sand rides a window you drag (0: it slides off)", &overlayFeel.grip, 1, "Grip" },
+				{ L"Fling", L"How hard sand flies off a window that stops short or turns back", &overlayFeel.fling, 3, "Fling" },
+				{ L"Window push", L"How hard a moving window shoves the sand in its way", &overlayFeel.push, 3, "Push" },
+				{ L"Mouse breeze", L"How much your mouse blows the sand where clicks go to the desktop", &overlayFeel.wind, 3, "Wind" },
+				{ L"Scorch", L"How fast fire and lava blacken the windows they touch (cleared with the sim)", &overlayFeel.scorch, 3, "Scorch" },
+			};
+			top = Group(x, y, w, S(26) * 5 + S(8), L"Desktop physics");
+			for (int i = 0; i < 5; i++)
+			{
+				auto &f = feel[i];
+				int ry = top + i * S(26);
+				Caption(x + S(12), ry, f.name);
+				wchar_t pct[16];
+				swprintf(pct, 16, *f.v > 0 ? L"%d%%" : L"off", int(std::lround(*f.v * 100)));
+				Caption(x + w - S(60), ry, pct);
+				Slider(x + S(160), ry, w - S(232), *f.v, 0, f.hi, [f](float v) {
+					*f.v = std::round(v * 20) / 20; // 5% steps
+					GlobalPrefs::Ref().Set(ByteString("Overlay.Feel.") + f.pref, *f.v);
+				}, f.tip);
+			}
+			y += S(26) * 5 + S(16);
 
 			top = Group(x, y, w, S(76), L"Gravity");
 			const wchar_t *gravs[] = { L"Vertical", L"Off", L"Radial", L"Custom" };
@@ -3607,7 +3648,7 @@ namespace
 				hover = at;
 				dirty = true;
 			}
-			if (at >= 0 && msg == WM_LBUTTONUP && hits[at].left)
+			if (at >= 0 && ((msg == WM_LBUTTONUP) || (msg == WM_MOUSEMOVE && (wp & MK_LBUTTON) && hits[at].drag)) && hits[at].left)
 			{
 				auto action = hits[at].left; // the action may repaint and rebuild hits
 				action();
@@ -4595,7 +4636,8 @@ void OverlayWindows::Init(void *mainHwnd)
 	auto &prefs = GlobalPrefs::Ref();
 	windowWalls = prefs.Get("Overlay.WindowWalls", true);
 	iconWalls = prefs.Get("Overlay.IconWalls", true);
-	cursorWind = prefs.Get("Overlay.CursorWind", true);
+	for (auto [v, name] : { std::pair{ &overlayFeel.grip, "Grip" }, { &overlayFeel.fling, "Fling" }, { &overlayFeel.push, "Push" }, { &overlayFeel.wind, "Wind" }, { &overlayFeel.scorch, "Scorch" } })
+		*v = prefs.Get(ByteString("Overlay.Feel.") + name, *v);
 	// Default UI scale: the larger of Windows' display scaling (TPT is DPI aware) and screen height / 1080, in
 	// quarter steps. Overridable.
 	HDC screen = GetDC(nullptr);
@@ -4878,6 +4920,7 @@ void OverlayWindows::ApplySimMasks(uint32_t *argb, int w, const uint8_t *occupie
 			}
 		}
 	});
+	OverlayDrawSoot(sim, argb, w, occupied, 2);
 	if (!full)
 	{
 		// A faint frame just outside the area, so you can see where it ends.
@@ -5169,7 +5212,7 @@ static void TickWindowWalls()
 	// the mouse over the desktop (where the overlay lets clicks through) stirs the air
 	static POINT lastCursor{ -1, -1 };
 	POINT cursor;
-	if (cursorWind && !overlayWindowed && sw > 0 && sh > 0 && GetCursorPos(&cursor))
+	if (!overlayWindowed && sw > 0 && sh > 0 && GetCursorPos(&cursor))
 	{
 		auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); };
 		int x = px(cursor.x - sr.left, WINDOWW, sw), y = px(cursor.y - sr.top, WINDOWH, sh);

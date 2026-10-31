@@ -29,6 +29,8 @@ What's new
 - **Input modes** for where clicks go: Auto (TPT while it's in front, the desktop otherwise), Pass-through and
   Locked, with global hotkeys (Ctrl+Alt+O / P / L, customisable). Full-screen apps and games are detected and the
   overlay steps aside. Ctrl+Alt+C clears the screen.
+- **Windows you can throw sand with**: sand rides a window you drag and flies off when you stop or shake it;
+  fire and lava scorch windows; your mouse blows sand like a breeze. Sliders in the Simulation tab tune all of it.
 - **Your sand stays**: the scene is saved when you quit and comes back next time.
 - **Light on the CPU**: when nothing moves it drops to a few frames a second (about a quarter of one core).
 - **Desktop-style menus**: TPT's side bar and tool strip move into real Windows windows (Elements, Simulation,

@@ -17,5 +17,16 @@ struct OverlayWall
 // Rebuilds sim->pixelWalls from the walls, carries what rests on the ones that moved and shoves what they moved onto.
 void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls);
 
+// How the desktop pushes the sim around, from the side window's sliders (Overlay.Feel.*): multipliers, 1 = normal, 0 = off;
+// grip is the chance (0-1) that a grain rides a moving window each tick.
+struct OverlayFeel
+{
+	float grip = 1, fling = 1, push = 1, wind = 1, scorch = 1;
+};
+extern OverlayFeel overlayFeel;
+
+// Draws the scorch marks (Simulation::windowSoot) on the frame where the window walls are (occupied & wallBit).
+void OverlayDrawSoot(const Simulation *sim, uint32_t *argb, int stride, const uint8_t *occupied, uint8_t wallBit);
+
 // The mouse moved by (dx, dy) to (x, y), in sim pixels, where the sim takes no clicks: it stirs the air there.
 void OverlayCursorWind(Simulation *sim, int x, int y, int dx, int dy);
