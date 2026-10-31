@@ -19,9 +19,16 @@
 # include <SDL_syswm.h>
 # define WIN32_LEAN_AND_MEAN
 # undef _WIN32_WINNT
-# define _WIN32_WINNT 0x0601 // SHQueryUserNotificationState (the build targets XP)
+# define _WIN32_WINNT 0x0602 // SHQueryUserNotificationState, DirectComposition (the build targets XP)
 # include <windows.h>
 # include <shellapi.h>
+# include <d3d11.h>
+# include <dxgi1_2.h>
+# include <dcomp.h>
+# pragma comment(lib, "d3d11.lib")
+# ifndef WS_EX_NOREDIRECTIONBITMAP
+#  define WS_EX_NOREDIRECTIONBITMAP 0x00200000L // SDL_syswm.h already pulled in windows.h for the XP target
+# endif
 #endif
 
 bool overlayMode = false;
@@ -85,13 +92,150 @@ namespace
 	};
 	Hotkey cycleInput, passThroughKey, lockedKey, paletteKey;
 
-	void ApplyPassThrough()
+	bool cursorMiss = false; // GPU frames: the mouse is over a see-through pixel (our window can't tell by itself)
+
+	void ApplyHitTest()
 	{
-		bool pass = input == OverlayInput::PassThrough || fullScreenApp || Shown() == OverlayLayer::BehindIcons;
-		OverlayWindows::SetPassThrough(fullScreenApp);
+		bool pass = input == OverlayInput::PassThrough || fullScreenApp || Shown() == OverlayLayer::BehindIcons || cursorMiss;
 		auto ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
 		ex = pass ? ex | WS_EX_TRANSPARENT : ex & ~LONG_PTR(WS_EX_TRANSPARENT);
 		SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex);
+	}
+
+	void ApplyPassThrough()
+	{
+		OverlayWindows::SetPassThrough(fullScreenApp);
+		ApplyHitTest();
+	}
+
+	// Frames on the GPU: a click-through window just over ours shows a sim-sized swap chain that the compositor scales
+	// up (DirectComposition, nearest pixel), so a frame is one sim-sized upload instead of UpdateLayeredWindow's
+	// full-screen copy (~4.5 ms at 5120x1440). Ours stays, at alpha 1 of 255, to take the clicks: see-through pixels
+	// pass them on by turning it click-through while the mouse is over one. Null without DirectComposition (Windows 7)
+	// or a D3D11 device: UpdateLayeredWindow then.
+	struct Gpu
+	{
+		HWND view = nullptr;
+		ID3D11Device *device = nullptr;
+		ID3D11DeviceContext *context = nullptr;
+		IDXGIFactory2 *factory = nullptr;
+		IDXGISwapChain1 *chain = nullptr;
+		IDCompositionDevice *comp = nullptr;
+		IDCompositionTarget *target = nullptr;
+		IDCompositionVisual *visual = nullptr;
+		int w = 0, h = 0, ww = 0, wh = 0;
+		RECT at{};
+		bool alphaSet = false; // our window's own picture is at alpha 1 (reset whenever WS_EX_LAYERED is toggled)
+	};
+	Gpu *gpu = nullptr;
+
+	Gpu *MakeGpu()
+	{
+		auto create = (decltype(&DCompositionCreateDevice))GetProcAddress(LoadLibraryW(L"dcomp.dll"), "DCompositionCreateDevice");
+		if (!create) return nullptr;
+		auto *g = new Gpu;
+		WNDCLASSW wc{};
+		wc.lpfnWndProc = DefWindowProcW;
+		wc.hInstance = GetModuleHandleW(nullptr);
+		wc.lpszClassName = L"TPTOverlayView";
+		RegisterClassW(&wc);
+		// owned by ours: always just above it in the z-order, whichever layer
+		g->view = CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+		                          wc.lpszClassName, L"", WS_POPUP, 0, 0, 1, 1, hwnd, nullptr, wc.hInstance, nullptr);
+		IDXGIDevice *dxgi = nullptr;
+		IDXGIAdapter *adapter = nullptr;
+		bool ok = g->view && SetLayeredWindowAttributes(g->view, 0, 255, LWA_ALPHA) &&
+		          SUCCEEDED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0,
+		                                      D3D11_SDK_VERSION, &g->device, nullptr, &g->context)) &&
+		          SUCCEEDED(g->device->QueryInterface(IID_PPV_ARGS(&dxgi))) && SUCCEEDED(dxgi->GetAdapter(&adapter)) &&
+		          SUCCEEDED(adapter->GetParent(IID_PPV_ARGS(&g->factory))) && SUCCEEDED(create(dxgi, IID_PPV_ARGS(&g->comp))) &&
+		          SUCCEEDED(g->comp->CreateTargetForHwnd(g->view, TRUE, &g->target)) && SUCCEEDED(g->comp->CreateVisual(&g->visual)) &&
+		          SUCCEEDED(g->visual->SetBitmapInterpolationMode(DCOMPOSITION_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR)) &&
+		          SUCCEEDED(g->target->SetRoot(g->visual));
+		if (adapter) adapter->Release();
+		if (dxgi) dxgi->Release();
+		if (!ok)
+		{
+			fprintf(stderr, "overlay: no GPU frames, UpdateLayeredWindow instead\n");
+			for (IUnknown *p : std::initializer_list<IUnknown *>{ g->visual, g->target, g->comp, g->factory, g->context, g->device })
+				if (p) p->Release();
+			if (g->view) DestroyWindow(g->view);
+			delete g;
+			return nullptr;
+		}
+		return g;
+	}
+
+	// One frame (premultiplied, w x h) for a ww x wh window. False: not shown, use UpdateLayeredWindow.
+	bool GpuPresent(const uint32_t *argb, int w, int h, int ww, int wh)
+	{
+		static bool tried = false;
+		if (!tried) tried = true, gpu = MakeGpu();
+		if (!gpu) return false;
+		auto &g = *gpu;
+		if (!g.alphaSet) g.alphaSet = SetLayeredWindowAttributes(hwnd, 0, 1, LWA_ALPHA);
+		RECT wr;
+		GetWindowRect(hwnd, &wr);
+		if (!IsWindowVisible(hwnd) || IsIconic(hwnd))
+		{
+			ShowWindow(g.view, SW_HIDE);
+			return true;
+		}
+		if (!EqualRect(&wr, &g.at) || !IsWindowVisible(g.view))
+		{
+			g.at = wr;
+			SetWindowPos(g.view, nullptr, wr.left, wr.top, wr.right - wr.left, wr.bottom - wr.top,
+			             SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+		}
+		bool commit = false;
+		if (!g.chain || w != g.w || h != g.h)
+		{
+			if (g.chain)
+			{
+				g.chain->ResizeBuffers(2, w, h, DXGI_FORMAT_B8G8R8A8_UNORM, 0);
+			}
+			else
+			{
+				DXGI_SWAP_CHAIN_DESC1 d{};
+				d.Width = w;
+				d.Height = h;
+				d.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+				d.SampleDesc.Count = 1;
+				d.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+				d.BufferCount = 2;
+				d.Scaling = DXGI_SCALING_STRETCH;
+				d.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+				d.AlphaMode = DXGI_ALPHA_MODE_PREMULTIPLIED;
+				if (FAILED(g.factory->CreateSwapChainForComposition(g.device, &d, nullptr, &g.chain))) return false;
+				g.visual->SetContent(g.chain);
+			}
+			g.w = w, g.h = h, g.ww = 0;
+			commit = true;
+		}
+		if (ww != g.ww || wh != g.wh)
+		{
+			g.visual->SetTransform(D2D_MATRIX_3X2_F{ float(ww) / w, 0, 0, float(wh) / h, 0, 0 });
+			g.ww = ww, g.wh = wh;
+			commit = true;
+		}
+		ID3D11Texture2D *buffer = nullptr;
+		if (FAILED(g.chain->GetBuffer(0, IID_PPV_ARGS(&buffer)))) return false;
+		g.context->UpdateSubresource(buffer, 0, nullptr, argb, w * 4, 0);
+		buffer->Release();
+		g.chain->Present(0, 0);
+		if (commit) g.comp->Commit();
+		// clicks: ours takes them only over a drawn pixel (or alpha 1: empty space that catches clicks)
+		POINT cur;
+		GetCursorPos(&cur);
+		int cx = int((cur.x - wr.left) * int64_t(w) / std::max(1L, wr.right - wr.left));
+		int cy = int((cur.y - wr.top) * int64_t(h) / std::max(1L, wr.bottom - wr.top));
+		bool miss = cx < 0 || cy < 0 || cx >= w || cy >= h || !(argb[size_t(cy) * w + cx] >> 24);
+		if (miss != cursorMiss)
+		{
+			cursorMiss = miss;
+			ApplyHitTest();
+		}
+		return true;
 	}
 
 	void SetInput(OverlayInput newInput, bool announce = true)
@@ -147,6 +291,7 @@ namespace
 			SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex & ~LONG_PTR(WS_EX_LAYERED));
 			SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED);
 			SetLayeredWindowAttributes(hwnd, layerKey, 0, LWA_COLORKEY);
+			if (gpu) gpu->alphaSet = false, ShowWindow(gpu->view, SW_HIDE);
 			// see-through until the first frame (an unpainted window is black over the whole desktop)
 			RECT rc;
 			GetClientRect(hwnd, &rc);
@@ -163,6 +308,7 @@ namespace
 			auto ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE); // back to per-pixel alpha
 			SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex & ~LONG_PTR(WS_EX_LAYERED));
 			SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED);
+			if (gpu) gpu->alphaSet = false;
 			SetWindowPos(hwnd, nullptr, screen.left, screen.top, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 		}
 		if (desk)
@@ -460,6 +606,7 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 	}
 	OverlayWindows::ClearUnderWindows(argb.data(), w, h, ww, wh);
 	bool keyed = GetParent(hwnd);
+	if (!keyed && GpuPresent(argb.data(), w, h, ww, wh)) return;
 	if (keyed)
 	{
 		// Behind the icons, inside Explorer's desktop window: Windows 11 24H2 and later refuse per-pixel alpha
