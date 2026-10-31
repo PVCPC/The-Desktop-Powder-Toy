@@ -21,7 +21,7 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls);
 // grip is the chance (0-1) that a grain rides a moving window each tick.
 struct OverlayFeel
 {
-	float grip = 1, fling = 1, push = 1, wind = 1, scorch = 1, frost = 1, acid = 1, water = 1, acidEat = 1, blast = 1;
+	float grip = 1, fling = 1, push = 1, wind = 1, scorch = 1, frost = 1, acid = 1, water = 1, acidEat = 1, blast = 1, holeOpacity = 1;
 	bool destructible = false; // acid and blasts eat holes in windows and icons (overlay only)
 };
 extern OverlayFeel overlayFeel;

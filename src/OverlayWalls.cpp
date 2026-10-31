@@ -341,7 +341,11 @@ void OverlayDrawMarks(const Simulation *sim, uint32_t *argb, int stride, const u
 				int x = m.x + i, y = m.y + j;
 				if (!how || x < 0 || y < 0 || x >= XRES || y >= YRES) continue;
 				auto &p = argb[size_t(y) * stride + x];
-				if (!(p >> 24)) p = 0xFF000000 | (backdrop ? backdrop[size_t(y) * XRES + x] : 0x1A1A1A);
+				if (uint32_t k = uint32_t(std::clamp(overlayFeel.holeOpacity, 0.f, 1.f) * 255); k && !(p >> 24)) // premultiplied
+				{
+					uint32_t c = backdrop ? backdrop[size_t(y) * XRES + x] : 0x1A1A1A;
+					p = k << 24 | ((c >> 16 & 0xFF) * k / 255) << 16 | ((c >> 8 & 0xFF) * k / 255) << 8 | (c & 0xFF) * k / 255;
+				}
 				for (int dy = -2; dy <= 2; dy++)
 					for (int dx = -2; dx <= 2; dx++)
 					{
