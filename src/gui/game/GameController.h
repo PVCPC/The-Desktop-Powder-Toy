@@ -177,6 +177,7 @@ public:
 	void ChangeBrush();
 	void ShowConsole();
 	void HideConsole();
+	CommandInterface *GetCommandInterface() { return commandInterface.get(); }
 	void FrameStep();
 	void TransformPlaceSave(Mat2<int> transform, Vec2<int> nudge);
 	bool MouseInZoom(ui::Point position);

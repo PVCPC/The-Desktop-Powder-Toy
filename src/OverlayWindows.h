@@ -30,4 +30,7 @@ namespace OverlayWindows
 	// isn't running (use TPT's own window).
 	int Form(const String &title, const String &prompt, const std::vector<String> &options, int &choice, String &text,
 	         const std::vector<String> &extras, std::function<bool(int, const String &)> valid, int limit = 0);
+	// The Lua console as a real window (TPT's ` key); false when the overlay isn't running.
+	bool ShowConsole();
+	void HideConsole();
 }

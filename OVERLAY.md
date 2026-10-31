@@ -128,6 +128,11 @@ overlay, and TPT only runs the top screen, so **the sim freezes while any dialog
      colour space) + "All of TPT's options..." for the rest. Lists = native menus, numbers = a Windows dialog that
      only accepts valid, in-range values. Tested: vorticity 5 refused, 0.5 saved. Not native yet: window/scale,
      FPS/draw limits, data folder, startup request, console key, clipboard, std redirect.
+   - [x] Render options (2026-10-30): already all in the Display tab (view modes, effects, air, colour modes).
+   - [x] Lua console (2026-10-30): a real window (TPT's ` key, ui.console, Esc/close hides): Consolas log over a
+     command line; Enter runs through TPT's CommandInterface (Lua and ! commands, "..." for an unfinished block),
+     Up/Down history, errors marked. Tested with posted keys: results, prints, multi-line block, errors, !set,
+     history. Prints from scripts outside a command still go to TPT's on-screen log.
    - [x] Real Vista-style menus, drop-downs and dialogs (user request 2026-10-30): today the hosted ones are TPT's
      pixel UI inside a Vista frame. First: Settings, drop-down lists, context menus.
      - [x] Drop-down lists and context menus are real Windows menus (ui::Window::MenuItems; TrackPopupMenu on its

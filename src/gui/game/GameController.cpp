@@ -67,6 +67,7 @@
 #include "gui/tags/TagsView.h"
 
 #include "Config.h"
+#include "OverlayWindows.h"
 #include <SDL.h>
 #include <iostream>
 
@@ -1432,6 +1433,7 @@ void GameController::OpenOptions()
 
 void GameController::ShowConsole()
 {
+	if (OverlayWindows::ShowConsole()) return; // the overlay's own console window
 	if (!console)
 		console = new ConsoleController(nullptr, commandInterface.get());
 	if (console->GetView() != ui::Engine::Ref().GetWindow())
@@ -1440,6 +1442,7 @@ void GameController::ShowConsole()
 
 void GameController::HideConsole()
 {
+	OverlayWindows::HideConsole();
 	if (!console)
 		return;
 	console->GetView()->CloseActiveWindow();

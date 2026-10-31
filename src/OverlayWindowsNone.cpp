@@ -13,3 +13,5 @@ void OverlayWindows::SetPlayArea(int, int, int, int) {}
 bool OverlayWindows::AreaMouse(int, int, int) { return false; }
 int OverlayWindows::Form(const String &, const String &, const std::vector<String> &, int &, String &, const std::vector<String> &,
                          std::function<bool(int, const String &)>, int) { return -1; }
+bool OverlayWindows::ShowConsole() { return false; }
+void OverlayWindows::HideConsole() {}
