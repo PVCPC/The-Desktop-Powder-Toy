@@ -15,7 +15,8 @@ namespace OverlayWindows
 	bool HideTPTMenus(); // TPT's own side bar and tool strip, replaced by the Elements window while it's open
 	// Sim-aware touches to a w-wide 0xAARRGGBB frame whose top-left XRES x YRES is the sim: black particles opaque,
 	// everything outside the playable area clear, a faint frame around the area.
-	void ApplySimMasks(uint32_t *argb, int w);
+	// occupied: XRES x YRES, nonzero where the shown frame has a particle (it lags the live sim)
+	void ApplySimMasks(uint32_t *argb, int w, const uint8_t *occupied);
 	// Clears the w x h frame where our app windows are, the frame being shown at ww x wh: the sim layer sits on top,
 	// so this keeps sand off them and lets clicks reach them.
 	void ClearUnderWindows(uint32_t *argb, int w, int h, int ww, int wh);

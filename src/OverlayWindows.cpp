@@ -4548,7 +4548,7 @@ bool OverlayWindows::HideTPTMenus()
 	return !showTPTMenus && palette && IsWindowVisible(palette->hwnd);
 }
 
-void OverlayWindows::ApplySimMasks(uint32_t *argb, int w)
+void OverlayWindows::ApplySimMasks(uint32_t *argb, int w, const uint8_t *occupied)
 {
 	if (!&GameController::Ref())
 	{
@@ -4578,7 +4578,7 @@ void OverlayWindows::ApplySimMasks(uint32_t *argb, int w)
 			{
 				p = 0;
 			}
-			else if (!(p & 0xFFFFFF) && (sim->pmap[y][x] || sim->photons[y][x]))
+			else if (!(p & 0xFFFFFF) && occupied[y * XRES + x]) // a black particle: solid
 			{
 				p = 0xFF000000;
 			}
@@ -4756,6 +4756,11 @@ static std::vector<DeskIcon> DesktopIcons()
 static void TickWindowWalls()
 {
 	auto *sim = GameController::Ref().GetModel()->GetSimulation();
+	// once per sim tick: frames drawn between ticks (the screen's rate is higher) have no particles to move. Every
+	// other frame while paused, so windows still shove.
+	static int lastTick = -1, skipped = 0;
+	if (sim->currentTick == lastTick && ++skipped < 2) return;
+	lastTick = sim->currentTick, skipped = 0;
 	static std::map<HWND, RECT> last; // where each window was on the last frame
 	struct Win { int x0, y0, x1, y1, mx, my; const DeskIcon *icon = nullptr; };
 	std::vector<Win> wins;
@@ -5226,7 +5231,7 @@ void OverlayWindows::TogglePalette() {}
 void OverlayWindows::SetPassThrough(bool) {}
 void OverlayWindows::Notify(const char *) {}
 bool OverlayWindows::HideTPTMenus() { return false; }
-void OverlayWindows::ApplySimMasks(uint32_t *, int) {}
+void OverlayWindows::ApplySimMasks(uint32_t *, int, const uint8_t *) {}
 void OverlayWindows::ClearUnderWindows(uint32_t *, int, int, int, int) {}
 void OverlayWindows::SetPlayArea(int, int, int, int) {}
 bool OverlayWindows::AreaMouse(int, int, int) { return false; }

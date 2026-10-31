@@ -37,6 +37,10 @@ void OverlayLoadKeys(); // (re)reads the hotkeys from Overlay.Keys.* in powder.p
 extern bool overlayAutoPass; // clicks pass through while a full-screen app or game is in front (Overlay.AutoPassThrough)
 // Presents the frame (0xRRGGBB pixels, w x h) scaled to the window, with per-pixel alpha. Also polls the hotkeys.
 void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h);
+// Each new sim frame, before it's presented: the particles it was rendered from, so frames drawn between sim ticks
+// can slide the moving ones from where they were to where they are (sim ticks 60 a second, the screen up to 120+).
+struct RenderableSimulation;
+void OverlayFrameParts(const RenderableSimulation &sim, bool zoom);
 // The sim size (in cells) and pixel scale that fill the primary screen, starting from the given scale and raising it
 // until the sim fits pmap. Stock size off Windows.
 std::pair<Vec2<int>, int> OverlaySimSize(int scale);

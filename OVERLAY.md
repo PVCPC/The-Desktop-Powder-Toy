@@ -217,6 +217,12 @@ Assessment, in the order I'd do it (effort: S = an hour or two, M = a session, L
    cell); top = position + 6 px, matched against sand resting on real icons.
    Speed: the scale-up runs in parallel bands (std::execution::par). Per frame now ~10 ms of overlay work:
    ~4.5 ms is UpdateLayeredWindow's 32 MB copy (needs a GPU presenter, DirectComposition, to get 120 fps).
+   2026-10-31: GPU presenter (4a2bc04) then 120 fps drawing with 60 Hz physics: drawing runs at the display
+   rate (DrawLimitDisplay), the frame goes up sim-sized, and particles that moved between the last two sim
+   frames (same slot + type, < 8 px) are cut out and drawn as GPU squares sliding from old to new position
+   (one tick of latency). Window walls run once per sim tick. The black-particle mask uses the shown frame's
+   positions (live pmap is a tick ahead: it painted black squares). No sliding while zoom is on.
+   Measured: 117-121 frames/s with ~3000 grains sliding, sim steady at 60. Behind-icons layer: old GDI path.
    2026-10-30 later: pixel-exact and every frame (user: "smoother, less blocky"). Windows are no longer WL_WALL
    cells but Simulation::pixelWalls, a per-pixel mask eval_move and brush drawing respect; unlike walls it never
    deletes particles, which fixes the ~2% grain loss. Tested: a pile rides a rising window with a smooth edge,

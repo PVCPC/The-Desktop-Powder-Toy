@@ -1,6 +1,7 @@
 #include "Overlay.h"
 #include "SimulationConfig.h"
 #include "simulation/ElementDefs.h"
+#include "simulation/Simulation.h"
 #include <algorithm>
 #include "OverlayWindows.h"
 #include "SimulationConfig.h"
@@ -25,6 +26,8 @@
 # include <d3d11.h>
 # include <dxgi1_2.h>
 # include <dcomp.h>
+# include <d3dcompiler.h>
+# include "FpsLimit.h"
 # pragma comment(lib, "d3d11.lib")
 # ifndef WS_EX_NOREDIRECTIONBITMAP
 #  define WS_EX_NOREDIRECTIONBITMAP 0x00200000L // SDL_syswm.h already pulled in windows.h for the XP target
@@ -108,11 +111,31 @@ namespace
 		ApplyHitTest();
 	}
 
-	// Frames on the GPU: a click-through window just over ours shows a sim-sized swap chain that the compositor scales
-	// up (DirectComposition, nearest pixel), so a frame is one sim-sized upload instead of UpdateLayeredWindow's
-	// full-screen copy (~4.5 ms at 5120x1440). Ours stays, at alpha 1 of 255, to take the clicks: see-through pixels
-	// pass them on by turning it click-through while the mouse is over one. Null without DirectComposition (Windows 7)
-	// or a D3D11 device: UpdateLayeredWindow then.
+	double Now()
+	{
+		LARGE_INTEGER f, c;
+		QueryPerformanceFrequency(&f);
+		QueryPerformanceCounter(&c);
+		return double(c.QuadPart) / f.QuadPart;
+	}
+
+	// The particles that moved between the last two sim frames (OverlayFrameParts): the pixel each is drawn at in the
+	// newest, and how far back (in sim pixels) it was in the one before. Frames drawn between sim ticks slide them
+	// across, so the screen shows the sim one tick late but in motion at the screen's rate.
+	struct Moving
+	{
+		float x, y, dx, dy;
+	};
+	std::vector<Moving> moving;
+	std::vector<uint8_t> frameOccupied; // XRES x YRES (sized at the first sim frame: the sim size is set at start-up): the pixels the shown frame has particles on
+	double framePeriod = 1 / 60.0, frameAt = 0; // seconds between sim frames, and when the newest came
+
+	// Frames on the GPU: a click-through window just over ours shows a screen-sized swap chain (DirectComposition):
+	// the frame goes up sim-sized and the GPU scales it (nearest pixel), with the moving particles taken out and drawn
+	// as squares between where they were and where they are. That replaces UpdateLayeredWindow's full-screen copy
+	// (~4.5 ms at 5120x1440). Ours stays, at alpha 1 of 255, to take the clicks: see-through pixels pass them on by
+	// turning it click-through while the mouse is over one. Null without DirectComposition (Windows 7), a D3D11
+	// device or the shader compiler: UpdateLayeredWindow then.
 	struct Gpu
 	{
 		HWND view = nullptr;
@@ -120,19 +143,58 @@ namespace
 		ID3D11DeviceContext *context = nullptr;
 		IDXGIFactory2 *factory = nullptr;
 		IDXGISwapChain1 *chain = nullptr;
+		ID3D11RenderTargetView *target = nullptr;
 		IDCompositionDevice *comp = nullptr;
-		IDCompositionTarget *target = nullptr;
+		IDCompositionTarget *compTarget = nullptr;
 		IDCompositionVisual *visual = nullptr;
-		int w = 0, h = 0, ww = 0, wh = 0;
+		ID3D11VertexShader *bgVs = nullptr, *partVs = nullptr;
+		ID3D11PixelShader *bgPs = nullptr, *partPs = nullptr;
+		ID3D11InputLayout *partLayout = nullptr;
+		ID3D11BlendState *over = nullptr;
+		ID3D11RasterizerState *noCull = nullptr;
+		ID3D11Buffer *constants = nullptr, *parts = nullptr;
+		ID3D11Texture2D *frame = nullptr;
+		ID3D11ShaderResourceView *frameView = nullptr;
+		int w = 0, h = 0, ww = 0, wh = 0, partsCap = 0;
 		RECT at{};
 		bool alphaSet = false; // our window's own picture is at alpha 1 (reset whenever WS_EX_LAYERED is toggled)
 	};
 	Gpu *gpu = nullptr;
+	struct Part
+	{
+		float x, y, dx, dy;
+		uint32_t colour;
+	};
+
+	constexpr char shaders[] = R"(
+cbuffer C : register(b0) { float2 scale; float2 screen; float t; float3 pad; };
+Texture2D<float4> frame : register(t0);
+struct V { float4 pos : SV_Position; float4 col : COLOR; };
+V Bg(uint id : SV_VertexID)
+{
+	V o;
+	float2 uv = float2((id << 1) & 2, id & 2);
+	o.pos = float4(uv * float2(2, -2) + float2(-1, 1), 0, 1);
+	o.col = 0;
+	return o;
+}
+float4 BgPs(V i) : SV_Target { return frame.Load(int3(i.pos.xy / scale, 0)); }
+V Part(uint id : SV_VertexID, float2 at : AT, float2 d : DELTA, float4 col : COLOR)
+{
+	float2 p = round((at + d * (1 - t)) * scale) + float2(id & 1, id >> 1) * scale;
+	V o;
+	o.pos = float4(p / screen * float2(2, -2) + float2(-1, 1), 0, 1);
+	o.col = col.bgra;
+	return o;
+}
+float4 PartPs(V i) : SV_Target { return i.col; }
+)";
 
 	Gpu *MakeGpu()
 	{
 		auto create = (decltype(&DCompositionCreateDevice))GetProcAddress(LoadLibraryW(L"dcomp.dll"), "DCompositionCreateDevice");
-		if (!create) return nullptr;
+		auto compile = (pD3DCompile)GetProcAddress(LoadLibraryW(L"d3dcompiler_47.dll"), "D3DCompile");
+		if (!create || !compile) return nullptr;
 		auto *g = new Gpu;
 		WNDCLASSW wc{};
 		wc.lpfnWndProc = DefWindowProcW;
@@ -149,28 +211,71 @@ namespace
 		                                      D3D11_SDK_VERSION, &g->device, nullptr, &g->context)) &&
 		          SUCCEEDED(g->device->QueryInterface(IID_PPV_ARGS(&dxgi))) && SUCCEEDED(dxgi->GetAdapter(&adapter)) &&
 		          SUCCEEDED(adapter->GetParent(IID_PPV_ARGS(&g->factory))) && SUCCEEDED(create(dxgi, IID_PPV_ARGS(&g->comp))) &&
-		          SUCCEEDED(g->comp->CreateTargetForHwnd(g->view, TRUE, &g->target)) && SUCCEEDED(g->comp->CreateVisual(&g->visual)) &&
-		          SUCCEEDED(g->visual->SetBitmapInterpolationMode(DCOMPOSITION_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR)) &&
-		          SUCCEEDED(g->target->SetRoot(g->visual));
+		          SUCCEEDED(g->comp->CreateTargetForHwnd(g->view, TRUE, &g->compTarget)) && SUCCEEDED(g->comp->CreateVisual(&g->visual)) &&
+		          SUCCEEDED(g->compTarget->SetRoot(g->visual));
 		if (adapter) adapter->Release();
 		if (dxgi) dxgi->Release();
+		auto shader = [&](const char *entry, const char *target) {
+			ID3DBlob *code = nullptr, *errors = nullptr;
+			if (FAILED(compile(shaders, sizeof(shaders) - 1, nullptr, nullptr, nullptr, entry, target, 0, 0, &code, &errors)))
+			{
+				fprintf(stderr, "overlay: shader %s: %s\n", entry, errors ? (const char *)errors->GetBufferPointer() : "?");
+				code = nullptr;
+			}
+			if (errors) errors->Release();
+			return code;
+		};
+		ID3DBlob *bgVs = nullptr, *bgPs = nullptr, *partVs = nullptr, *partPs = nullptr;
+		if (ok)
+		{
+			bgVs = shader("Bg", "vs_4_0"), bgPs = shader("BgPs", "ps_4_0"), partVs = shader("Part", "vs_4_0"), partPs = shader("PartPs", "ps_4_0");
+			D3D11_INPUT_ELEMENT_DESC layout[] = {
+				{ "AT", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+				{ "DELTA", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+				{ "COLOR", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, 16, D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+			};
+			D3D11_BLEND_DESC blend{};
+			blend.RenderTarget[0] = { TRUE, D3D11_BLEND_ONE, D3D11_BLEND_INV_SRC_ALPHA, D3D11_BLEND_OP_ADD,
+			                          D3D11_BLEND_ONE, D3D11_BLEND_INV_SRC_ALPHA, D3D11_BLEND_OP_ADD, D3D11_COLOR_WRITE_ENABLE_ALL };
+			D3D11_RASTERIZER_DESC raster{};
+			raster.FillMode = D3D11_FILL_SOLID;
+			raster.CullMode = D3D11_CULL_NONE;
+			raster.DepthClipEnable = TRUE;
+			D3D11_BUFFER_DESC cb{ 32, D3D11_USAGE_DYNAMIC, D3D11_BIND_CONSTANT_BUFFER, D3D11_CPU_ACCESS_WRITE };
+			ok = bgVs && bgPs && partVs && partPs &&
+			     SUCCEEDED(g->device->CreateVertexShader(bgVs->GetBufferPointer(), bgVs->GetBufferSize(), nullptr, &g->bgVs)) &&
+			     SUCCEEDED(g->device->CreatePixelShader(bgPs->GetBufferPointer(), bgPs->GetBufferSize(), nullptr, &g->bgPs)) &&
+			     SUCCEEDED(g->device->CreateVertexShader(partVs->GetBufferPointer(), partVs->GetBufferSize(), nullptr, &g->partVs)) &&
+			     SUCCEEDED(g->device->CreatePixelShader(partPs->GetBufferPointer(), partPs->GetBufferSize(), nullptr, &g->partPs)) &&
+			     SUCCEEDED(g->device->CreateInputLayout(layout, 3, partVs->GetBufferPointer(), partVs->GetBufferSize(), &g->partLayout)) &&
+			     SUCCEEDED(g->device->CreateBlendState(&blend, &g->over)) &&
+			     SUCCEEDED(g->device->CreateRasterizerState(&raster, &g->noCull)) &&
+			     SUCCEEDED(g->device->CreateBuffer(&cb, nullptr, &g->constants));
+		}
+		for (auto *b : { bgVs, bgPs, partVs, partPs })
+			if (b) b->Release();
 		if (!ok)
 		{
 			fprintf(stderr, "overlay: no GPU frames, UpdateLayeredWindow instead\n");
-			for (IUnknown *p : std::initializer_list<IUnknown *>{ g->visual, g->target, g->comp, g->factory, g->context, g->device })
-				if (p) p->Release();
+			// ponytail: the device and its objects leak here, once
 			if (g->view) DestroyWindow(g->view);
-			delete g;
 			return nullptr;
 		}
 		return g;
 	}
 
-	// One frame (premultiplied, w x h) for a ww x wh window. False: not shown, use UpdateLayeredWindow.
-	bool GpuPresent(const uint32_t *argb, int w, int h, int ww, int wh)
+	// One frame (premultiplied, w x h; the moving particles' pixels get `empty`) for a ww x wh window. False: not
+	// shown, use UpdateLayeredWindow.
+	bool GpuPresent(uint32_t *argb, int w, int h, int ww, int wh, uint32_t empty)
 	{
 		static bool tried = false;
-		if (!tried) tried = true, gpu = MakeGpu();
+		if (!tried)
+		{
+			tried = true;
+			gpu = MakeGpu();
+			// draw at the screen's rate; the sim keeps its own (FpsLimit) and the frames between slide the particles
+			if (gpu) ui::Engine::Ref().SetDrawingFrequencyLimit(DrawLimitDisplay{});
+		}
 		if (!gpu) return false;
 		auto &g = *gpu;
 		if (!g.alphaSet) g.alphaSet = SetLayeredWindowAttributes(hwnd, 0, 1, LWA_ALPHA);
@@ -187,43 +292,6 @@ namespace
 			SetWindowPos(g.view, nullptr, wr.left, wr.top, wr.right - wr.left, wr.bottom - wr.top,
 			             SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
 		}
-		bool commit = false;
-		if (!g.chain || w != g.w || h != g.h)
-		{
-			if (g.chain)
-			{
-				g.chain->ResizeBuffers(2, w, h, DXGI_FORMAT_B8G8R8A8_UNORM, 0);
-			}
-			else
-			{
-				DXGI_SWAP_CHAIN_DESC1 d{};
-				d.Width = w;
-				d.Height = h;
-				d.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-				d.SampleDesc.Count = 1;
-				d.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-				d.BufferCount = 2;
-				d.Scaling = DXGI_SCALING_STRETCH;
-				d.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
-				d.AlphaMode = DXGI_ALPHA_MODE_PREMULTIPLIED;
-				if (FAILED(g.factory->CreateSwapChainForComposition(g.device, &d, nullptr, &g.chain))) return false;
-				g.visual->SetContent(g.chain);
-			}
-			g.w = w, g.h = h, g.ww = 0;
-			commit = true;
-		}
-		if (ww != g.ww || wh != g.wh)
-		{
-			g.visual->SetTransform(D2D_MATRIX_3X2_F{ float(ww) / w, 0, 0, float(wh) / h, 0, 0 });
-			g.ww = ww, g.wh = wh;
-			commit = true;
-		}
-		ID3D11Texture2D *buffer = nullptr;
-		if (FAILED(g.chain->GetBuffer(0, IID_PPV_ARGS(&buffer)))) return false;
-		g.context->UpdateSubresource(buffer, 0, nullptr, argb, w * 4, 0);
-		buffer->Release();
-		g.chain->Present(0, 0);
-		if (commit) g.comp->Commit();
 		// clicks: ours takes them only over a drawn pixel (or alpha 1: empty space that catches clicks)
 		POINT cur;
 		GetCursorPos(&cur);
@@ -235,6 +303,114 @@ namespace
 			cursorMiss = miss;
 			ApplyHitTest();
 		}
+
+		if (!g.chain || ww != g.ww || wh != g.wh)
+		{
+			if (g.target) g.target->Release(), g.target = nullptr;
+			if (g.chain)
+			{
+				g.chain->ResizeBuffers(2, ww, wh, DXGI_FORMAT_B8G8R8A8_UNORM, 0);
+			}
+			else
+			{
+				DXGI_SWAP_CHAIN_DESC1 d{};
+				d.Width = ww;
+				d.Height = wh;
+				d.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+				d.SampleDesc.Count = 1;
+				d.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+				d.BufferCount = 2;
+				d.Scaling = DXGI_SCALING_STRETCH;
+				d.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+				d.AlphaMode = DXGI_ALPHA_MODE_PREMULTIPLIED;
+				if (FAILED(g.factory->CreateSwapChainForComposition(g.device, &d, nullptr, &g.chain))) return false;
+				g.visual->SetContent(g.chain);
+				g.comp->Commit();
+			}
+			ID3D11Texture2D *buffer = nullptr;
+			if (FAILED(g.chain->GetBuffer(0, IID_PPV_ARGS(&buffer)))) return false;
+			g.device->CreateRenderTargetView(buffer, nullptr, &g.target); // with flip model, buffer 0 is always the back one
+			buffer->Release();
+			g.ww = ww, g.wh = wh;
+		}
+		if (!g.frame || w != g.w || h != g.h)
+		{
+			if (g.frameView) g.frameView->Release(), g.frameView = nullptr;
+			if (g.frame) g.frame->Release(), g.frame = nullptr;
+			D3D11_TEXTURE2D_DESC d{};
+			d.Width = w;
+			d.Height = h;
+			d.MipLevels = d.ArraySize = 1;
+			d.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+			d.SampleDesc.Count = 1;
+			d.Usage = D3D11_USAGE_DEFAULT;
+			d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+			if (FAILED(g.device->CreateTexture2D(&d, nullptr, &g.frame)) ||
+			    FAILED(g.device->CreateShaderResourceView(g.frame, nullptr, &g.frameView))) return false;
+			g.w = w, g.h = h;
+		}
+
+		// the moving particles: out of the frame, into squares
+		static std::vector<Part> parts;
+		parts.clear();
+		for (auto &m : moving)
+		{
+			int x = int(m.x), y = int(m.y);
+			if (x < 0 || y < 0 || x >= w || y >= h) continue;
+			auto &px = argb[size_t(y) * w + x];
+			if (px >> 24 < 2) continue; // under a window or a panel, or already taken
+			parts.push_back({ m.x, m.y, m.dx, m.dy, px });
+			px = empty;
+		}
+		if (int(parts.size()) > g.partsCap)
+		{
+			if (g.parts) g.parts->Release(), g.parts = nullptr;
+			g.partsCap = std::max(int(parts.size()) * 2, 4096);
+			D3D11_BUFFER_DESC d{ UINT(g.partsCap * sizeof(Part)), D3D11_USAGE_DYNAMIC, D3D11_BIND_VERTEX_BUFFER, D3D11_CPU_ACCESS_WRITE };
+			if (FAILED(g.device->CreateBuffer(&d, nullptr, &g.parts))) return g.partsCap = 0, false;
+		}
+		D3D11_MAPPED_SUBRESOURCE map;
+		if (!parts.empty() && SUCCEEDED(g.context->Map(g.parts, 0, D3D11_MAP_WRITE_DISCARD, 0, &map)))
+		{
+			std::memcpy(map.pData, parts.data(), parts.size() * sizeof(Part));
+			g.context->Unmap(g.parts, 0);
+		}
+		float t = float(std::clamp((Now() - frameAt) / framePeriod, 0.0, 1.0));
+		if (SUCCEEDED(g.context->Map(g.constants, 0, D3D11_MAP_WRITE_DISCARD, 0, &map)))
+		{
+			float c[8] = { float(ww) / w, float(wh) / h, float(ww), float(wh), t };
+			std::memcpy(map.pData, c, sizeof(c));
+			g.context->Unmap(g.constants, 0);
+		}
+		g.context->UpdateSubresource(g.frame, 0, nullptr, argb, w * 4, 0);
+
+		D3D11_VIEWPORT vp{ 0, 0, float(ww), float(wh), 0, 1 };
+		g.context->RSSetViewports(1, &vp);
+		g.context->RSSetState(g.noCull);
+		g.context->OMSetRenderTargets(1, &g.target, nullptr);
+		g.context->VSSetConstantBuffers(0, 1, &g.constants);
+		g.context->PSSetConstantBuffers(0, 1, &g.constants);
+		// the frame, scaled up
+		g.context->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFF);
+		g.context->IASetInputLayout(nullptr);
+		g.context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		g.context->VSSetShader(g.bgVs, nullptr, 0);
+		g.context->PSSetShader(g.bgPs, nullptr, 0);
+		g.context->PSSetShaderResources(0, 1, &g.frameView);
+		g.context->Draw(3, 0);
+		// the moving particles, over it
+		if (!parts.empty())
+		{
+			UINT stride = sizeof(Part), offset = 0;
+			g.context->OMSetBlendState(g.over, nullptr, 0xFFFFFFFF);
+			g.context->IASetInputLayout(g.partLayout);
+			g.context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+			g.context->IASetVertexBuffers(0, 1, &g.parts, &stride, &offset);
+			g.context->VSSetShader(g.partVs, nullptr, 0);
+			g.context->PSSetShader(g.partPs, nullptr, 0);
+			g.context->DrawInstanced(4, UINT(parts.size()), 0, 0);
+		}
+		g.chain->Present(0, 0);
 		return true;
 	}
 
@@ -523,6 +699,39 @@ void OverlayTickUI()
 #endif
 }
 
+void OverlayFrameParts(const RenderableSimulation &sim, bool zoom)
+{
+#ifdef _WIN32
+	static std::vector<float> lastX, lastY;
+	static std::vector<int> lastType;
+	double now = Now();
+	if (frameAt) framePeriod = std::clamp(framePeriod + (now - frameAt - framePeriod) * 0.1, 1 / 240.0, 1 / 20.0);
+	frameAt = now;
+	moving.clear();
+	frameOccupied.assign(size_t(XRES) * YRES, 0);
+	int n = sim.parts.active;
+	if (int(lastType.size()) < n) lastX.resize(n), lastY.resize(n), lastType.resize(n, 0);
+	for (int i = 0; i < n; i++)
+	{
+		auto &p = sim.parts[i];
+		// the same slot and type a frame ago, and close: the same particle (a reused slot is a new one)
+		if (p.type && p.type == lastType[i])
+		{
+			float dx = lastX[i] - p.x, dy = lastY[i] - p.y;
+			// not with the zoom window up: it would be a magnified copy of the unmoved frame
+			if (!zoom && (dx != 0 || dy != 0) && std::abs(dx) < 8 && std::abs(dy) < 8)
+				moving.push_back({ float(int(p.x + 0.5f)), float(int(p.y + 0.5f)), dx, dy });
+		}
+		lastType[i] = p.type, lastX[i] = p.x, lastY[i] = p.y;
+		int x = int(p.x + 0.5f), y = int(p.y + 0.5f);
+		if (p.type && x >= 0 && y >= 0 && x < XRES && y < YRES) frameOccupied[y * XRES + x] = 1;
+	}
+	std::fill(lastType.begin() + n, lastType.end(), 0);
+#else
+	(void)sim, (void)zoom;
+#endif
+}
+
 void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 {
 #ifdef _WIN32
@@ -567,7 +776,8 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 	}
 	if (w == WINDOWW && h == WINDOWH)
 	{
-		OverlayWindows::ApplySimMasks(argb.data(), w);
+		if (frameOccupied.size() < size_t(XRES) * YRES) frameOccupied.assign(size_t(XRES) * YRES, 0);
+		OverlayWindows::ApplySimMasks(argb.data(), w, frameOccupied.data());
 		auto *top = ui::Engine::Ref().GetWindow();
 		// TPT's menus: the side bar (x >= XRES), the tool strip under the sim and the bottom button row (which would
 		// sit on the taskbar).
@@ -606,7 +816,7 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 	}
 	OverlayWindows::ClearUnderWindows(argb.data(), w, h, ww, wh);
 	bool keyed = GetParent(hwnd);
-	if (!keyed && GpuPresent(argb.data(), w, h, ww, wh)) return;
+	if (!keyed && GpuPresent(argb.data(), w, h, ww, wh, empty)) return;
 	if (keyed)
 	{
 		// Behind the icons, inside Explorer's desktop window: Windows 11 24H2 and later refuse per-pixel alpha

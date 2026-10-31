@@ -2195,6 +2195,7 @@ void GameView::OnDraw()
 			rendererStats = ren->GetStats();
 			*rendererThreadResult = ren->GetVideo();
 			rendererFrame = rendererThreadResult.get();
+			if (overlayMode && !overlayWindowed) OverlayFrameParts(*rendererThreadSim, zoomEnabled); // what that frame shows
 			DispatchRendererThread();
 		}
 		else
@@ -2205,6 +2206,7 @@ void GameView::OnDraw()
 			AfterSimDraw(*sim);
 			rendererStats = ren->GetStats();
 			rendererFrame = &ren->GetVideo();
+			if (overlayMode && !overlayWindowed) OverlayFrameParts(*sim, zoomEnabled);
 		}
 	}
 
