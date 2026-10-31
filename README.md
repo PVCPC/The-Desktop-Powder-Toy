@@ -9,6 +9,8 @@ README follows below.
 Our work is on the [`overlay`](https://github.com/PVCPC/The-Desktop-Powder-Toy/tree/overlay) branch. Details, design notes and the to-do list are in
 [OVERLAY.md](https://github.com/PVCPC/The-Desktop-Powder-Toy/blob/overlay/OVERLAY.md).
 
+![Sand and water poured over the desktop, piling on windows that get dragged around](https://raw.githubusercontent.com/PVCPC/The-Desktop-Powder-Toy/overlay/docs/overlay/demo.gif)
+
 ![Sand piled on an open window, water running off another](https://raw.githubusercontent.com/PVCPC/The-Desktop-Powder-Toy/overlay/docs/overlay/sand-on-windows.png)
 
 What's new
