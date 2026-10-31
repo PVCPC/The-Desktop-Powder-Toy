@@ -107,7 +107,11 @@ static void CalculateMousePosition(int *x, int *y)
 
 void blit(pixel *vid)
 {
-	if (overlayMode)
+	if (overlayWindowed)
+	{
+		OverlayTickUI();
+	}
+	else if (overlayMode)
 	{
 		OverlayPresent(sdl_window, vid, WINDOWW, WINDOWH);
 		return;
@@ -254,7 +258,7 @@ void SDLSetScreen()
 		{
 			rendererFlags |= SDL_RENDERER_PRESENTVSYNC;
 		}
-		if (overlayMode)
+		if (overlayMode && !overlayWindowed)
 		{
 			flags |= SDL_WINDOW_BORDERLESS | SDL_WINDOW_ALWAYS_ON_TOP;
 			// Overlay frames go out through UpdateLayeredWindow (Overlay.cpp); keep SDL off GPU swapchains, which fight it.
@@ -304,7 +308,7 @@ void SDLSetScreen()
 	{
 		SDL_SetWindowSize(sdl_window, size.X, size.Y);
 		LoadWindowPosition();
-		if (overlayMode)
+		if (overlayMode && !overlayWindowed)
 		{
 			// The overlay covers its monitor; a saved normal-window position would push it off screen.
 			auto centred = SDL_WINDOWPOS_CENTERED_DISPLAY(SDL_GetWindowDisplayIndex(sdl_window));

@@ -597,7 +597,7 @@ namespace
 	// secondary, as in TPT. The other tabs are immediate-mode Vista controls: each paint rebuilds the list of
 	// clickable rectangles (hits) that the mouse handler uses.
 	void OpenTorn(int tab);
-	void RestartAtScale(int scale);
+	void Restart(int scale, bool windowed);
 	void LoadSceneTiles();
 
 	struct SideWindow : Panel
@@ -1362,7 +1362,13 @@ namespace
 				}, L"Ctrl, Alt, Shift or Win plus a letter, digit or F key");
 			}
 			y += S(148);
-			top = Group(x, y, w, S(80), L"Size");
+			top = Group(x, y, w, S(108), L"Size");
+			Caption(x + S(12), top + S(56), L"Runs as");
+			int mx = x + S(200);
+			mx += Toggle(mx, top + S(56), L"Desktop overlay", !overlayWindowed, true, [] { Restart(ui::Engine::Ref().windowFrameOps.scale, false); },
+			             L"Over the desktop (restarts TPT; the scene comes along)") + S(18);
+			Toggle(mx, top + S(56), L"Normal window", overlayWindowed, true, [] { Restart(ui::Engine::Ref().windowFrameOps.scale, true); },
+			       L"TPT's own window with these side windows (restarts TPT; the scene comes along, clipped to the smaller sim)");
 			// The sim's pixel size: a different sim size, so TPT restarts with the scene carried over.
 			Caption(x + S(12), top + S(28), L"Sim pixel size");
 			int sx = x + S(200);
@@ -1374,7 +1380,7 @@ namespace
 				swprintf(label, 32, L"%d\u00D7", sc);
 				wchar_t tip[96];
 				swprintf(tip, 96, L"%dx%d sim pixels (restarts TPT; the scene comes along, clipped if it doesn't fit)", cells.X * CELL, cells.Y * CELL);
-				sx += Toggle(sx, top + S(28), label, ui::Engine::Ref().windowFrameOps.scale == sc, true, [sc] { RestartAtScale(sc); }, tip) + S(18);
+				sx += Toggle(sx, top + S(28), label, ui::Engine::Ref().windowFrameOps.scale == sc, true, [sc] { Restart(sc, overlayWindowed); }, tip) + S(18);
 			}
 			wchar_t scale[32];
 			swprintf(scale, 32, L"UI scale %g\u00D7", uiScale);
@@ -1686,9 +1692,10 @@ namespace
 	}
 
 	// Saves the scene, sets the new pixel size and starts a fresh TPT, which loads the scene; this one quits.
-	void RestartAtScale(int scale)
+	// The other pixel size or mode: the scene goes along in tiles, the new TPT loads it, this one quits.
+	void Restart(int scale, bool windowed)
 	{
-		if (scale == ui::Engine::Ref().windowFrameOps.scale) return;
+		if (scale == ui::Engine::Ref().windowFrameOps.scale && windowed == overlayWindowed) return;
 		auto *model = GameController::Ref().GetModel();
 		auto *sim = model->GetSimulation();
 		for (int y = 0; y < YCELLS; y += 255)
@@ -1703,10 +1710,13 @@ namespace
 			}
 		GlobalPrefs::Ref().Set("Overlay.PendingScene", true);
 		GlobalPrefs::Ref().Set("Scale", scale);
-		// The same command line.
+		// The same command line, with overlay:on or overlay:window.
 		wchar_t exe[MAX_PATH];
 		GetModuleFileNameW(nullptr, exe, MAX_PATH);
 		std::wstring line = GetCommandLineW();
+		for (auto *arg : { L" overlay:window", L" overlay:on" })
+			if (auto at = line.find(arg); at != std::wstring::npos) line.erase(at, wcslen(arg));
+		line += windowed ? L" overlay:window" : L" overlay:on";
 		STARTUPINFOW si{ sizeof(si) };
 		PROCESS_INFORMATION pi{};
 		if (CreateProcessW(exe, line.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi))
@@ -2680,6 +2690,7 @@ void OverlayWindows::ApplySimMasks(uint32_t *argb, int w)
 // ponytail: a save made meanwhile includes these walls; strip them in the save path if that bothers anyone.
 static void TickWindowWalls()
 {
+	if (overlayWindowed) return; // no desktop to have windows on
 	static int frames = 0;
 	if (++frames % 20) return;
 	auto *sim = GameController::Ref().GetModel()->GetSimulation();

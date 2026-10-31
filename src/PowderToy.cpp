@@ -377,7 +377,8 @@ int Main(int argc, char *argv[])
 		return arg.has_value() && trueString(arg.value());
 	};
 
-	overlayMode = trueArg(arguments["overlay"]);
+	overlayWindowed = arguments["overlay"] == "window";
+	overlayMode = overlayWindowed || trueArg(arguments["overlay"]);
 	auto kioskArg = arguments["kiosk"];
 	if (kioskArg.has_value())
 	{
@@ -414,7 +415,7 @@ int Main(int argc, char *argv[])
 		}
 	}
 
-	if (overlayMode)
+	if (overlayMode && !overlayWindowed)
 	{
 		// Before anything sized by the sim exists (save thumbnails, the drawing surface, the game).
 		auto [cells, scale] = OverlaySimSize(windowFrameOps.scale);
@@ -457,7 +458,7 @@ int Main(int argc, char *argv[])
 	engine.g = new Graphics();
 	engine.GraveExitsConsole = graveExitsConsole;
 	engine.MomentumScroll = momentumScroll;
-	engine.LiveBackground = overlayMode;
+	engine.LiveBackground = overlayMode && !overlayWindowed;
 	engine.ShowAvatars = showAvatars;
 	engine.Begin();
 	engine.SetFastQuit(prefs.Get("FastQuit", true));

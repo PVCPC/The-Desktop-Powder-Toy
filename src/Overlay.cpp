@@ -21,6 +21,7 @@
 #endif
 
 bool overlayMode = false;
+bool overlayWindowed = false;
 bool overlayAutoPass = true;
 
 #ifdef _WIN32
@@ -270,6 +271,12 @@ void ApplyOverlay(SDL_Window *window)
 		return;
 	}
 	hwnd = info.info.win.window;
+	if (overlayWindowed)
+	{
+		OverlayLoadKeys();
+		OverlayWindows::Init(hwnd);
+		return;
+	}
 	SetWindowLongPtrW(hwnd, GWL_EXSTYLE, GetWindowLongPtrW(hwnd, GWL_EXSTYLE) | WS_EX_LAYERED | WS_EX_TOOLWINDOW);
 	// SDL_WINDOW_ALWAYS_ON_TOP alone doesn't stick once the style changes above; set it on the window itself.
 	SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
@@ -285,13 +292,9 @@ void ApplyOverlay(SDL_Window *window)
 #endif
 }
 
-void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
+void OverlayTickUI()
 {
 #ifdef _WIN32
-	if (!hwnd)
-	{
-		return;
-	}
 	if (OverlayWindows::RecordingKey())
 	{
 		// the keys being recorded must not also fire
@@ -312,9 +315,20 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 	{
 		OverlayWindows::TogglePalette();
 	}
+	OverlayWindows::Tick();
+#endif
+}
+
+void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
+{
+#ifdef _WIN32
+	if (!hwnd)
+	{
+		return;
+	}
 	TickFullScreen();
 	TickLayer();
-	OverlayWindows::Tick();
+	OverlayTickUI();
 
 	int ww, wh;
 	SDL_GetWindowSize(window, &ww, &wh);

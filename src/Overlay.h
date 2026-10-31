@@ -7,6 +7,10 @@
 // overlay:on: a borderless, always-on-top window over the desktop. Empty (black) pixels are see-through; what
 // clicks do depends on the mode (OVERLAY.md). Windows only so far.
 extern bool overlayMode;
+// overlay:window: TPT's normal window (its own background and menus), still with the overlay's side windows and tray.
+extern bool overlayWindowed;
+// The side windows, tray and hotkeys, once per frame (the windowed mode's part of OverlayPresent).
+void OverlayTickUI();
 
 enum class OverlayInput
 {

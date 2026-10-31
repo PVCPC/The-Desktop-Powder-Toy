@@ -2,7 +2,8 @@
 
 The to-do list and ideas for the overlay live here. Keep it current.
 
-`powder.exe overlay:on` runs TPT as a borderless, always-on-top window over the desktop. Empty (black) pixels
+`powder.exe overlay:window` is TPT's normal window with the side windows and tray (Overlay tab -> Size -> Runs as
+switches between the two, restarting with the scene). `powder.exe overlay:on` runs TPT as a borderless, always-on-top window over the desktop. Empty (black) pixels
 are see-through. TPT presents its own frame with per-pixel alpha (`UpdateLayeredWindow`, `src/Overlay.cpp`), so
 clicks on see-through pixels reach the desktop and windows behind. Windows only for now.
 
@@ -185,7 +186,8 @@ Assessment, in the order I'd do it (effort: S = an hour or two, M = a session, L
    drawing into a theme interface when the second theme starts. Theme choice in Overlay settings.
 7. [x] Black particles inside the zoom window (S); menus fade when unused (S). Done 2026-10-30: the zoom box is opaque
    (a magnifier); TPT's own menus, when shown, fade out after 3 s without the mouse over them.
-8. [ ] Other platforms: X11 / Wayland input regions, macOS (L; only if someone needs them).
+8. [-] Other platforms: X11 / Wayland input regions, macOS (L; only if someone needs them). Deferred by the
+   user 2026-10-30.
 
 Dropped: a Kingsway-style taskbar and start button. The tray icon plus the side window cover launching. Vista
 tray menu: the tray menu stays native on purpose.
