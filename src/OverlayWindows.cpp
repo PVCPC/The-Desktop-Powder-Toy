@@ -8,6 +8,7 @@
 #include "gui/game/Notification.h"
 #include "client/SaveFile.h"
 #include "client/SaveInfo.h"
+#include "client/GameSave.h"
 #include "gui/game/GameView.h"
 #include "graphics/VideoBuffer.h"
 #include "simulation/Simulation.h"
@@ -596,6 +597,8 @@ namespace
 	// secondary, as in TPT. The other tabs are immediate-mode Vista controls: each paint rebuilds the list of
 	// clickable rectangles (hits) that the mouse handler uses.
 	void OpenTorn(int tab);
+	void RestartAtScale(int scale);
+	void LoadSceneTiles();
 
 	struct SideWindow : Panel
 	{
@@ -837,7 +840,7 @@ namespace
 			auto &gc = GameController::Ref();
 			auto *model = gc.GetModel();
 			auto *sim = model->GetSimulation();
-			int x = c.left + S(10), w = c.right - c.left - S(20), y = c.top + S(8);
+			int x = c.left + S(10), w = c.right - c.left - S(20), y = c.top + S(8) - scroll;
 
 			// The playable area, in cells of 4 pixels.
 			int top = Group(x, y, w, S(118), L"Play area");
@@ -926,7 +929,7 @@ namespace
 			auto c = Content();
 			auto &gc = GameController::Ref();
 			auto *model = gc.GetModel();
-			int x = c.left + S(10), w = c.right - c.left - S(20), y = c.top + S(8);
+			int x = c.left + S(10), w = c.right - c.left - S(20), y = c.top + S(8) - scroll;
 			auto &presets = Renderer::renderModePresets;
 			int rows = (int(presets.size()) + 3) / 4;
 			int top = Group(x, y, w, S(20) + rows * S(29), L"View mode");
@@ -1004,7 +1007,7 @@ namespace
 			auto c = Content();
 			auto &gc = GameController::Ref();
 			auto *model = gc.GetModel();
-			int x = c.left + S(10), w = c.right - c.left - S(20), y = c.top + S(8);
+			int x = c.left + S(10), w = c.right - c.left - S(20), y = c.top + S(8) - scroll;
 			int n = model->BrushListSize(), rows = (n + 2) / 3;
 			int top = Group(x, y, w, S(56) + rows * S(29), L"Brush");
 			int bw = (w - S(24) - 2 * S(6)) / 3;
@@ -1045,7 +1048,7 @@ namespace
 		void PaintSaves()
 		{
 			auto c = Content();
-			int x = c.left + S(10), w = c.right - c.left - S(20), y = c.top + S(8);
+			int x = c.left + S(10), w = c.right - c.left - S(20), y = c.top + S(8) - scroll;
 			auto *model = GameController::Ref().GetModel();
 			int top = Group(x, y, w, S(72), L"Open save");
 			std::wstring name = L"Untitled simulation", info = L"Not saved yet";
@@ -1090,6 +1093,7 @@ namespace
 		// The start page, in place of TPT's text over the game at startup: the same help, laid out like a Vista
 		// welcome page. Drawn on its own canvas, then the visible part is copied in (it scrolls).
 		int welcomeH = 0;
+		int formH = 0; // the Tools, Simulation, Display, Saves and Overlay pages' height (they scroll when the window is short)
 		void PaintWelcome()
 		{
 			using Style = Text::Style;
@@ -1309,7 +1313,7 @@ namespace
 		void PaintOverlay()
 		{
 			auto c = Content();
-			int x = c.left + S(10), w = c.right - c.left - S(20), y = c.top + S(8);
+			int x = c.left + S(10), w = c.right - c.left - S(20), y = c.top + S(8) - scroll;
 			auto &prefs = GlobalPrefs::Ref();
 			auto key = [&](const char *name, const char *fallback) {
 				return Platform::WinWiden(prefs.Get(ByteString("Overlay.Keys.") + name, ByteString(fallback)));
@@ -1321,14 +1325,14 @@ namespace
 				Toggle(x + S(12), top + i * S(24), modes[i], int(OverlayGetInput()) == i, true, [i] { OverlaySetInput(OverlayInput(i)); });
 			}
 			y += S(108);
-			top = Group(x, y, w, S(76), L"Sim layer");
+			top = Group(x, y, w, S(84), L"Sim layer");
 			const wchar_t *layers[] = { L"On top of every window", L"Under windows, over the desktop icons",
 			                            L"Behind the desktop icons, like a wallpaper (look only: clicks go to the desktop)" };
 			for (int i = 0; i < int(OverlayLayer::Count); i++)
 			{
 				Toggle(x + S(12), top + i * S(24), layers[i], int(OverlayGetLayer()) == i, true, [i] { OverlaySetLayer(OverlayLayer(i)); });
 			}
-			y += S(84);
+			y += S(92);
 			top = Group(x, y, w, S(68), L"Window");
 			Toggle(x + S(12), top, L"Show TPT's own menus too", showTPTMenus, false, [] {
 				showTPTMenus = !showTPTMenus;
@@ -1358,7 +1362,20 @@ namespace
 				}, L"Ctrl, Alt, Shift or Win plus a letter, digit or F key");
 			}
 			y += S(148);
-			top = Group(x, y, w, S(52), L"Size");
+			top = Group(x, y, w, S(80), L"Size");
+			// The sim's pixel size: a different sim size, so TPT restarts with the scene carried over.
+			Caption(x + S(12), top + S(28), L"Sim pixel size");
+			int sx = x + S(200);
+			for (int sc = 1; sc <= 6; sc++)
+			{
+				auto [cells, real] = OverlaySimSize(sc);
+				if (real != sc) continue; // too big a sim at this size; the next one up is the same
+				wchar_t label[32];
+				swprintf(label, 32, L"%d\u00D7", sc);
+				wchar_t tip[96];
+				swprintf(tip, 96, L"%dx%d sim pixels (restarts TPT; the scene comes along, clipped if it doesn't fit)", cells.X * CELL, cells.Y * CELL);
+				sx += Toggle(sx, top + S(28), label, ui::Engine::Ref().windowFrameOps.scale == sc, true, [sc] { RestartAtScale(sc); }, tip) + S(18);
+			}
 			wchar_t scale[32];
 			swprintf(scale, 32, L"UI scale %g\u00D7", uiScale);
 			Caption(x + S(12), top, scale);
@@ -1414,6 +1431,11 @@ namespace
 			for (int i = 0; i < tab && fixedTab < 0; i++) sx += text->Measure(tabNames[i]).cx + S(21);
 			for (int i = sx + 1; i < sx + text->Measure(tabNames[tab]).cx + S(19); i++) cv.Blend(i, c.top, 0xFFFFFF, 255);
 
+			// Form pages scroll: rows outside the page are put back after, and controls there dropped.
+			bool form = tab >= 1 && tab <= 5;
+			size_t firstPageHit = hits.size();
+			size_t topEnd = size_t(c.top + 1) * cv.w, bottomStart = size_t(c.bottom) * cv.w;
+			std::vector<uint32_t> above(cv.px.begin(), cv.px.begin() + topEnd), below(cv.px.begin() + bottomStart, cv.px.end());
 			switch (tab)
 			{
 			case 0: PaintElements(); break;
@@ -1423,6 +1445,17 @@ namespace
 			case 5: PaintOverlay(); break;
 			case welcomeTab: PaintWelcome(); break;
 			case toolsTab: PaintTools(); break;
+			}
+			if (form)
+			{
+				std::copy(above.begin(), above.end(), cv.px.begin());
+				std::copy(below.begin(), below.end(), cv.px.begin() + bottomStart);
+				int bottom = c.top;
+				for (size_t i = firstPageHit; i < hits.size(); i++) bottom = std::max(bottom, int(hits[i].rc.bottom));
+				formH = bottom + scroll - c.top + S(20);
+				hits.erase(std::remove_if(hits.begin() + firstPageHit, hits.end(), [&](const Hit &h) {
+					return h.rc.top < c.top + 1 || h.rc.bottom > c.bottom;
+				}), hits.end());
 			}
 
 			// The status bar: what the hovered control does.
@@ -1470,6 +1503,12 @@ namespace
 				auto c = Content();
 				int maxScroll = std::max(0, welcomeH - int(c.bottom - c.top));
 				scroll = std::clamp(scroll - GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA * S(51), 0, maxScroll);
+				dirty = true;
+			}
+			if (msg == WM_MOUSEWHEEL && tab >= 1 && tab <= 5)
+			{
+				auto c = Content();
+				scroll = std::clamp(scroll - GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA * S(40), 0, std::max(0, formH - int(c.bottom - c.top)));
 				dirty = true;
 			}
 			if (msg == WM_MOUSEWHEEL && tab == 0)
@@ -1615,6 +1654,70 @@ namespace
 	}
 
 	void ApplyPassThrough(Panel &panel);
+
+	// The scene carried across a restart: saves of at most 255x255 cells (the save format's limit), named by their
+	// top-left cell, in the temp folder.
+	std::wstring SceneTile(int x, int y)
+	{
+		wchar_t tmp[MAX_PATH];
+		GetTempPathW(MAX_PATH, tmp);
+		return std::wstring(tmp) + L"tpt-overlay-scene-" + std::to_wstring(x) + L"-" + std::to_wstring(y) + L".cps";
+	}
+
+	void LoadSceneTiles()
+	{
+		auto *model = GameController::Ref().GetModel();
+		auto *sim = model->GetSimulation();
+		GameController::Ref().GetView()->PauseRendererThread();
+		for (int y = 0; y < YCELLS; y += 255)
+			for (int x = 0; x < XCELLS; x += 255)
+			{
+				auto file = Platform::WinNarrow(SceneTile(x, y));
+				std::vector<char> data;
+				if (!Platform::FileExists(file) || !Platform::ReadFile(data, file)) continue;
+				try
+				{
+					GameSave save(data);
+					sim->Load(&save, true, Vec2(x, y));
+				}
+				catch (std::exception &) {} // a bad tile: that part of the scene is lost
+				DeleteFileW(SceneTile(x, y).c_str());
+			}
+	}
+
+	// Saves the scene, sets the new pixel size and starts a fresh TPT, which loads the scene; this one quits.
+	void RestartAtScale(int scale)
+	{
+		if (scale == ui::Engine::Ref().windowFrameOps.scale) return;
+		auto *model = GameController::Ref().GetModel();
+		auto *sim = model->GetSimulation();
+		for (int y = 0; y < YCELLS; y += 255)
+			for (int x = 0; x < XCELLS; x += 255)
+			{
+				auto tile = RectSized(Vec2(x, y), Vec2(std::min(255, XCELLS - x), std::min(255, YCELLS - y)));
+				auto save = sim->Save(true, RectSized(tile.pos * CELL, tile.size * CELL));
+				if (!save) continue;
+				save->paused = model->GetPaused();
+				auto [ok, data] = save->Serialise();
+				if (ok) Platform::WriteFile(data, Platform::WinNarrow(SceneTile(x, y)));
+			}
+		GlobalPrefs::Ref().Set("Overlay.PendingScene", true);
+		GlobalPrefs::Ref().Set("Scale", scale);
+		// The same command line.
+		wchar_t exe[MAX_PATH];
+		GetModuleFileNameW(nullptr, exe, MAX_PATH);
+		std::wstring line = GetCommandLineW();
+		STARTUPINFOW si{ sizeof(si) };
+		PROCESS_INFORMATION pi{};
+		if (CreateProcessW(exe, line.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi))
+		{
+			CloseHandle(pi.hThread);
+			CloseHandle(pi.hProcess);
+			SDL_Event quit{};
+			quit.type = SDL_QUIT;
+			SDL_PushEvent(&quit);
+		}
+	}
 
 	void OpenTorn(int tab)
 	{
@@ -2372,6 +2475,11 @@ void OverlayWindows::Tick()
 		int w = prefs.Get("Overlay.PlayArea.W", 0), h = prefs.Get("Overlay.PlayArea.H", 0); // 0: the whole sim, whatever its size
 		SetPlayArea(prefs.Get("Overlay.PlayArea.X", 0), prefs.Get("Overlay.PlayArea.Y", 0), w > 0 ? w : CELLS.X, h > 0 ? h : CELLS.Y);
 		areaRestored = true;
+		if (GlobalPrefs::Ref().Get("Overlay.PendingScene", false))
+		{
+			GlobalPrefs::Ref().Set("Overlay.PendingScene", false);
+			LoadSceneTiles(); // from a restart at another pixel size
+		}
 		GameController::Ref().GetView()->SkipIntroText(); // it's in the side window's Welcome tab
 	}
 	if (!palette && GlobalPrefs::Ref().Get("Overlay.Windows.Palette.Open", true))
