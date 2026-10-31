@@ -18,7 +18,14 @@ clicks on see-through pixels reach the desktop and windows behind. Windows, and 
 The hotkeys are global (polled each frame, so they work while TPT is unfocused) and customisable in
 `%APPDATA%\The Powder Toy\powder.pref`: `Overlay.Keys.CycleInput`, `Overlay.Keys.PassThrough` and
 `Overlay.Keys.Locked`, as text like `"Ctrl+Alt+O"` (Ctrl, Alt, Shift, Win plus a letter, digit or F1-F24). The
-current mode is saved as `Overlay.Input`. A fading glass notice shows the new mode.
+current mode is saved as `Overlay.Input`. A fading glass notice shows the new mode. Ctrl+Alt+C
+(`Overlay.Keys.Clear`) clears the sim.
+
+The scene is kept between runs: quitting (or Windows shutting down) saves it as `overlay-scene-*.cps` tiles next to
+`powder.pref`, and the next start loads and deletes them.
+
+While nothing moves and TPT isn't in use, the overlay draws 15 frames a second and the sim ticks at most 20 times
+(`overlayIdle`); anything moving brings back the full rate.
 
 ## Windows
 

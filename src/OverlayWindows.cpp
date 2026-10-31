@@ -3215,15 +3215,16 @@ namespace
 				for (int i = 0, k = S(4), ax = bx + bw - S(20), ay = by + S(10); i <= k; i++) Line(cv, ax + i, ay + i, 2 * (k - i) + 1, 1, theme->ink); // the arrow
 			}
 			y += ah + S(8);
-			top = Group(x, y, w, S(140), L"Shortcuts (any app)");
+			top = Group(x, y, w, S(166), L"Shortcuts (any app)");
 			std::wstring rows[][2] = {
 				{ L"Next input mode", key("CycleInput", "Ctrl+Alt+O") },
 				{ L"Pass-through on/off", key("PassThrough", "Ctrl+Alt+P") },
 				{ L"Locked on/off", key("Locked", "Ctrl+Alt+L") },
 				{ L"Show/hide this window", key("Palette", "Ctrl+Alt+E") },
+				{ L"Clear the sim", key("Clear", "Ctrl+Alt+C") },
 			};
-			const char *names[] = { "CycleInput", "PassThrough", "Locked", "Palette" };
-			for (int i = 0; i < 4; i++)
+			const char *names[] = { "CycleInput", "PassThrough", "Locked", "Palette", "Clear" };
+			for (int i = 0; i < 5; i++)
 			{
 				int ry = top + i * S(26);
 				Caption(x + S(12), ry, rows[i][0]);
@@ -3233,7 +3234,7 @@ namespace
 					recording = rec ? "" : name;
 				}, L"Ctrl, Alt, Shift or Win plus a letter, digit or F key");
 			}
-			y += S(148);
+			y += S(174);
 			top = Group(x, y, w, S(108), L"Size");
 			Caption(x + S(12), top + S(56), L"Runs as");
 			int mx = x + S(200);
@@ -3768,13 +3769,32 @@ namespace
 
 	void ApplyPassThrough(Panel &panel);
 
-	// The scene carried across a restart: saves of at most 255x255 cells (the save format's limit), named by their
-	// top-left cell, in the temp folder.
+	// The scene carried across a restart or to the next run: saves of at most 255x255 cells (the save format's limit),
+	// named by their top-left cell, next to powder.pref.
 	std::wstring SceneTile(int x, int y)
 	{
-		wchar_t tmp[MAX_PATH];
-		GetTempPathW(MAX_PATH, tmp);
-		return std::wstring(tmp) + L"tpt-overlay-scene-" + std::to_wstring(x) + L"-" + std::to_wstring(y) + L".cps";
+		return L"overlay-scene-" + std::to_wstring(x) + L"-" + std::to_wstring(y) + L".cps";
+	}
+
+	bool sceneSaved = false; // a restart saved it already, and the new TPT is loading it
+
+	void SaveSceneTiles()
+	{
+		if (sceneSaved) return;
+		sceneSaved = true;
+		auto *model = GameController::Ref().GetModel();
+		auto *sim = model->GetSimulation();
+		for (int y = 0; y < YCELLS; y += 255)
+			for (int x = 0; x < XCELLS; x += 255)
+			{
+				auto tile = RectSized(Vec2(x, y), Vec2(std::min(255, XCELLS - x), std::min(255, YCELLS - y)));
+				auto save = sim->Save(true, RectSized(tile.pos * CELL, tile.size * CELL));
+				if (!save) continue;
+				save->paused = model->GetPaused();
+				auto data = save->Serialise().second; // .first is not success (TPT's own save path ignores it too)
+				if (!data.empty()) Platform::WriteFile(data, Platform::WinNarrow(SceneTile(x, y)));
+			}
+		GlobalPrefs::Ref().Set("Overlay.PendingScene", true);
 	}
 
 	void LoadSceneTiles()
@@ -3803,19 +3823,7 @@ namespace
 	void Restart(int scale, bool windowed, bool force)
 	{
 		if (!force && scale == ui::Engine::Ref().windowFrameOps.scale && windowed == overlayWindowed) return;
-		auto *model = GameController::Ref().GetModel();
-		auto *sim = model->GetSimulation();
-		for (int y = 0; y < YCELLS; y += 255)
-			for (int x = 0; x < XCELLS; x += 255)
-			{
-				auto tile = RectSized(Vec2(x, y), Vec2(std::min(255, XCELLS - x), std::min(255, YCELLS - y)));
-				auto save = sim->Save(true, RectSized(tile.pos * CELL, tile.size * CELL));
-				if (!save) continue;
-				save->paused = model->GetPaused();
-				auto data = save->Serialise().second; // .first is not success (TPT's own save path ignores it too)
-				if (!data.empty()) Platform::WriteFile(data, Platform::WinNarrow(SceneTile(x, y)));
-			}
-		GlobalPrefs::Ref().Set("Overlay.PendingScene", true);
+		SaveSceneTiles();
 		GlobalPrefs::Ref().Set("Scale", scale);
 		// The same command line, with overlay:on or overlay:window.
 		wchar_t exe[MAX_PATH];
@@ -4465,6 +4473,11 @@ namespace
 			Shell_NotifyIconW(NIM_ADD, &tray); // Explorer restarted and lost the icon
 			return 0;
 		}
+		if (msg == WM_ENDSESSION && wp)
+		{
+			SaveSceneTiles(); // shutting down or signing out: TPT gets no quit of its own
+			return 0;
+		}
 		if (msg != trayMessage)
 		{
 			return DefWindowProcW(hwnd, msg, wp, lp);
@@ -4489,7 +4502,7 @@ namespace
 			bool open = palette && IsWindowVisible(palette->hwnd);
 			AppendMenuW(menu, MF_STRING | (open ? MF_CHECKED : 0), elements, label(L"Elements window", "Palette", "Ctrl+Alt+E").c_str());
 			AppendMenuW(menu, MF_STRING, pause, GameController::Ref().GetPaused() ? L"Resume" : L"Pause");
-			AppendMenuW(menu, MF_STRING, clear, L"Clear the sim");
+			AppendMenuW(menu, MF_STRING, clear, label(L"Clear the sim", "Clear", "Ctrl+Alt+C").c_str());
 			AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 			std::wstring modes[] = { L"Input: Auto", label(L"Input: Pass-through", "PassThrough", "Ctrl+Alt+P"), label(L"Input: Locked to TPT", "Locked", "Ctrl+Alt+L") };
 			for (int i = 0; i < int(OverlayInput::Count); i++)
@@ -4660,7 +4673,7 @@ void OverlayWindows::Tick()
 		if (GlobalPrefs::Ref().Get("Overlay.PendingScene", false))
 		{
 			GlobalPrefs::Ref().Set("Overlay.PendingScene", false);
-			LoadSceneTiles(); // from a restart at another pixel size
+			LoadSceneTiles(); // from the last run, or a restart at another pixel size
 		}
 		GameController::Ref().GetView()->SkipIntroText(); // it's in the side window's Welcome tab
 	}
@@ -4748,6 +4761,17 @@ static void TickRecording()
 	recording.clear();
 	OverlayLoadKeys();
 	DirtyAll();
+}
+
+void OverlayWindows::SaveScene()
+{
+	SaveSceneTiles();
+}
+
+void OverlayWindows::ClearSim()
+{
+	GameController::Ref().ClearSim();
+	Notify("Cleared");
 }
 
 void OverlayWindows::TogglePalette()

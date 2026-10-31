@@ -28,7 +28,9 @@ What's new
   live wallpaper.
 - **Input modes** for where clicks go: Auto (TPT while it's in front, the desktop otherwise), Pass-through and
   Locked, with global hotkeys (Ctrl+Alt+O / P / L, customisable). Full-screen apps and games are detected and the
-  overlay steps aside.
+  overlay steps aside. Ctrl+Alt+C clears the screen.
+- **Your sand stays**: the scene is saved when you quit and comes back next time.
+- **Light on the CPU**: when nothing moves it drops to a few frames a second (about a quarter of one core).
 - **Desktop-style menus**: TPT's side bar and tool strip move into real Windows windows (Elements, Simulation,
   Display, Saves, Overlay tabs) that can be dragged, docked, torn into separate windows and hidden to the tray
   icon. Dragging one doesn't freeze the simulation.

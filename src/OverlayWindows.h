@@ -3,7 +3,7 @@
 #include <functional>
 #include <vector>
 #include "common/String.h"
-#define DESKTOP_VERSION L"0.2.0" // The Desktop Powder Toy release; the GitHub tag is v + this
+#define DESKTOP_VERSION L"0.3.0" // The Desktop Powder Toy release; the GitHub tag is v + this
 
 // Overlay mode's own desktop windows (element palette, notices), Vista-styled. Windows only so far.
 namespace OverlayWindows
@@ -11,6 +11,8 @@ namespace OverlayWindows
 	void Init(void *mainHwnd);
 	void Tick(); // once per frame, from the main thread
 	void TogglePalette();
+	void SaveScene(); // for the next run (on quitting)
+	void ClearSim(); // the clear hotkey
 	void SetPassThrough(bool on);
 	void Notify(const char *message); // a short fading notice over TPT's window
 	bool HideTPTMenus(); // TPT's own side bar and tool strip, replaced by the Elements window while it's open

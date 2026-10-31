@@ -1,5 +1,6 @@
 #include "PowderToySDL.h"
 #include "Overlay.h"
+#include "OverlayWindows.h"
 #include "Format.h"
 #include "X86KillDenormals.h"
 #include "prefs/GlobalPrefs.h"
@@ -604,6 +605,9 @@ int Main(int argc, char *argv[])
 	}
 
 	MainLoop();
+#ifdef _WIN32
+	if (overlayMode) OverlayWindows::SaveScene(); // the sand is still there next time
+#endif
 
 	Platform::Exit(0);
 	return 0;

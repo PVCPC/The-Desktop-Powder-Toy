@@ -8,6 +8,8 @@
 #include "prefs/GlobalPrefs.h"
 #include "gui/interface/Engine.h"
 #include "gui/interface/Window.h"
+#include "gui/game/GameController.h"
+#include "gui/game/GameModel.h"
 #include <vector>
 #include <array>
 #include <numeric>
@@ -101,7 +103,7 @@ namespace
 			return pressed;
 		}
 	};
-	Hotkey cycleInput, passThroughKey, lockedKey, paletteKey;
+	Hotkey cycleInput, passThroughKey, lockedKey, paletteKey, clearKey;
 
 	bool cursorMiss = false; // GPU frames: the mouse is over a see-through pixel (our window can't tell by itself)
 
@@ -665,6 +667,7 @@ void OverlayLoadKeys()
 	passThroughKey = Hotkey::Parse(prefs.Get("Overlay.Keys.PassThrough", ByteString("Ctrl+Alt+P")));
 	lockedKey = Hotkey::Parse(prefs.Get("Overlay.Keys.Locked", ByteString("Ctrl+Alt+L")));
 	paletteKey = Hotkey::Parse(prefs.Get("Overlay.Keys.Palette", ByteString("Ctrl+Alt+E")));
+	clearKey = Hotkey::Parse(prefs.Get("Overlay.Keys.Clear", ByteString("Ctrl+Alt+C")));
 #endif
 }
 
@@ -767,6 +770,10 @@ void OverlayTickUI()
 	{
 		OverlayWindows::TogglePalette();
 	}
+	else if (clearKey.Pressed())
+	{
+		OverlayWindows::ClearSim();
+	}
 	OverlayWindows::Tick();
 #elif defined(__APPLE__)
 	OverlayWindows::Tick();
@@ -783,6 +790,13 @@ void OverlayFrameParts(const RenderableSimulation &sim, bool zoom)
 	frameAt = now;
 	moving.clear();
 	frameOccupied.assign(size_t(XRES) * YRES, 0);
+	// the zoom window is a magnified copy of the unmoved frame: what's under it isn't slid
+	auto magnifier = RectSized(Vec2{ 0, 0 }, Vec2{ 0, 0 });
+	if (zoom)
+	{
+		auto *model = GameController::Ref().GetModel();
+		magnifier = RectSized(model->GetZoomWindowPosition() - Vec2{ 2, 2 }, Vec2{ 1, 1 } * (model->GetZoomSize() * model->GetZoomFactor() + 4));
+	}
 	int n = sim.parts.active;
 	if (int(lastType.size()) < n) lastX.resize(n), lastY.resize(n), lastType.resize(n, 0);
 	for (int i = 0; i < n; i++)
@@ -794,8 +808,7 @@ void OverlayFrameParts(const RenderableSimulation &sim, bool zoom)
 		if (p.type && p.type == lastType[i])
 		{
 			float vx = p.x - lastX[i], vy = p.y - lastY[i];
-			// not with the zoom window up: it would be a magnified copy of the unmoved frame
-			if (!zoom && (vx != 0 || vy != 0) && std::abs(vx) < 8 && std::abs(vy) < 8)
+			if ((vx != 0 || vy != 0) && std::abs(vx) < 8 && std::abs(vy) < 8 && !magnifier.Contains({ x, y }))
 				moving.push_back({ float(x), float(y), vx, vy }), moves = true;
 		}
 		lastType[i] = p.type, lastX[i] = p.x, lastY[i] = p.y;
