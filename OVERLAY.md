@@ -291,6 +291,15 @@ tray menu: the tray menu stays native on purpose.
 - [x] Remade windows leave a ghost of the old title (the old window was never destroyed; ~Panel destroys it now)
 - [x] Long button labels spilled past the button's left edge
 
+## Desktop physics to-do (user 2026-10-31, in this order)
+
+- [ ] More window marks, on the scorch system (Simulation::windowSoot gets a kind per pixel): frost from ice, LN2 and
+  cryo (pale, melts away slowly), acid etching (greenish pits), water streaks (faint, dry out). A slider each.
+- [ ] Icons carry and fling sand like windows (riding is windows-only today: icon walls are shaped, `w.solid`).
+- [ ] Water clings to windows: runs down the sides and drips off the bottom edge instead of bouncing off.
+- [ ] Explosions shake nearby windows a few pixels (moves other apps' windows: off by default, a switch to enable).
+- [ ] Falling-sand CPU (~1 core with lots of sand moving): profile TPT's own update and trim what the overlay adds.
+
 ## Ideas
 
 - **Menu inspiration: Kingsway** (2017), whose whole UI is a fake retro desktop. Every TPT panel would be its own
