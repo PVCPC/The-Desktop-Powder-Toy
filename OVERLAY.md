@@ -206,7 +206,14 @@ Assessment, in the order I'd do it (effort: S = an hour or two, M = a session, L
    a pile rides up on a rising window, ~2% of the pushed grains lost; the taskbar is a floor), only in empty cells and only those given back; a moved or closed window drops its sand. Simulation
    tab toggle (Overlay.WindowWalls). Desktop icons: done 2026-10-31, read through the desktop's shell view
    (IShellWindows -> IFolderView2 item positions, twice a second; no reading Explorer's memory), added to the same
-   pixel mask; Overlay tab toggle (Overlay.IconWalls). Tested: sand rests exactly on each visible icon's top.
+   pixel mask; Overlay tab toggle (Overlay.IconWalls). 2026-10-31: each icon's real shape (its picture from
+   IShellItemImageFactory, opaque pixels; cached, 16 new per pass, squares until loaded), positions re-read every
+   ~8 ms on a background thread (dragging and free placement work), walls in the on-top and under-windows layers.
+   Pushing never tunnels through another window or icon (that threw sand off the top edge in void mode).
+   Behind-icons layer on 24H2+: UpdateLayeredWindow fails (87) on a child of Progman, so it's colour-keyed and
+   BitBlt-ed; placed at the monitor corner and kept under SHELLDLL_DefView (SDL's always-on-top cleared).
+   Speed: the scale-up runs in parallel bands (std::execution::par). Per frame now ~10 ms of overlay work:
+   ~4.5 ms is UpdateLayeredWindow's 32 MB copy (needs a GPU presenter, DirectComposition, to get 120 fps).
    2026-10-30 later: pixel-exact and every frame (user: "smoother, less blocky"). Windows are no longer WL_WALL
    cells but Simulation::pixelWalls, a per-pixel mask eval_move and brush drawing respect; unlike walls it never
    deletes particles, which fixes the ~2% grain loss. Tested: a pile rides a rising window with a smooth edge,

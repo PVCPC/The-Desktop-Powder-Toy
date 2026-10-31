@@ -8,6 +8,10 @@
 #include "gui/interface/Engine.h"
 #include "gui/interface/Window.h"
 #include <vector>
+#include <array>
+#include <numeric>
+#include <cstring>
+#include <execution>
 #include <cstdio>
 #include <utility>
 #include <algorithm>
@@ -28,6 +32,8 @@ bool overlayAutoPass = true;
 namespace
 {
 	HWND hwnd = nullptr;
+	SDL_Window *sdlWindow = nullptr;
+	constexpr uint32_t layerKey = 0x010001; // the see-through colour behind the icons (same as RGB() and 0xRRGGBB)
 	OverlayInput input = OverlayInput::Auto;
 	bool fullScreenApp = false; // a full-screen app or game is in front: clicks pass through whatever the mode
 	OverlayLayer layer = OverlayLayer::OnTop;
@@ -115,17 +121,40 @@ namespace
 	{
 		static RECT screen; // where the layer sits as a top-level window
 		auto [desk, under] = layer == OverlayLayer::BehindIcons ? WallpaperLayer() : std::pair<HWND, HWND>{};
+		// SDL re-applies its own always-on-top whenever it moves or raises the window, which would lift the lower
+		// layers (the wallpaper one over the icons)
+		SDL_SetWindowAlwaysOnTop(sdlWindow, layer == OverlayLayer::OnTop ? SDL_TRUE : SDL_FALSE);
 		auto style = GetWindowLongPtrW(hwnd, GWL_STYLE);
 		if (desk && !GetParent(hwnd))
 		{
-			GetWindowRect(hwnd, &screen);
+			// its monitor's corner, where the overlay sits (at startup the window is still centred, not there yet)
+			MONITORINFO mi{ sizeof(mi) };
+			GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi);
+			screen = mi.rcMonitor;
 			SetWindowLongPtrW(hwnd, GWL_STYLE, (style | WS_CHILD) & ~LONG_PTR(WS_POPUP));
 			SetParent(hwnd, desk);
+			// Colour-keyed instead of per-pixel alpha (OverlayPresent); dropping WS_EX_LAYERED resets the mode
+			// (and not topmost, from ApplyOverlay, or it stays over the icons whatever the order)
+			auto ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & ~LONG_PTR(WS_EX_TOPMOST);
+			SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex & ~LONG_PTR(WS_EX_LAYERED));
+			SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED);
+			SetLayeredWindowAttributes(hwnd, layerKey, 0, LWA_COLORKEY);
+			// see-through until the first frame (an unpainted window is black over the whole desktop)
+			RECT rc;
+			GetClientRect(hwnd, &rc);
+			HDC dc = GetDC(hwnd);
+			HBRUSH key = CreateSolidBrush(layerKey);
+			FillRect(dc, &rc, key);
+			DeleteObject(key);
+			ReleaseDC(hwnd, dc);
 		}
 		else if (!desk && GetParent(hwnd))
 		{
 			SetWindowLongPtrW(hwnd, GWL_STYLE, (style & ~LONG_PTR(WS_CHILD)) | WS_POPUP); // before SetParent(nullptr)
 			SetParent(hwnd, nullptr);
+			auto ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE); // back to per-pixel alpha
+			SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex & ~LONG_PTR(WS_EX_LAYERED));
+			SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED);
 			SetWindowPos(hwnd, nullptr, screen.left, screen.top, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 		}
 		if (desk)
@@ -147,10 +176,17 @@ namespace
 		ApplyPassThrough();
 	}
 
-	// Under windows: clicking the layer brings it up; send it back down.
+	// Under windows: clicking the layer brings it up; send it back down. Behind the icons (24H2 and later): TPT
+	// raising its window puts it over the icons' view; put it back under.
 	void TickLayer()
 	{
 		static int frames = 0;
+		if (layer == OverlayLayer::BehindIcons && GetParent(hwnd) && !(++frames % 10))
+		{
+			HWND icons = FindWindowExW(GetParent(hwnd), nullptr, L"SHELLDLL_DefView", nullptr);
+			if (icons && GetWindow(hwnd, GW_HWNDPREV) != icons)
+				SetWindowPos(hwnd, icons, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+		}
 		if (layer == OverlayLayer::UnderWindows && !(++frames % 10) && GetWindow(hwnd, GW_HWNDNEXT))
 		{
 			// ponytail: anything after us in the z-order counts; fine as long as nothing else pins itself to the bottom
@@ -272,6 +308,7 @@ void ApplyOverlay(SDL_Window *window)
 		return;
 	}
 	hwnd = info.info.win.window;
+	sdlWindow = window;
 	if (overlayWindowed)
 	{
 		OverlayLoadKeys();
@@ -402,14 +439,47 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 		}
 	}
 	OverlayWindows::ClearUnderWindows(argb.data(), w, h, ww, wh);
-	for (int y = 0; y < wh; y++)
+	bool keyed = GetParent(hwnd);
+	if (keyed)
 	{
-		auto *src = argb.data() + (y * h / wh) * w;
-		auto *dst = bits + y * ww;
-		for (int x = 0; x < ww; x++)
+		// Behind the icons, inside Explorer's desktop window: Windows 11 24H2 and later refuse per-pixel alpha
+		// (UpdateLayeredWindow) there, so this is a colour-keyed layered window painted normally. See-through pixels
+		// get the key; the rest are drawn as if over black (soft edges darken a little).
+		for (auto &p : argb)
 		{
-			dst[x] = src[x * w / ww];
+			if (p >> 24 < 2) p = layerKey; // alpha 1 is "catch clicks" (never here: behind icons takes none)
+			else if ((p & 0xFFFFFF) == layerKey) p ^= 1;
 		}
+	}
+	// Scale up to the window (nearest pixel) in bands across every core: a column table, and rows that repeat the
+	// one above are copied whole.
+	static std::vector<int> columns;
+	if (int(columns.size()) != ww || (ww && columns.back() != (ww - 1) * w / ww))
+	{
+		columns.resize(ww);
+		for (int x = 0; x < ww; x++) columns[x] = x * w / ww;
+	}
+	constexpr int bands = 32;
+	static const auto bandIds = [] { std::array<int, bands> a; std::iota(a.begin(), a.end(), 0); return a; }();
+	std::for_each(std::execution::par, bandIds.begin(), bandIds.end(), [&](int b) {
+		for (int y = wh * b / bands; y < wh * (b + 1) / bands; y++)
+		{
+			auto *dst = bits + size_t(y) * ww;
+			if (y > wh * b / bands && y * h / wh == (y - 1) * h / wh)
+			{
+				std::memcpy(dst, dst - ww, size_t(ww) * 4);
+				continue;
+			}
+			auto *src = argb.data() + size_t(y * h / wh) * w;
+			for (int x = 0; x < ww; x++) dst[x] = src[columns[x]];
+		}
+	});
+	if (keyed)
+	{
+		HDC dc = GetDC(hwnd);
+		BitBlt(dc, 0, 0, ww, wh, memDC, 0, 0, SRCCOPY);
+		ReleaseDC(hwnd, dc);
+		return;
 	}
 	POINT origin{ 0, 0 };
 	SIZE size{ ww, wh };

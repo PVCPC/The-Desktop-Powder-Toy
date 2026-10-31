@@ -2420,10 +2420,10 @@ namespace
 				windowWalls = !windowWalls;
 				GlobalPrefs::Ref().Set("Overlay.WindowWalls", windowWalls);
 			}, L"Only while the sim is on top of every window");
-			Toggle(x + S(12), top + S(48), L"Desktop icons are walls too", iconWalls, false, [] {
+			Toggle(x + S(12), top + S(48), L"Desktop icons are walls (sand piles on them, in their shapes)", iconWalls, false, [] {
 				iconWalls = !iconWalls;
 				GlobalPrefs::Ref().Set("Overlay.IconWalls", iconWalls);
-			}, L"Sand piles on your icons (only while the sim is on top)");
+			}, L"Sand piles on your icons, shaped like each icon (not when the sim is behind them)");
 			const wchar_t *edges[] = { L"Void", L"Solid", L"Loop" };
 			const wchar_t *edgeTips[] = { L"Particles and air leave at the edges", L"The edges are walls", L"Particles wrap around (whole screen only for now)" };
 			int ex = x + S(12);
@@ -4554,20 +4554,60 @@ void OverlayWindows::ApplySimMasks(uint32_t *argb, int w)
 	}
 }
 
-// The desktop icons' screen rectangles (the icon, not its label), through the desktop's IFolderView. Re-read twice
-// a second; empty when Explorer isn't there.
-static const std::vector<RECT> &DesktopIcons()
+// The desktop icons: where each sits on screen (grid or free placement) and its shape (the icon's own picture from the
+// shell, opaque pixels solid), through the desktop's IFolderView. Positions are re-read every few frames, so dragged
+// icons push sand live; shapes are cached per file and size. Empty when Explorer isn't there or icons are hidden. All
+// of it runs on its own thread (fetching icon pictures takes seconds at first), so frames never wait on Explorer.
+struct DeskIcon
 {
-	static std::vector<RECT> icons;
-	static IFolderView2 *view = nullptr;
-	static HWND list = nullptr;
-	static int frames = 0;
-	if (frames++ % 30) return icons;
-	icons.clear();
+	RECT r;
+	std::shared_ptr<const std::vector<uint8_t>> shape; // (r.right - r.left) squared, 1 = solid; null = the whole square
+};
+// Null (a plain square for now) when not cached yet and this pass's budget of new pictures is spent: a desktop can
+// hold hundreds of icons, and fetching them all at once takes seconds.
+static std::shared_ptr<const std::vector<uint8_t>> IconShape(IShellFolder *folder, PCUITEMID_CHILD child, int size, int &budget)
+{
+	static std::map<std::wstring, std::shared_ptr<const std::vector<uint8_t>>> cache;
+	IShellItem *item = nullptr;
+	if (FAILED(SHCreateItemWithParent(nullptr, folder, child, IID_PPV_ARGS(&item)))) return nullptr;
+	std::wstring key = std::to_wstring(size) + L"|";
+	wchar_t *name = nullptr;
+	if (SUCCEEDED(item->GetDisplayName(SIGDN_DESKTOPABSOLUTEPARSING, &name))) key += name, CoTaskMemFree(name);
+	if (auto it = cache.find(key); it != cache.end()) return item->Release(), it->second;
+	if (budget-- <= 0) return item->Release(), nullptr;
+	auto shape = std::make_shared<std::vector<uint8_t>>(size_t(size) * size, 1); // a square if the picture fails
+	IShellItemImageFactory *images = nullptr;
+	HBITMAP bmp = nullptr;
+	if (SUCCEEDED(item->QueryInterface(IID_PPV_ARGS(&images))) && SUCCEEDED(images->GetImage({ size, size }, SIIGBF_ICONONLY, &bmp)))
+	{
+		BITMAP bm{};
+		GetObjectW(bmp, sizeof(bm), &bm);
+		BITMAPINFO bi{};
+		bi.bmiHeader = { sizeof(bi.bmiHeader), bm.bmWidth, -bm.bmHeight, 1, 32, BI_RGB };
+		std::vector<uint32_t> px(size_t(bm.bmWidth) * bm.bmHeight);
+		HDC dc = GetDC(nullptr);
+		if (bm.bmBitsPixel == 32 && GetDIBits(dc, bmp, 0, bm.bmHeight, px.data(), &bi, DIB_RGB_COLORS))
+		{
+			// centred in the icon's box, as Explorer draws a smaller picture
+			int ox = (size - bm.bmWidth) / 2, oy = (size - bm.bmHeight) / 2;
+			std::fill(shape->begin(), shape->end(), 0);
+			for (int y = 0; y < bm.bmHeight; y++)
+				for (int x = 0; x < bm.bmWidth; x++)
+					if (px[size_t(y) * bm.bmWidth + x] >> 24 >= 128 && x + ox >= 0 && x + ox < size && y + oy >= 0 && y + oy < size)
+						(*shape)[size_t(y + oy) * size + x + ox] = 1;
+		}
+		ReleaseDC(nullptr, dc);
+		DeleteObject(bmp);
+	}
+	if (images) images->Release();
+	item->Release();
+	return cache[key] = shape;
+}
+static std::vector<DeskIcon> ReadDesktopIcons(IFolderView2 *&view, HWND &list)
+{
+	std::vector<DeskIcon> icons;
 	if (!view)
 	{
-		static bool com = SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED)) || true; // SDL may have done it
-		(void)com;
 		IShellWindows *windows = nullptr;
 		if (FAILED(CoCreateInstance(CLSID_ShellWindows, nullptr, CLSCTX_ALL, IID_PPV_ARGS(&windows)))) return icons;
 		VARIANT loc{}, root{};
@@ -4594,15 +4634,19 @@ static const std::vector<RECT> &DesktopIcons()
 	int size = 0;
 	POINT spacing{};
 	IEnumIDList *items = nullptr;
-	if (FAILED(view->GetViewModeAndIconSize(&mode, &size)) || FAILED(view->GetSpacing(&spacing)) || FAILED(view->Items(SVGIO_ALLVIEW, IID_PPV_ARGS(&items))))
+	IShellFolder *folder = nullptr;
+	if (FAILED(view->GetViewModeAndIconSize(&mode, &size)) || FAILED(view->GetSpacing(&spacing)) ||
+	    FAILED(view->GetFolder(IID_PPV_ARGS(&folder))) || FAILED(view->Items(SVGIO_ALLVIEW, IID_PPV_ARGS(&items))))
 	{
-		view->Release(), view = nullptr; // Explorer restarted: find it again next time
+		if (folder) folder->Release();
+		view->Release(), view = nullptr; // Explorer restarted: find it again
 		return icons;
 	}
 	// ponytail: the icon is assumed centred at the top of its spacing cell (no per-item rect from IFolderView)
 	if (IsWindowVisible(list))
 	{
 		PITEMID_CHILD item;
+		int budget = 16;
 		while (items->Next(1, &item, nullptr) == S_OK)
 		{
 			POINT p;
@@ -4610,13 +4654,47 @@ static const std::vector<RECT> &DesktopIcons()
 			{
 				ClientToScreen(list, &p);
 				int x = p.x + (spacing.x - size) / 2, y = p.y + 2;
-				icons.push_back({ x, y, x + size, y + size });
+				icons.push_back({ { x, y, x + size, y + size }, IconShape(folder, item, size, budget) });
 			}
 			CoTaskMemFree(item);
 		}
 	}
 	items->Release();
+	folder->Release();
 	return icons;
+}
+static std::vector<DeskIcon> DesktopIcons()
+{
+	static std::mutex lock;
+	static std::vector<DeskIcon> latest;
+	static std::atomic<int> wanted{ 0 }; // frames since the last ask; the thread idles when nobody asks
+	wanted = 0;
+	static bool started = [] {
+		std::thread([] {
+			CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+			IFolderView2 *view = nullptr;
+			HWND list = nullptr;
+			while (true)
+			{
+				if (wanted++ > 10)
+				{
+					Sleep(200);
+					continue;
+				}
+				bool had = view;
+				auto icons = ReadDesktopIcons(view, list);
+				{
+					std::lock_guard g(lock);
+					latest = std::move(icons);
+				}
+				Sleep(view ? 8 : had ? 0 : 1000); // looking for Explorer: once a second
+			}
+		}).detach();
+		return true;
+	}();
+	(void)started;
+	std::lock_guard g(lock);
+	return latest;
 }
 
 // Every frame: every visible window's rectangle, in sim pixels, blocks particles (Simulation::pixelWalls), so they
@@ -4627,12 +4705,15 @@ static void TickWindowWalls()
 {
 	auto *sim = GameController::Ref().GetModel()->GetSimulation();
 	static std::map<HWND, RECT> last; // where each window was on the last frame
-	struct Win { int x0, y0, x1, y1, mx, my; };
+	struct Win { int x0, y0, x1, y1, mx, my; const DeskIcon *icon = nullptr; };
 	std::vector<Win> wins;
 	RECT sr;
 	GetWindowRect(mainWindow, &sr);
 	int sw = sr.right - sr.left, sh = sr.bottom - sr.top;
-	if (overlayWindowed || !windowWalls || OverlayGetLayer() != OverlayLayer::OnTop || sw <= 0 || sh <= 0)
+	// windows are walls only when the sim is over them; icons whenever it's over the icons
+	bool doWindows = windowWalls && OverlayGetLayer() == OverlayLayer::OnTop;
+	bool doIcons = iconWalls && OverlayGetLayer() != OverlayLayer::BehindIcons;
+	if (overlayWindowed || (!doWindows && !doIcons) || sw <= 0 || sh <= 0)
 	{
 		sim->pixelWalls.clear();
 		last.clear();
@@ -4640,7 +4721,7 @@ static void TickWindowWalls()
 	}
 	std::map<HWND, RECT> now;
 	struct Ctx { std::vector<Win> *wins; std::map<HWND, RECT> *now; RECT sr; int sw, sh; } ctx{ &wins, &now, sr, sw, sh };
-	EnumWindows([](HWND hwnd, LPARAM lp) -> BOOL {
+	if (doWindows) EnumWindows([](HWND hwnd, LPARAM lp) -> BOOL {
 		auto &c = *(Ctx *)lp;
 		auto ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
 		BOOL cloaked = FALSE;
@@ -4670,12 +4751,14 @@ static void TickWindowWalls()
 		return TRUE;
 	}, LPARAM(&ctx));
 	last = std::move(now);
-	if (iconWalls)
-		for (auto &r : DesktopIcons())
+	auto icons = doIcons ? DesktopIcons() : std::vector<DeskIcon>{};
+	if (doIcons)
+		for (auto &icon : icons)
 		{
+			auto &r = icon.r;
 			auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); };
 			Win w{ std::max(0, px(r.left - sr.left, WINDOWW, sw)), std::max(0, px(r.top - sr.top, WINDOWH, sh)),
-			       std::min(XRES, px(r.right - sr.left, WINDOWW, sw)), std::min(YRES, px(r.bottom - sr.top, WINDOWH, sh)), 0, 0 };
+			       std::min(XRES, px(r.right - sr.left, WINDOWW, sw)), std::min(YRES, px(r.bottom - sr.top, WINDOWH, sh)), 0, 0, &icon };
 			if (w.x1 > w.x0 && w.y1 > w.y0) wins.push_back(w);
 		}
 
@@ -4683,7 +4766,23 @@ static void TickWindowWalls()
 	auto &mask = sim->pixelWalls;
 	mask.assign(size_t(XRES) * YRES, 0);
 	for (auto &w : wins)
-		for (int y = w.y0; y < w.y1; y++) std::fill(&mask[size_t(y) * XRES + w.x0], &mask[size_t(y) * XRES + w.x1], 1);
+		for (int y = w.y0; y < w.y1; y++)
+		{
+			if (!w.icon || !w.icon->shape)
+			{
+				std::fill(&mask[size_t(y) * XRES + w.x0], &mask[size_t(y) * XRES + w.x1], 1);
+				continue;
+			}
+			// an icon: each sim pixel takes the icon pixel under its centre
+			int n = w.icon->r.right - w.icon->r.left;
+			int iy = int(sr.top + (y + 0.5) * sh / WINDOWH) - w.icon->r.top;
+			if (iy < 0 || iy >= n) continue;
+			for (int x = w.x0; x < w.x1; x++)
+			{
+				int ix = int(sr.left + (x + 0.5) * sw / WINDOWW) - w.icon->r.left;
+				if (ix >= 0 && ix < n && (*w.icon->shape)[size_t(iy) * n + ix]) mask[size_t(y) * XRES + x] = 1;
+			}
+		}
 	for (auto &w : wins)
 	{
 		int mx = w.mx, my = w.my;
@@ -4694,12 +4793,14 @@ static void TickWindowWalls()
 			for (int x = w.x0; x < w.x1; x++)
 			{
 				int r = sim->pmap[y][x];
-				if (!r || (!old.empty() && old[size_t(y) * XRES + x])) continue; // only what the window just moved onto
+				if (!r || !mask[size_t(y) * XRES + x] || (!old.empty() && old[size_t(y) * XRES + x])) continue; // only what the window just moved onto
 				for (int k = 1; k < XRES + YRES; k++)
 				{
 					int tx = int(std::lround(x + sx * k)), ty = int(std::lround(y + sy * k));
 					if (tx < 0 || ty < 0 || tx >= XRES || ty >= YRES) break; // nowhere to go: stays, under the window
-					if (mask[size_t(ty) * XRES + tx] || sim->pmap[ty][tx] || sim->IsWallBlocking(tx, ty, TYP(r))) continue;
+					bool own = tx >= w.x0 && tx < w.x1 && ty >= w.y0 && ty < w.y1 && (!w.icon || mask[size_t(ty) * XRES + tx]);
+					if (!own && mask[size_t(ty) * XRES + tx]) break; // another window or icon: no tunnelling through it
+					if (own || sim->pmap[ty][tx] || sim->IsWallBlocking(tx, ty, TYP(r))) continue;
 					auto &part = sim->parts[ID(r)];
 					part.x = float(tx);
 					part.y = float(ty);
