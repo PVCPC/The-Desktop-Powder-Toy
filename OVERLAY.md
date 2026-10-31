@@ -298,7 +298,8 @@ tray menu: the tray menu stays native on purpose.
 - [x] Icons carry sand (2026-10-31): an icon only moves when dropped, so its pile jumps with it (no fling: a jump has no
   speed). Icons have ids (hash of the item ID) and moves; riders sit on the top of the shape per column. Window drag
   tests unchanged; not tried on real icons (needs the user to drop one).
-- [ ] Water clings to windows: runs down the sides and drips off the bottom edge instead of bouncing off.
+- [-] Water clinging to windows: DROPPED (user 2026-10-31: TPT doesn't do it in game, so no new mechanics that
+  rewrite TPT's physics).
 - [ ] Explosions shake nearby windows a few pixels (moves other apps' windows: off by default, a switch to enable).
 - [ ] Falling-sand CPU (~1 core with lots of sand moving): profile TPT's own update and trim what the overlay adds.
 
