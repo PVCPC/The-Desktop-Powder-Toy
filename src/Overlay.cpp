@@ -5,6 +5,8 @@
 #include "gui/interface/Engine.h"
 #include "gui/interface/Window.h"
 #include <vector>
+#include <cstdio>
+#include <utility>
 #include <algorithm>
 #ifdef _WIN32
 # include <SDL_syswm.h>
@@ -24,6 +26,7 @@ namespace
 	HWND hwnd = nullptr;
 	OverlayInput input = OverlayInput::Auto;
 	bool fullScreenApp = false; // a full-screen app or game is in front: clicks pass through whatever the mode
+	OverlayLayer layer = OverlayLayer::OnTop;
 
 	// A global hotkey ("Ctrl+Alt+O"), polled each frame so it works while the window is unfocused.
 	struct Hotkey
@@ -67,7 +70,7 @@ namespace
 
 	void ApplyPassThrough()
 	{
-		bool pass = input == OverlayInput::PassThrough || fullScreenApp;
+		bool pass = input == OverlayInput::PassThrough || fullScreenApp || layer == OverlayLayer::BehindIcons;
 		OverlayWindows::SetPassThrough(pass);
 		auto ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
 		ex = pass ? ex | WS_EX_TRANSPARENT : ex & ~LONG_PTR(WS_EX_TRANSPARENT);
@@ -84,6 +87,80 @@ namespace
 			OverlayWindows::Notify(names[int(input)]);
 		}
 		GlobalPrefs::Ref().Set("Overlay.Input", int(input));
+	}
+
+	// The desktop window the wallpaper is drawn in, under the icons; parenting to it puts us behind the icons (the
+	// trick live-wallpaper apps use). Returns the parent and the window to sit just under, if any.
+	std::pair<HWND, HWND> WallpaperLayer()
+	{
+		HWND progman = FindWindowW(L"Progman", nullptr);
+		SendMessageTimeoutW(progman, 0x052C, 0xD, 0x1, SMTO_NORMAL, 1000, nullptr); // makes Explorer split off a WorkerW
+		HWND worker = nullptr;
+		EnumWindows([](HWND top, LPARAM out) -> BOOL {
+			if (FindWindowExW(top, nullptr, L"SHELLDLL_DefView", nullptr))
+			{
+				*(HWND *)out = FindWindowExW(nullptr, top, L"WorkerW", nullptr);
+			}
+			return TRUE;
+		}, LPARAM(&worker));
+		if (worker) return { worker, nullptr };                                       // up to Windows 11 23H2
+		return { progman, FindWindowExW(progman, nullptr, L"SHELLDLL_DefView", nullptr) }; // 24H2: under the icons' view
+	}
+
+	void ApplyLayer()
+	{
+		static RECT screen; // where the layer sits as a top-level window
+		auto [desk, under] = layer == OverlayLayer::BehindIcons ? WallpaperLayer() : std::pair<HWND, HWND>{};
+		auto style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+		if (desk && !GetParent(hwnd))
+		{
+			GetWindowRect(hwnd, &screen);
+			SetWindowLongPtrW(hwnd, GWL_STYLE, (style | WS_CHILD) & ~LONG_PTR(WS_POPUP));
+			SetParent(hwnd, desk);
+		}
+		else if (!desk && GetParent(hwnd))
+		{
+			SetWindowLongPtrW(hwnd, GWL_STYLE, (style & ~LONG_PTR(WS_CHILD)) | WS_POPUP); // before SetParent(nullptr)
+			SetParent(hwnd, nullptr);
+			SetWindowPos(hwnd, nullptr, screen.left, screen.top, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+		}
+		if (desk)
+		{
+			// Child coordinates are the desktop window's: put the layer back over this monitor.
+			POINT origin{ screen.left, screen.top };
+			ScreenToClient(desk, &origin);
+			SetWindowPos(hwnd, under ? under : HWND_TOP, origin.x, origin.y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+		}
+		else if (layer == OverlayLayer::OnTop)
+		{
+			SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+		}
+		else
+		{
+			SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+			SetWindowPos(hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+		}
+		ApplyPassThrough();
+	}
+
+	// Under windows: clicking the layer brings it up; send it back down.
+	void TickLayer()
+	{
+		static int frames = 0;
+		if (layer == OverlayLayer::UnderWindows && !(++frames % 10) && GetWindow(hwnd, GW_HWNDNEXT))
+		{
+			// ponytail: anything after us in the z-order counts; fine as long as nothing else pins itself to the bottom
+			HWND next = GetWindow(hwnd, GW_HWNDNEXT);
+			bool onlyDesktop = true;
+			for (; next; next = GetWindow(next, GW_HWNDNEXT))
+				if (IsWindowVisible(next) && !IsIconic(next))
+				{
+					wchar_t cls[32];
+					GetClassNameW(next, cls, 32);
+					if (wcscmp(cls, L"Progman") && wcscmp(cls, L"WorkerW")) { onlyDesktop = false; break; }
+				}
+			if (!onlyDesktop) SetWindowPos(hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+		}
 	}
 
 	// Twice a second: is a full-screen app (a game, a video, a presentation) in front of the desktop?
@@ -114,6 +191,24 @@ namespace
 	int dibW = 0, dibH = 0;
 }
 #endif
+
+void OverlaySetLayer(OverlayLayer newLayer)
+{
+#ifdef _WIN32
+	layer = newLayer;
+	GlobalPrefs::Ref().Set("Overlay.Layer", int(layer));
+	ApplyLayer();
+#endif
+}
+
+OverlayLayer OverlayGetLayer()
+{
+#ifdef _WIN32
+	return layer;
+#else
+	return OverlayLayer::OnTop;
+#endif
+}
 
 void OverlaySetInput(OverlayInput newInput)
 {
@@ -162,6 +257,8 @@ void ApplyOverlay(SDL_Window *window)
 	OverlayWindows::Init(hwnd);
 	overlayAutoPass = prefs.Get("Overlay.AutoPassThrough", true);
 	SetInput(prefs.Get("Overlay.Input", OverlayInput::Count, OverlayInput::Auto), false);
+	layer = prefs.Get("Overlay.Layer", OverlayLayer::Count, OverlayLayer::OnTop);
+	if (layer != OverlayLayer::OnTop) ApplyLayer();
 #else
 	(void)window; // ponytail: Windows only; X11/Wayland/macOS each need their own shape/input-region code
 #endif
@@ -195,6 +292,7 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 		OverlayWindows::TogglePalette();
 	}
 	TickFullScreen();
+	TickLayer();
 	OverlayWindows::Tick();
 
 	int ww, wh;
@@ -276,7 +374,12 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 	POINT origin{ 0, 0 };
 	SIZE size{ ww, wh };
 	BLENDFUNCTION blend{ AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-	UpdateLayeredWindow(hwnd, nullptr, nullptr, &size, memDC, &origin, 0, &blend, ULW_ALPHA);
+	if (!UpdateLayeredWindow(hwnd, nullptr, nullptr, &size, memDC, &origin, 0, &blend, ULW_ALPHA))
+	{
+		static bool told = false;
+		if (!told) fprintf(stderr, "overlay: UpdateLayeredWindow failed (%lu)\n", GetLastError());
+		told = true;
+	}
 #else
 	(void)window, (void)vid, (void)w, (void)h;
 #endif

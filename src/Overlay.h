@@ -14,7 +14,17 @@ enum class OverlayInput
 	Count,
 };
 
+enum class OverlayLayer
+{
+	OnTop,       // over every window
+	UnderWindows, // over the desktop and its icons, under every app window
+	BehindIcons, // part of the wallpaper: under the desktop icons, takes no clicks
+	Count,
+};
+
 void ApplyOverlay(SDL_Window *window);
+void OverlaySetLayer(OverlayLayer layer);
+OverlayLayer OverlayGetLayer();
 void OverlaySetInput(OverlayInput input);
 OverlayInput OverlayGetInput();
 void OverlayLoadKeys(); // (re)reads the hotkeys from Overlay.Keys.* in powder.pref

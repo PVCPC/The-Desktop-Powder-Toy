@@ -121,6 +121,10 @@ overlay, and TPT only runs the top screen, so **the sim freezes while any dialog
    - [x] Done 2026-10-30: TPT's notifications (update news, server notices) are a toast each and a yellow row at the
      top of the Welcome tab (Open, Dismiss) instead of buttons over the desktop. Errors stay TPT's own dialogs (hosted).
 6. **Sim layer position setting** (S-M): on top / under windows / behind the desktop icons.
+   - [x] Done 2026-10-30: Overlay tab "Sim layer" (Overlay.Layer). Under windows = bottom of the z-order, pushed back
+     down when clicked. Behind icons = child of the desktop (WorkerW, or Progman under SHELLDLL_DefView on 24H2+),
+     look-only; the manifest now declares Windows 8+ so a layered window can be a child. Z-order and parent checked
+     in tests; the user should eyeball behind-icons once (the test desktop was covered by windows).
 7. **Themes** (M each): the frame and controls as a theme interface, then XP, 7, 10/11, Mac, Linux.
 
 Open questions: whether some windows (the element palette, a tool strip) should dock to screen edges like the

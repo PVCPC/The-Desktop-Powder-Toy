@@ -1293,6 +1293,14 @@ namespace
 				Toggle(x + S(12), top + i * S(24), modes[i], int(OverlayGetInput()) == i, true, [i] { OverlaySetInput(OverlayInput(i)); });
 			}
 			y += S(108);
+			top = Group(x, y, w, S(76), L"Sim layer");
+			const wchar_t *layers[] = { L"On top of every window", L"Under windows, over the desktop icons",
+			                            L"Behind the desktop icons, like a wallpaper (look only: clicks go to the desktop)" };
+			for (int i = 0; i < int(OverlayLayer::Count); i++)
+			{
+				Toggle(x + S(12), top + i * S(24), layers[i], int(OverlayGetLayer()) == i, true, [i] { OverlaySetLayer(OverlayLayer(i)); });
+			}
+			y += S(84);
 			top = Group(x, y, w, S(68), L"Window");
 			Toggle(x + S(12), top, L"Show TPT's own menus too", showTPTMenus, false, [] {
 				showTPTMenus = !showTPTMenus;
