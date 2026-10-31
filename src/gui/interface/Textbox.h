@@ -37,6 +37,7 @@ public:
 	void SetBorder(bool border) { this->border = border; }
 	void SetHidden(bool hidden);
 	bool GetHidden() { return masked; }
+	int GetCursor() const { return cursor; }
 	void SetActionCallback(TextboxAction action) { actionCallback = action; }
 	void SetDefocusCallback(TextboxDefocusAction action) { defocusCallback = action; }
 

@@ -5,10 +5,13 @@
 #include "Overlay.h"
 #include "gui/game/GameController.h"
 #include "gui/game/GameModel.h"
+#include "client/SaveFile.h"
+#include "client/SaveInfo.h"
 #include "gui/game/GameView.h"
 #include "graphics/VideoBuffer.h"
 #include "simulation/Simulation.h"
 #include "simulation/Air.h"
+#include "simulation/ElementGraphics.h"
 #include "simulation/SimulationData.h"
 #include "SimulationConfig.h"
 #include "gui/game/Menu.h"
@@ -43,6 +46,10 @@
 #include <windows.h>
 #include <windowsx.h>
 #include <shellapi.h>
+#include <dwmapi.h>
+#pragma comment(lib, "dwmapi.lib")
+#undef small       // rpcndr.h, via dwmapi.h
+#undef GetUserName // SaveInfo::GetUserName
 
 namespace
 {
@@ -373,7 +380,14 @@ namespace
 		Vec2<int> minSize{ 0, 0 };
 		HWND owner = nullptr; // an owned window: no taskbar button, normal z-order, minimises with its owner
 
-		virtual ~Panel() = default;
+		virtual ~Panel()
+		{
+			if (hwnd)
+			{
+				SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+				DestroyWindow(hwnd);
+			}
+		}
 		virtual void Paint() = 0;
 		virtual LRESULT HitTest(int, int) { return HTCLIENT; }
 		virtual void Mouse(UINT, int, int, WPARAM) {}
@@ -398,6 +412,8 @@ namespace
 			hwnd = CreateWindowExW(ex, L"TPTOverlayPanel", title.empty() ? Platform::WinWiden(name).c_str() : title.c_str(), style, x, y, w, h,
 			                       owner, nullptr, GetModuleHandleW(nullptr), nullptr);
 			SetWindowLongPtrW(hwnd, GWLP_USERDATA, LONG_PTR(this));
+			BOOL noFade = TRUE;
+			DwmSetWindowAttribute(hwnd, DWMWA_TRANSITIONS_FORCEDISABLED, &noFade, sizeof(noFade));
 			// Creation measured the client area before Proc could say "no frame"; measure again, or the canvas
 			// comes out smaller than the window.
 			SetWindowPos(hwnd, nullptr, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
@@ -571,8 +587,8 @@ namespace
 		int tab = 0, section = 0, scroll = 0;
 		int titleH, border, tabH, navW, statusH, tileW, tileH, gap;
 		uint64_t shownState = 0;
-		static constexpr const wchar_t *tabNames[] = { L"Elements", L"Simulation", L"Display", L"Saves", L"Overlay", L"Welcome", L"Tools" };
-		static constexpr int welcomeTab = 5, toolsTab = 6;
+		static constexpr const wchar_t *tabNames[] = { L"Elements", L"Tools", L"Simulation", L"Display", L"Saves", L"Overlay", L"Welcome" };
+		static constexpr int toolsTab = 1, welcomeTab = 6;
 
 		SideWindow()
 		{
@@ -674,7 +690,7 @@ namespace
 			RECT rc{ x, y, x + w, y + S(23) };
 			vista::Button(cv, x, y, w, S(23), pressed ? 2 : (Hovered(rc) ? 1 : 0));
 			auto size = text->Measure(label);
-			text->Draw(cv, x + (w - size.cx) / 2, y + (S(23) - size.cy) / 2, label, 0x000000, false, w - S(6));
+			text->Draw(cv, x + std::max(S(3), int(w - size.cx) / 2), y + (S(23) - size.cy) / 2, label, 0x000000, false, w - S(6));
 			Add(rc, std::move(action), tip);
 		}
 
@@ -883,21 +899,74 @@ namespace
 			auto *model = gc.GetModel();
 			int x = c.left + S(10), w = c.right - c.left - S(20), y = c.top + S(8);
 			auto &presets = Renderer::renderModePresets;
-			int rows = (int(presets.size()) + 2) / 3;
+			int rows = (int(presets.size()) + 3) / 4;
 			int top = Group(x, y, w, S(20) + rows * S(29), L"View mode");
-			int bw = (w - S(24) - 2 * S(6)) / 3;
+			int bw = (w - S(24) - 3 * S(6)) / 4;
 			for (int i = 0; i < int(presets.size()); i++)
 			{
-				PushButton(x + S(12) + (i % 3) * (bw + S(6)), top + (i / 3) * S(29), bw, Wide(presets[i].Name),
+				PushButton(x + S(12) + (i % 4) * (bw + S(6)), top + (i / 4) * S(29), bw, Wide(presets[i].Name.EndsWith(" Display") ? presets[i].Name.Substr(0, presets[i].Name.size() - 8) : presets[i].Name),
 				           [i] { GameController::Ref().LoadRenderPreset(i); }, L"Number key " + std::to_wstring(i == 9 ? 0 : i + 1));
 			}
 			y += S(28) + rows * S(29);
-			top = Group(x, y, w, S(100), L"Show");
+			int cw = (w - S(24)) / 3; // three columns
+			auto &rs = model->GetRendererSettings();
+			top = Group(x, y, w, S(68), L"Show");
 			Toggle(x + S(12), top, L"HUD", gc.GetHudEnable(), false, [] { auto &g = GameController::Ref(); g.SetHudEnable(!g.GetHudEnable()); }, L"Frame rate, particle count and cursor info (H)");
-			Toggle(x + S(12), top + S(24), L"Decorations", model->GetDecoration(), false, [] { GameController::Ref().SetDecoration(); }, L"Painted colours (Ctrl+B)");
-			Toggle(x + S(12), top + S(48), L"Gravity field", model->GetGravityGrid(), false, [] { GameController::Ref().ShowGravityGrid(); }, L"Newtonian gravity lines (Ctrl+G)");
-			y += S(108);
-			PushButton(x, y, S(200), L"More render options\u2026", [] { GameController::Ref().OpenRenderOptions(); }, L"TPT's full render settings");
+			Toggle(x + S(12) + cw, top, L"Decorations", model->GetDecoration(), false, [] { GameController::Ref().SetDecoration(); }, L"Painted colours (Ctrl+B)");
+			Toggle(x + S(12) + 2 * cw, top, L"Gravity field", model->GetGravityGrid(), false, [] { GameController::Ref().ShowGravityGrid(); }, L"Newtonian gravity lines (Ctrl+G)");
+			struct Extra { const wchar_t *name; uint32_t flag; const wchar_t *tip; } extras[] = {
+				{ L"Fancy", DISPLAY_EFFE, L"Moving solids, stickman guns and other extras" },
+				{ L"Lensing", DISPLAY_WARP, L"Newtonian gravity bends light" },
+				{ L"Persistent", DISPLAY_PERS, L"Paths stay on screen for a while" },
+			};
+			for (int i = 0; i < 3; i++)
+			{
+				bool on = rs.displayMode & extras[i].flag;
+				Toggle(x + S(12) + i * cw, top + S(24), extras[i].name, on, false, [&rs, flag = extras[i].flag] { rs.displayMode ^= flag; }, extras[i].tip);
+			}
+			y += S(76);
+
+			// TPT's render options (its whole-screen view sits under the taskbar here), as switches. The view-mode
+			// presets above set all three groups at once.
+			struct Mode { const wchar_t *name; uint32_t flag; const wchar_t *tip; };
+			auto grid = [&](const wchar_t *title, std::initializer_list<Mode> modes, uint32_t &field, int kind) {
+				int rows = (int(modes.size()) + 2) / 3;
+				int gt = Group(x, y, w, S(20) + rows * S(24), title);
+				int i = 0;
+				for (auto &m : modes)
+				{
+					bool on = kind == 2 ? field == m.flag : (field & m.flag) == m.flag;
+					Toggle(x + S(12) + (i % 3) * cw, gt + (i / 3) * S(24), m.name, on, kind != 0, [&field, flag = m.flag, kind, on] {
+						if (kind == 2) field = on ? 0 : flag;                                   // colours: one or none
+						else if (kind == 1) field = (field & ~DISPLAY_AIR & ~flag) | (on ? 0 : flag); // air views: one at a time
+						else field = on ? field & ~flag : field | flag;
+					}, m.tip);
+					i++;
+				}
+				y += S(28) + rows * S(24);
+			};
+			grid(L"Effects", {
+				{ L"Effects", RENDER_EFFE, L"Special flare effects on some elements" },
+				{ L"Fire", RENDER_FIRE, L"Fire effect for gases" },
+				{ L"Glow", RENDER_GLOW, L"Glow on some elements" },
+				{ L"Blur", RENDER_BLUR, L"Blur for liquids" },
+				{ L"Blob", RENDER_BLOB, L"Draws everything as blobs" },
+				{ L"Basic", RENDER_BASC, L"Basic drawing; without it most things are invisible" },
+				{ L"Spark glow", RENDER_SPRK, L"Glow on sparks" },
+			}, rs.renderMode, 0);
+			grid(L"Air (one at a time)", {
+				{ L"Pressure", DISPLAY_AIRP, L"Red is positive pressure, blue negative" },
+				{ L"Velocity", DISPLAY_AIRV, L"Air velocity and positive pressure" },
+				{ L"Both", DISPLAY_AIRC, L"Pressure as red and blue, velocity as white" },
+				{ L"Air heat", DISPLAY_AIRH, L"Air temperature, like heat display" },
+				{ L"Vorticity", DISPLAY_AIRW, L"Red is clockwise, blue anticlockwise" },
+			}, rs.displayMode, 1);
+			grid(L"Colours (one at a time)", {
+				{ L"Heat", COLOUR_HEAT, L"Temperature: dark blue is coldest, pink hottest" },
+				{ L"Life", COLOUR_LIFE, L"Life value in greys" },
+				{ L"Heat gradient", COLOUR_GRAD, L"Tints colours to show heat spreading" },
+				{ L"Plain", COLOUR_BASC, L"No effects at all; overrides everything, deco too" },
+			}, rs.colorMode, 2);
 		}
 
 		// Brush, replace mode and decoration colour (TPT keeps them in its tool strip and keys).
@@ -948,7 +1017,27 @@ namespace
 		{
 			auto c = Content();
 			int x = c.left + S(10), w = c.right - c.left - S(20), y = c.top + S(8);
-			int top = Group(x, y, w, S(96), L"Saves");
+			auto *model = GameController::Ref().GetModel();
+			int top = Group(x, y, w, S(72), L"Open save");
+			std::wstring name = L"Untitled simulation", info = L"Not saved yet";
+			if (auto *save = model->GetSave())
+			{
+				name = Wide(save->GetName());
+				info = L"by " + Platform::WinWiden(save->GetUserName()) + L"   \u25B2 " + std::to_wstring(save->GetVotesUp()) +
+				       L"  \u25BC " + std::to_wstring(save->GetVotesDown());
+				std::wstring tags;
+				for (auto &tag : save->GetTags()) tags += (tags.empty() ? L"   Tags: " : L", ") + Platform::WinWiden(tag);
+				info += tags;
+			}
+			else if (auto *file = model->GetSaveFile())
+			{
+				name = Platform::WinWiden(file->GetName());
+				info = L"Saved on this computer";
+			}
+			text->Draw(cv, x + S(12), top, name, Text::Style{ 13, FW_SEMIBOLD, false, false, 0x1E395B });
+			text->Draw(cv, x + S(12), top + S(24), info, Text::Style{ 11, FW_NORMAL, false, false, 0x6D6D6D });
+			y += S(80);
+			top = Group(x, y, w, S(96), L"Saves");
 			int bw = (w - S(24) - S(6)) / 2;
 			PushButton(x + S(12), top, bw, L"Open\u2026", [] { GameController::Ref().OpenLocalBrowse(); }, L"Your local saves");
 			PushButton(x + S(12) + bw + S(6), top, bw, L"Save\u2026", [] { GameController::Ref().OpenLocalSaveWindow(false); },
@@ -956,7 +1045,7 @@ namespace
 			PushButton(x + S(12), top + S(29), bw, L"Stamps\u2026", [] { GameController::Ref().OpenStamps(); }, L"Saved selections (K)");
 			PushButton(x + S(12) + bw + S(6), top + S(29), bw, L"Reload", [] { GameController::Ref().ReloadSim(); }, L"Back to the last loaded save (F5)");
 			y += S(104);
-			// What TPT's bottom button row had (it's hidden while the side window is open).
+			// The rest of what TPT's bottom button row had (it's hidden while the side window is open).
 			top = Group(x, y, w, S(125), L"Online");
 			PushButton(x + S(12), top, bw, L"Browse\u2026", [] { GameController::Ref().OpenSearch(""); }, L"Saves on powdertoy.co.uk");
 			PushButton(x + S(12) + bw + S(6), top, bw, L"Upload\u2026", [] { GameController::Ref().OpenSaveWindow(); }, L"Save to powdertoy.co.uk");
@@ -966,7 +1055,6 @@ namespace
 			PushButton(x + S(12) + bw + S(6), top + S(58), bw, L"Sign in\u2026", [] { GameController::Ref().OpenLogin(); }, L"Your powdertoy.co.uk account");
 			y += S(133);
 			top = Group(x, y, w, S(52), L"TPT");
-			PushButton(x + S(12) + bw + S(6), top, bw, L"Render options\u2026", [] { GameController::Ref().OpenRenderOptions(); }, L"TPT's view and render settings");
 			PushButton(x + S(12), top, bw, L"Options\u2026", [] { GameController::Ref().OpenOptions(); }, L"TPT's own settings window");
 		}
 
@@ -1012,7 +1100,7 @@ namespace
 			text->Draw(cv, x0, y, L"Welcome to The Powder Toy", title);
 			y += text->Measure(L"Ag", title).cy + S(2);
 			text->Draw(cv, x0, y, L"Version " + std::to_wstring(DISPLAY_VERSION[0]) + L"." + std::to_wstring(DISPLAY_VERSION[1]) +
-			                          L"  ·  running on your desktop", subtitle);
+			                          L"  \u00B7  running on your desktop", subtitle);
 			y += text->Measure(L"Ag", subtitle).cy + S(8);
 			int lx = x0;
 			for (auto [label, url] : { std::pair{ L"powdertoy.co.uk", L"https://powdertoy.co.uk" },
@@ -1136,7 +1224,7 @@ namespace
 				{ L"F5", L"Reload the simulation", nullptr },
 			});
 			section(L"View", 0x00796B, {
-				{ L"0 – 9", L"View modes", nullptr },
+				{ L"0 \u2013 9", L"View modes", nullptr },
 				{ L"H|D", L"Show the HUD, or debug details in it", nullptr },
 				{ L"Z", L"Zoom", L"Click to keep the zoom window; the wheel changes its strength" },
 				{ L"Ctrl+F", L"Highlight the selected element", nullptr },
@@ -1206,8 +1294,14 @@ namespace
 			wchar_t scale[32];
 			swprintf(scale, 32, L"UI scale %g\u00D7", uiScale);
 			Caption(x + S(12), top, scale);
-			auto setScale = [](float v) {
+			auto setScale = [this](float v) {
+				float old = uiScale;
 				uiScale = std::clamp(v, 1.f, 4.f);
+				auto &prefs = GlobalPrefs::Ref();
+				RECT wr;
+				GetWindowRect(hwnd, &wr);
+				prefs.Set("Overlay.Windows.Palette.W", int(std::lround((wr.right - wr.left) * uiScale / old)));
+				prefs.Set("Overlay.Windows.Palette.H", int(std::lround((wr.bottom - wr.top) * uiScale / old)));
 				GlobalPrefs::Ref().Set("Overlay.UIScale", uiScale);
 				rebuildPalette = true;
 			};
@@ -1253,10 +1347,10 @@ namespace
 			switch (tab)
 			{
 			case 0: PaintElements(); break;
-			case 1: PaintSimulation(); break;
-			case 2: PaintDisplay(); break;
-			case 3: PaintSaves(); break;
-			case 4: PaintOverlay(); break;
+			case 2: PaintSimulation(); break;
+			case 3: PaintDisplay(); break;
+			case 4: PaintSaves(); break;
+			case 5: PaintOverlay(); break;
 			case welcomeTab: PaintWelcome(); break;
 			case toolsTab: PaintTools(); break;
 			}
@@ -1427,6 +1521,7 @@ namespace
 		int align = 0;    // 0 left, 1 centre, 2 right
 		bool enabled = true, hover = false, down = false, checked = false, focused = false, multiline = false;
 		int value = 0, steps = 0;
+		int caret = 0, selA = 0, selB = 0; // text boxes: cursor and selection, in characters
 		bool operator==(const SkinItem &) const = default;
 	};
 
@@ -1486,8 +1581,17 @@ namespace
 				auto col = l->GetTextColour();
 				it.rgb = (col.Red << 16) | (col.Green << 8) | col.Blue;
 				it.multiline = l->GetMultiline();
-				if (it.kind == K::Textbox && static_cast<ui::Textbox *>(c)->GetHidden())
-					it.text = std::wstring(it.text.size(), L'\u25CF');
+				if (it.kind == K::Textbox)
+				{
+					auto *t = static_cast<ui::Textbox *>(c);
+					if (t->GetHidden()) it.text = std::wstring(it.text.size(), L'\u25CF');
+					it.caret = std::clamp(t->GetCursor(), 0, int(it.text.size()));
+					if (t->HasSelection())
+					{
+						it.selA = std::clamp(t->GetSelectionStart(), 0, int(it.text.size()));
+						it.selB = std::clamp(t->GetSelectionEnd(), 0, int(it.text.size()));
+					}
+				}
 				break;
 			}
 			case K::Button:
@@ -1543,11 +1647,6 @@ namespace
 				titleH = S(28);
 				border = S(6);
 			}
-		}
-		~HostWindow() override
-		{
-			SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
-			DestroyWindow(hwnd);
 		}
 
 		ui::Point ClientOrigin() { return { border, titleH }; }
@@ -1645,7 +1744,27 @@ namespace
 					}
 					continue;
 				}
-				if (!inside) continue; // ponytail: half-scrolled rows vanish instead of clipping; clip if it shows
+				if (it.y + it.h <= it.clipT || it.y >= it.clipB) continue;
+				std::vector<std::pair<int, std::vector<uint32_t>>> keep; // rows outside the clip, as they were
+				if (!inside)
+				{
+					int x0 = std::max(0, x - 2 * k), x1 = std::min(cv.w, x + w + 2 * k);
+					for (int row = std::max(0, y - 2 * k); row < std::min(cv.h, y + h + 2 * k); row++)
+					{
+						if (row >= oy + it.clipT * k && row < oy + it.clipB * k) continue;
+						keep.push_back({ row, std::vector<uint32_t>(cv.px.begin() + size_t(row) * cv.w + x0, cv.px.begin() + size_t(row) * cv.w + x1) });
+					}
+				}
+				struct Restore
+				{
+					Canvas &cv;
+					std::vector<std::pair<int, std::vector<uint32_t>>> &keep;
+					int x0;
+					~Restore()
+					{
+						for (auto &[row, px] : keep) std::copy(px.begin(), px.end(), cv.px.begin() + size_t(row) * cv.w + x0);
+					}
+				} restore{ cv, keep, std::max(0, x - 2 * k) };
 				uint32_t fg = it.enabled ? 0x000000 : 0x8D8D8D;
 				int ty = y + (h - lineH) / 2;
 				switch (it.kind)
@@ -1657,10 +1776,16 @@ namespace
 				case K::Textbox:
 					cv.RoundRect(x, y, w, h, 0, 0xFFFFFF, 0xFFFFFF, 255);
 					cv.RoundFrame(x, y, w, h, 0, it.focused ? 0x3399FF : 0xABADB3, 255);
-					runs(x + 3 * k, it.multiline ? y + 2 * k : ty, x + w - 3 * k, it.text, fg, 0, it.multiline);
-					if (it.focused)
+					if (it.selB > it.selA && !it.multiline)
 					{
-						int cx = std::min(x + w - 3 * k, x + 3 * k + int(text->Measure(it.text, ui).cx));
+						int sx = x + 3 * k + int(text->Measure(it.text.substr(0, it.selA), ui).cx);
+						int sw = int(text->Measure(it.text.substr(it.selA, it.selB - it.selA), ui).cx);
+						cv.RoundRect(sx, ty, sw, lineH, 0, 0xCCE8FF, 0xCCE8FF, 255);
+					}
+					runs(x + 3 * k, it.multiline ? y + 2 * k : ty, x + w - 3 * k, it.text, fg, 0, it.multiline);
+					if (it.focused && !it.multiline)
+					{
+						int cx = std::min(x + w - 3 * k, x + 3 * k + int(text->Measure(it.text.substr(0, it.caret), ui).cx));
 						cv.RoundRect(cx, ty, std::max(1, k / 2), lineH, 0, 0x000000, 0x000000, 255);
 					}
 					break;
@@ -1682,7 +1807,7 @@ namespace
 					cv.RoundFrame(x, by, bs, bs, 0, it.hover ? 0x3C7FB1 : 0x8E8F8F, 255);
 					if (it.checked)
 					{
-						text->Draw(cv, x + 2 * k, by, L"✔", Style{ 12, FW_BOLD, false, false, 0x1C5180, 7 * k });
+						text->Draw(cv, x + 2 * k, by, L"\u2714", Style{ 12, FW_BOLD, false, false, 0x1C5180, 7 * k });
 					}
 					runs(x + bs + 4 * k, ty, x + w, it.text, fg, 0, false);
 					break;
@@ -1692,7 +1817,7 @@ namespace
 					cv.RoundRect(x + k / 2, y + k / 2, w - k, h - k, 3 * k / 2, it.hover ? 0xEAF6FD : 0xF2F2F2, it.hover ? 0xA7D9F5 : 0xD5D5D5, 255);
 					cv.RoundFrame(x + k / 2, y + k / 2, w - k, h - k, 3 * k / 2, it.hover ? 0x3C7FB1 : 0x707070, 255);
 					runs(x + 4 * k, ty, x + w - 14 * k, it.text, fg, 0, false);
-					text->Draw(cv, x + w - 11 * k, ty, L"▼", Style{ 12, FW_NORMAL, false, false, 0x404040, 6 * k });
+					text->Draw(cv, x + w - 11 * k, ty, L"\u25BC", Style{ 12, FW_NORMAL, false, false, 0x404040, 6 * k });
 					break;
 				}
 				case K::Separator:

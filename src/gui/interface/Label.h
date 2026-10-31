@@ -54,6 +54,8 @@ namespace ui
 		virtual String GetText();
 
 		bool HasSelection();
+		int GetSelectionStart() const { return selectionIndexL.clear_index; }
+		int GetSelectionEnd() const { return selectionIndexH.clear_index; }
 		void ClearSelection();
 		void selectAll();
 		void AutoHeight();

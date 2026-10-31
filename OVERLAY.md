@@ -142,7 +142,7 @@ Assessment, in the order I'd do it (effort: S = an hour or two, M = a session, L
    - [x] Simulation: play area, pause/step/reload/clear, edges, gravity, air, ambient heat
    - [x] Saves and stamps: buttons that open TPT's own browsers (a native Vista save list is a later step)
    - [x] Overlay settings: input mode, TPT's menus, shortcut list
-   - [ ] Hotkey recording and UI scale in the Overlay tab (still powder.pref)
+   - [x] Hotkey recording and UI scale in the Overlay tab
    - [ ] Tear tabs off into their own windows; dock the window to a screen edge
    - [ ] Play area: drag its edges on the desktop instead of +/- buttons; loop edges wrap at the area edge
    - [x] Bottom button row hidden with the rest (2026-10-30); its save name, vote and tags have no side-window
@@ -176,16 +176,17 @@ tray menu: the tray menu stays native on purpose.
 
 ## Rough edges (user request 2026-10-30: fix and polish all of them; tick each off as it's fixed)
 
-- [ ] Vista skin: rows half-scrolled out of a scroll panel vanish instead of being clipped
-- [ ] Vista skin: the text caret is always at the end; no selection highlight
-- [ ] Typing into a hosted dialog's text field is untested
-- [ ] Hosted dialogs don't resize (TPT dialogs are fixed size; a resize remakes the window)
-- [ ] Render options (drawn in place) sits partly under the taskbar
-- [ ] Tools tab sits after Welcome; it belongs next to Elements
-- [ ] Shortcut recording is untested with real key presses (tests can't press keys on this PC)
-- [ ] Changing the UI scale keeps the side window's pixel size
-- [ ] The Saves tab doesn't show the open save's name, votes or tags (the hidden bottom row did)
-- [ ] Remade windows leave a ghost of the old title for a moment (DWM fade)
+- [x] Vista skin: rows half-scrolled out of a scroll panel vanish instead of being clipped (now clipped at the panel edge)
+- [x] Vista skin: the text caret is always at the end; no selection highlight (caret follows the cursor, selection drawn light blue)
+- [x] Typing into a hosted dialog's text field is untested (tested: typing and arrow keys in Save)
+- [x] Hosted dialogs don't resize (by design: TPT lays its dialogs out at a fixed size)
+- [x] Render options (drawn in place) sits partly under the taskbar (its switches are native in the Display tab now)
+- [x] Tools tab sits after Welcome; it belongs next to Elements
+- [ ] Shortcut recording is untested with real key presses (tests can't press keys on this PC; needs the user to try)
+- [x] Changing the UI scale keeps the side window's pixel size (now scales with it)
+- [x] The Saves tab doesn't show the open save's name, votes or tags (now an Open save group)
+- [x] Remade windows leave a ghost of the old title (the old window was never destroyed; ~Panel destroys it now)
+- [x] Long button labels spilled past the button's left edge
 
 ## Ideas
 
