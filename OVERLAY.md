@@ -167,8 +167,8 @@ Assessment, in the order I'd do it (effort: S = an hour or two, M = a session, L
    Caveat: saves bigger than 612x384 won't open in stock TPT.
    - [x] **Sim size at runtime** (L): the sim sizes itself to the screen at startup, no rebuild per monitor
      (2026-10-30; tested at 3x = 1688x440 and 2x = 2540x680; a full play area is saved as 0x0 so it follows).
-   - [ ] **Sim scale slider** (M, needs the item above; 2026-10-30: Overlay tab "Sim pixel size" 2x-6x restarts TPT at
-     the new size - restart tested. Scene carry-over as <=255-cell tiles (save format limit) is NOT verified yet): how big one sim pixel is on screen (1x, 2x, 3x...). A
+   - [x] **Sim scale slider** (M, needs the item above; 2026-10-30: Overlay tab "Sim pixel size" 2x-6x restarts TPT at
+     the new size - restart tested. Scene carry-over as <=255-cell tiles (save format limit): 5859/5859 particles back at 2x): how big one sim pixel is on screen (1x, 2x, 3x...). A
      smaller scale gives a bigger sim with finer pixels; a larger one, a smaller sim with chunkier pixels. The sim
      is rebuilt at the new size and the current scene carried over (clipped if it no longer fits).
    - [x] Loop edges wrap at the play-area edge (2026-10-30, Simulation::LoopWrap; tested: 2107 sand kept, all inside).

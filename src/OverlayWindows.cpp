@@ -1698,8 +1698,8 @@ namespace
 				auto save = sim->Save(true, RectSized(tile.pos * CELL, tile.size * CELL));
 				if (!save) continue;
 				save->paused = model->GetPaused();
-				auto [ok, data] = save->Serialise();
-				if (ok) Platform::WriteFile(data, Platform::WinNarrow(SceneTile(x, y)));
+				auto data = save->Serialise().second; // .first is not success (TPT's own save path ignores it too)
+				if (!data.empty()) Platform::WriteFile(data, Platform::WinNarrow(SceneTile(x, y)));
 			}
 		GlobalPrefs::Ref().Set("Overlay.PendingScene", true);
 		GlobalPrefs::Ref().Set("Scale", scale);
