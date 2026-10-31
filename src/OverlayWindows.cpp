@@ -91,6 +91,7 @@ namespace
 	float uiScale = 1;
 	bool windowWalls = true;            // open windows are walls to particles (Overlay.WindowWalls)
 	bool iconWalls = true;              // and so are the desktop icons (Overlay.IconWalls)
+	bool cursorWind = true;             // the mouse stirs the air where the sim lets clicks through (Overlay.CursorWind)
 	HWND mainWindow = nullptr;    // TPT's own window
 	std::string recording;        // Overlay.Keys.<name> being recorded in the Overlay tab, or empty
 	std::function<void()> later; // run on the next tick, outside any window's message handling
@@ -2494,7 +2495,7 @@ namespace
 			PushButton(x + S(12) + 3 * (bw4 + S(6)), top, bw4, L"Clear", [] { GameController::Ref().ClearSim(); }, L"Empty the sim");
 			y += S(68);
 
-			top = Group(x, y, w, S(100), L"Edges");
+			top = Group(x, y, w, S(124), L"Edges");
 			Toggle(x + S(12), top + S(24), L"Open windows are walls (sand piles on title bars)", windowWalls, false, [] {
 				windowWalls = !windowWalls;
 				GlobalPrefs::Ref().Set("Overlay.WindowWalls", windowWalls);
@@ -2503,6 +2504,10 @@ namespace
 				iconWalls = !iconWalls;
 				GlobalPrefs::Ref().Set("Overlay.IconWalls", iconWalls);
 			}, L"Sand piles on your icons, shaped like each icon (not when the sim is behind them)");
+			Toggle(x + S(12), top + S(72), L"Your mouse blows the sand (where clicks go to the desktop)", cursorWind, false, [] {
+				cursorWind = !cursorWind;
+				GlobalPrefs::Ref().Set("Overlay.CursorWind", cursorWind);
+			}, L"Moving the mouse stirs the air like TPT's wind tool");
 			const wchar_t *edges[] = { L"Void", L"Solid", L"Loop" };
 			const wchar_t *edgeTips[] = { L"Particles and air leave at the edges", L"The edges are walls", L"Particles wrap around (whole screen only for now)" };
 			int ex = x + S(12);
@@ -2510,7 +2515,7 @@ namespace
 			{
 				ex += Toggle(ex, top, edges[i], gc.GetEdgeMode() == i, true, [i] { GameController::Ref().SetEdgeMode(i); }, edgeTips[i]) + S(18);
 			}
-			y += S(108);
+			y += S(132);
 
 			top = Group(x, y, w, S(76), L"Gravity");
 			const wchar_t *gravs[] = { L"Vertical", L"Off", L"Radial", L"Custom" };
@@ -4590,6 +4595,7 @@ void OverlayWindows::Init(void *mainHwnd)
 	auto &prefs = GlobalPrefs::Ref();
 	windowWalls = prefs.Get("Overlay.WindowWalls", true);
 	iconWalls = prefs.Get("Overlay.IconWalls", true);
+	cursorWind = prefs.Get("Overlay.CursorWind", true);
 	// Default UI scale: the larger of Windows' display scaling (TPT is DPI aware) and screen height / 1080, in
 	// quarter steps. Overridable.
 	HDC screen = GetDC(nullptr);
@@ -5160,6 +5166,19 @@ static void TickWindowWalls()
 	GetWindowRect(mainWindow, &sr);
 	int sw = sr.right - sr.left, sh = sr.bottom - sr.top;
 	// windows are walls only when the sim is over them; icons whenever it's over the icons
+	// the mouse over the desktop (where the overlay lets clicks through) stirs the air
+	static POINT lastCursor{ -1, -1 };
+	POINT cursor;
+	if (cursorWind && !overlayWindowed && sw > 0 && sh > 0 && GetCursorPos(&cursor))
+	{
+		auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); };
+		int x = px(cursor.x - sr.left, WINDOWW, sw), y = px(cursor.y - sr.top, WINDOWH, sh);
+		if (lastCursor.x >= 0 && x >= 0 && y >= 0 && x < XRES && y < YRES && GetAncestor(WindowFromPoint(cursor), GA_ROOT) != mainWindow)
+		{
+			OverlayCursorWind(sim, x, y, px(cursor.x - lastCursor.x, WINDOWW, sw), px(cursor.y - lastCursor.y, WINDOWH, sh));
+		}
+		lastCursor = cursor;
+	}
 	bool doWindows = windowWalls && OverlayGetLayer() == OverlayLayer::OnTop;
 	bool doIcons = iconWalls && OverlayGetLayer() != OverlayLayer::BehindIcons;
 	if (overlayWindowed || (!doWindows && !doIcons) || sw <= 0 || sh <= 0)
@@ -5196,6 +5215,7 @@ static void TickWindowWalls()
 			w.mx = px(r.left - it->second.left, WINDOWW, c.sw);
 			w.my = px(r.top - it->second.top, WINDOWH, c.sh);
 		}
+		w.id = uintptr_t(hwnd);
 		c.wins->push_back(w);
 		return TRUE;
 	}, LPARAM(&ctx));
@@ -5614,6 +5634,7 @@ void OverlayWindows::Tick()
 				w.mx = px(r.l - it->second.l, WINDOWW, sw);
 				w.my = px(r.t - it->second.t, WINDOWH, sh);
 			}
+			w.id = r.id;
 			walls.push_back(w);
 		}
 	last = std::move(now);

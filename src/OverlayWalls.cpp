@@ -2,7 +2,9 @@
 #include "simulation/Simulation.h"
 #include "SimulationConfig.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <map>
 
 void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 {
@@ -21,11 +23,32 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 				if (w.solid(x, y)) mask[size_t(y) * XRES + x] = 1;
 		}
 	// What rests on a window rides along when it moves (friction): each column's stack of particles on its old top
-	// edge goes the same way. Big jumps (snapping, maximising) leave it behind.
+	// edge goes the same way. Big jumps (snapping, maximising) leave it behind. When the window slows, stops or turns,
+	// the riders keep the speed it lost: shake a window and the sand flies off.
+	// Window positions don't arrive in step with ticks (a steady drag reads 8, 0, 8, 0 px), so the speed is averaged:
+	// the 4 ticks before against the last 2.
+	using History = std::array<std::pair<int, int>, 6>; // moves per tick, oldest first
+	static std::map<uintptr_t, History> lastMoves;
+	std::map<uintptr_t, History> moves;
 	for (auto &w : walls)
 	{
-		int mx = w.mx, my = w.my;
-		if (w.solid || (!mx && !my) || std::abs(mx) > 40 || std::abs(my) > 40) continue;
+		int mx = w.mx, my = w.my, fx = 0, fy = 0;
+		if (w.id && std::abs(mx) <= 40 && std::abs(my) <= 40)
+		{
+			auto &h = moves[w.id] = lastMoves[w.id];
+			std::rotate(h.begin(), h.begin() + 1, h.end());
+			h.back() = { mx, my };
+			float ax = 0, ay = 0, bx = 0, by = 0;
+			for (int i = 0; i < 4; i++) ax += h[i].first / 4.f, ay += h[i].second / 4.f;
+			for (int i = 4; i < 6; i++) bx += h[i].first / 2.f, by += h[i].second / 2.f;
+			float was = std::hypot(ax, ay), now = std::hypot(bx, by);
+			if (was >= 3 && (now < was * 0.4f || ax * bx + ay * by < 0)) // it stopped short or turned back
+			{
+				fx = int(std::lround(ax - bx)), fy = int(std::lround(ay - by));
+				h.fill({ int(std::lround(bx)), int(std::lround(by)) }); // flung once; the speed it has now carries on
+			}
+		}
+		if (w.solid || (!mx && !my && !fx && !fy) || std::abs(mx) > 40 || std::abs(my) > 40) continue;
 		int top = w.y0 - my - 1; // the row just above the old top edge
 		if (top < 0 || top >= YRES) continue;
 		struct Rider { int r, x, y; };
@@ -44,9 +67,16 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 			auto &part = sim->parts[ID(p.r)];
 			part.x = float(tx);
 			part.y = float(ty);
+			if (fx || fy)
+			{
+				// livelier than the bare speed, and a little up so it leaves the surface instead of scraping along it
+				part.vx = std::clamp(fx * 1.5f, -15.f, 15.f);
+				part.vy = std::clamp(fy * 1.5f - std::abs(fx) * 0.5f, -15.f, 15.f);
+			}
 			sim->pmap[ty][tx] = p.r;
 		}
 	}
+	lastMoves = std::move(moves);
 	for (auto &w : walls)
 	{
 		int mx = w.mx, my = w.my;
@@ -77,4 +107,20 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 				}
 			}
 	}
+}
+
+void OverlayCursorWind(Simulation *sim, int x, int y, int dx, int dy)
+{
+	if ((!dx && !dy) || std::abs(dx) > 200 || std::abs(dy) > 200) return; // still, or a jump
+	// like dragging TPT's WIND tool, softer: a breeze 3 cells around the cursor, fading out from it
+	constexpr int r = 3;
+	for (int j = -r; j <= r; j++)
+		for (int i = -r; i <= r; i++)
+		{
+			int cx = x / CELL + i, cy = y / CELL + j;
+			if (cx < 0 || cy < 0 || cx >= XCELLS || cy >= YCELLS || i * i + j * j > r * r) continue;
+			float k = 0.08f * (1 - std::sqrt(float(i * i + j * j)) / (r + 1));
+			sim->vx[cy][cx] = std::clamp(sim->vx[cy][cx] + dx * k, -15.f, 15.f);
+			sim->vy[cy][cx] = std::clamp(sim->vy[cy][cx] + dy * k, -15.f, 15.f);
+		}
 }
