@@ -1,5 +1,5 @@
 // Overlay mode's own desktop windows (OVERLAY.md): each menu is a real top-level layered window, drawn here in
-// software with per-pixel alpha. The look is Windows Vista Aero; other OS themes will replace the vista:: drawing.
+// software with per-pixel alpha. The look is a Theme (Windows Vista, 7, 8, 10, Classic Mac, macOS).
 #include "OverlayWindows.h"
 #ifdef _WIN32
 #include "Overlay.h"
@@ -285,29 +285,129 @@ namespace
 		return Platform::WinWiden(cut == id.npos ? id : id.substr(cut + 1));
 	}
 
-	// Windows Vista Aero. ponytail: one theme; when a second OS theme lands, these become a Theme interface.
-	namespace vista
+	enum CaptionKind { CaptionMin, CaptionMax, CaptionClose };
+
+	// A caption glyph centred on (cx, cy): an x (close), a square (maximise), a bar (minimise) or, with plus, a +.
+	void Glyph(Canvas &cv, int cx, int cy, CaptionKind kind, uint32_t c, int size, int thick, bool plus = false)
 	{
-		constexpr uint32_t glassTop = 0x7FA8D0, glassBottom = 0x4C7BAA; // the default Aero "sky" tint
-		constexpr int glassAlpha = 205;
+		int k = size / 2;
+		if (kind == CaptionClose)
+		{
+			for (int i = -k; i <= k; i++)
+				for (int t = 0; t < thick; t++)
+				{
+					cv.Blend(cx + i + t, cy + i, c, 255);
+					cv.Blend(cx + i + t, cy - i, c, 255);
+				}
+			return;
+		}
+		if (kind == CaptionMax && !plus)
+		{
+			for (int t = 0; t < thick; t++) cv.RoundFrame(cx - k + t, cy - k + t, 2 * k + 1 - 2 * t, 2 * k + 1 - 2 * t, 0, c, 255);
+			return;
+		}
+		cv.RoundRect(cx - k, cy - thick / 2, 2 * k + 1, thick, 0, c, c, 255);
+		if (plus) cv.RoundRect(cx - thick / 2, cy - k, thick, 2 * k + 1, 0, c, c, 255);
+	}
+
+	// An OS look (pref Overlay.Theme). The theme draws the frame, caption buttons, push buttons and popups; tabs,
+	// list items, check boxes, group boxes and the status bar are drawn here in its colours. Sizes are unscaled.
+	struct Theme
+	{
+		const wchar_t *name = L"";
+		uint32_t page = 0xFFFFFF, ink = 0x000000, pressedInk = 0x000000, heading = 0x1E395B, navInk = 0x1E395B, navSelInk = 0xFFFFFFFF /* none: navInk */, edge = 0x898C95, groupEdge = 0xD5DFE5;
+		uint32_t strip = 0xF0F0F0, tabOff[2] = { 0xF2F2F2, 0xE3E3E3 }, tabHot[2] = { 0xEAF6FD, 0xA7D9F5 }, tabHotEdge = 0x3C7FB1;
+		uint32_t status[3] = { 0xF7F9FC, 0xDCE5F1, 0xA0AFC3 }, nav[3] = { 0xF1F5FB, 0xE5EDF8, 0xA0AFC3 }; // top, bottom, edge
+		uint32_t navHot[3] = { 0xF2F8FE, 0xE3EFFD, 0xB8D6FB }, navSel[3] = { 0xDCEBFC, 0xC1DBFC, 0x7DA2CE };
+		uint32_t box[3] = { 0xF4F4F4, 0xDEDEDE, 0x8E8F8F }, boxHot[3] = { 0xDEF3FD, 0xB1DFFD, 0x3C7FB1 };
+		uint32_t mark = 0x1C3D6E, dot[2] = { 0x8AD0F2, 0x1C64B4 };
+		uint32_t boxOn = 0; // non-zero: a ticked box or radio is filled with this (macOS), mark and dot then contrast
+		int radius = 3, boxRadius = 2, glow = 0;
+		bool segmentTabs = false; // macOS segmented control instead of tabs
+		// Caption buttons: widths (minimise, maximise, close), height, top, gap, distance from the edge (-1: the
+		// frame border) and the side each sits on.
+		int capW[3] = { 27, 27, 43 }, capH = 18, capTop = 1, capGap = 0, capInset = -1;
+		bool capLeft[3] = { false, false, false };
+
+		virtual ~Theme() = default;
+		virtual void Frame(Canvas &cv, int titleH, int border, const std::wstring &title) = 0;
+		virtual void CaptionButton(Canvas &cv, RECT rc, bool hover, CaptionKind kind) = 0;
+		virtual void Button(Canvas &cv, int x, int y, int w, int h, int state) = 0; // 0 normal, 1 hover, 2 pressed/selected
+		virtual void Popup(Canvas &cv)
+		{
+			cv.RoundRect(0, 0, cv.w, cv.h, S(float(radius)), page, page, 250);
+			cv.RoundFrame(0, 0, cv.w, cv.h, S(float(radius)), edge, 255);
+		}
+
+		RECT CaptionRect(int w, int border, CaptionKind k) const
+		{
+			// outward in: on the right close, maximise, minimise; on the left close, minimise, maximise
+			static const CaptionKind order[2][3] = { { CaptionClose, CaptionMax, CaptionMin }, { CaptionClose, CaptionMin, CaptionMax } };
+			int x = capInset < 0 ? border : S(float(capInset)), top = capTop <= 1 ? capTop : S(float(capTop));
+			for (auto o : order[capLeft[k]])
+			{
+				if (capLeft[o] != capLeft[k]) continue;
+				int bw = S(float(capW[o]));
+				if (o == k) return capLeft[k] ? RECT{ x, top, x + bw, top + S(float(capH)) } : RECT{ w - x - bw, top, w - x, top + S(float(capH)) };
+				x += bw + S(float(capGap));
+			}
+			return {};
+		}
+
+		// A navigation-pane item: plain, hovered (1) or selected (2).
+		void NavItem(Canvas &cv, int x, int y, int w, int h, int state)
+		{
+			if (state == 0) return;
+			auto *c = state == 2 ? navSel : navHot;
+			cv.RoundRect(x, y, w, h, S(segmentTabs ? 5.f : 2.f), c[0], c[1], 255);
+			cv.RoundFrame(x, y, w, h, S(segmentTabs ? 5.f : 2.f), c[2], 255);
+		}
+
+		// A tab on the strip; the selected one's rectangle reaches the page.
+		void Tab(Canvas &cv, RECT rc, bool on, bool hot)
+		{
+			int w = rc.right - rc.left, h = rc.bottom - rc.top;
+			if (segmentTabs)
+			{
+				if (on || hot) cv.RoundRect(rc.left, rc.top + S(1), w, h - S(4), S(5), on ? 0xFFFFFF : 0xDDDDDD, on ? 0xFFFFFF : 0xDDDDDD, 255);
+				if (on) cv.RoundFrame(rc.left, rc.top + S(1), w, h - S(4), S(5), 0xC4C4C4, 255);
+				return;
+			}
+			cv.RoundRect(rc.left, rc.top, w, h, S(float(radius)), on ? page : (hot ? tabHot[0] : tabOff[0]), on ? page : (hot ? tabHot[1] : tabOff[1]), 255, true);
+			cv.RoundFrame(rc.left, rc.top, w, h + S(3), S(float(radius)), hot ? tabHotEdge : edge, 255, true);
+		}
+	};
+
+	// Windows Vista Aero.
+	struct Vista : Theme
+	{
+		uint32_t glassTop = 0x7FA8D0, glassBottom = 0x4C7BAA; // the default Aero "sky" tint
+		int glassAlpha = 205;
+
+		Vista()
+		{
+			name = L"Windows Vista";
+			glow = 5;
+		}
 
 		// The glass frame: a translucent tinted body, a glossy upper half on the title bar, dark outer and light
 		// inner edges. The client area (below the title bar, inset by the frame) is left for the caller.
-		void Frame(Canvas &cv, int titleH, int border, const std::wstring &title)
+		void Frame(Canvas &cv, int titleH, int border, const std::wstring &title) override
 		{
 			int r = S(6);
 			cv.RoundRect(0, 0, cv.w, cv.h, r, glassTop, glassBottom, glassAlpha);
 			cv.RoundRect(1, 1, cv.w - 2, titleH / 2, r, 0xFFFFFF, 0xFFFFFF, 60, true); // gloss
+			Extra(cv, titleH);
 			cv.RoundFrame(0, 0, cv.w, cv.h, r, 0x000000, 170);
 			cv.RoundFrame(1, 1, cv.w - 2, cv.h - 2, r - 1, 0xFFFFFF, 110);
 			text->Draw(cv, S(10), (titleH - text->Measure(title).cy) / 2, title, 0x000000, false, cv.w - S(80), S(5));
 			// The client area's sunken edge.
 			cv.RoundFrame(border - 1, titleH - 1, cv.w - 2 * border + 2, cv.h - titleH - border + 2, 0, 0x000000, 90);
 		}
+		virtual void Extra(Canvas &, int) {}
 
-		// A caption button: Vista's glossy red close pill, or the light glass minimise button. hover brightens it.
-		enum CaptionKind { CaptionMin, CaptionMax, CaptionClose };
-		void CaptionButton(Canvas &cv, RECT rc, bool hover, CaptionKind kind)
+		// Vista's glossy red close pill, or the light glass minimise and maximise buttons. hover brightens them.
+		void CaptionButton(Canvas &cv, RECT rc, bool hover, CaptionKind kind) override
 		{
 			bool close = kind == CaptionClose;
 			int w = rc.right - rc.left, h = rc.bottom - rc.top;
@@ -319,14 +419,7 @@ namespace
 			int cx = rc.left + w / 2, cy = rc.top + h / 2;
 			if (close)
 			{
-				// The white x.
-				int k = S(3.5f);
-				for (int i = -k; i <= k; i++)
-					for (int t = 0; t < S(2); t++)
-					{
-						cv.Blend(cx + i + t, cy + i, 0xFFFFFF, 255);
-						cv.Blend(cx + i + t, cy - i, 0xFFFFFF, 255);
-					}
+				Glyph(cv, cx, cy, CaptionClose, 0xFFFFFF, S(7), S(2));
 			}
 			else if (kind == CaptionMax)
 			{
@@ -345,8 +438,7 @@ namespace
 			}
 		}
 
-		// A Vista push button. state: 0 normal, 1 hover, 2 pressed/selected.
-		void Button(Canvas &cv, int x, int y, int w, int h, int state)
+		void Button(Canvas &cv, int x, int y, int w, int h, int state) override
 		{
 			static const uint32_t top[] = { 0xF2F2F2, 0xEAF6FD, 0xE5F4FC }, mid1[] = { 0xEBEBEB, 0xD9F0FC, 0xC4E5F6 },
 				mid2[] = { 0xDDDDDD, 0xBEE6FD, 0x98D1EF }, bottom[] = { 0xCFCFCF, 0xA7D9F5, 0x68B3DB },
@@ -360,14 +452,585 @@ namespace
 			cv.RoundFrame(x + 1, y + 1, w - 2, h - 2, r - 1, 0xFFFFFF, 120);
 		}
 
-		// An Explorer navigation-pane item: plain, or a soft blue highlight.
-		void NavItem(Canvas &cv, int x, int y, int w, int h, int state)
+		void Popup(Canvas &cv) override
 		{
-			if (state == 0) return;
-			cv.RoundRect(x, y, w, h, S(2), state == 2 ? 0xDCEBFC : 0xF2F8FE, state == 2 ? 0xC1DBFC : 0xE3EFFD, 255);
-			cv.RoundFrame(x, y, w, h, S(2), state == 2 ? 0x7DA2CE : 0xB8D6FB, 255);
+			int r = S(6);
+			cv.RoundRect(0, 0, cv.w, cv.h, r, glassTop, glassBottom, glassAlpha);
+			cv.RoundRect(1, 1, cv.w - 2, cv.h / 2, r, 0xFFFFFF, 0xFFFFFF, 60, true);
+			cv.RoundFrame(0, 0, cv.w, cv.h, r, 0x000000, 170);
+			cv.RoundFrame(1, 1, cv.w - 2, cv.h - 2, r - 1, 0xFFFFFF, 110);
 		}
+	};
+
+	// Windows 7: paler, clearer glass with the diagonal light streaks, and wider caption buttons.
+	struct Seven : Vista
+	{
+		Seven()
+		{
+			name = L"Windows 7";
+			glassTop = 0xA9C8EA, glassBottom = 0x7FA4CF, glassAlpha = 185;
+			capW[0] = 26, capW[1] = 26, capW[2] = 45, capH = 19, capTop = 0;
+		}
+
+		void Extra(Canvas &cv, int) override
+		{
+			// three soft bands, only where the frame already is
+			for (int band = 0; band < 3; band++)
+			{
+				int x0 = cv.w / 5 + band * S(70) * (band + 1), bw = S(14) + band * S(8);
+				for (int y = 0; y < cv.h; y++)
+					for (int x = x0 - y / 2; x < x0 - y / 2 + bw; x++)
+						if (x >= 0 && x < cv.w && (cv.px[size_t(y) * cv.w + x] >> 24)) cv.Blend(x, y, 0xFFFFFF, 28);
+			}
+		}
+	};
+
+	// Windows 8: flat, a solid coloured frame, a centred title and flat square caption buttons.
+	struct Eight : Theme
+	{
+		static constexpr uint32_t frame = 0x6A9BD8, frameEdge = 0x4A7CBE;
+
+		Eight()
+		{
+			name = L"Windows 8";
+			radius = 0, boxRadius = 0;
+			capW[0] = 26, capW[1] = 27, capW[2] = 45, capH = 20, capTop = 0;
+			heading = 0x000000, navInk = 0x000000, edge = 0xACACAC, groupEdge = 0xDCDCDC;
+			tabOff[0] = 0xF0F0F0, tabOff[1] = 0xE5E5E5, tabHot[0] = 0xECF4FC, tabHot[1] = 0xDCECFC, tabHotEdge = 0x7EB4EA;
+			status[0] = status[1] = 0xF0F0F0, status[2] = 0xD7D7D7;
+			nav[0] = nav[1] = 0xFFFFFF, nav[2] = 0xE5E5E5;
+			navHot[0] = navHot[1] = 0xE5F3FB, navHot[2] = 0x70C0E7, navSel[0] = navSel[1] = 0xCBE8F6, navSel[2] = 0x26A0DA;
+			box[0] = box[1] = 0xFFFFFF, box[2] = 0x707070, boxHot[0] = boxHot[1] = 0xF3F9FF, boxHot[2] = 0x3399FF;
+			mark = 0x000000, dot[0] = dot[1] = 0x333333;
+		}
+
+		void Frame(Canvas &cv, int titleH, int border, const std::wstring &title) override
+		{
+			cv.RoundRect(0, 0, cv.w, cv.h, 0, frame, frame, 255);
+			cv.RoundFrame(0, 0, cv.w, cv.h, 0, frameEdge, 255);
+			int tw = text->Measure(title).cx;
+			text->Draw(cv, std::max(S(10), (cv.w - tw) / 2), (titleH - text->Measure(title).cy) / 2, title, 0x000000, false, cv.w - S(130));
+			cv.RoundFrame(border - 1, titleH - 1, cv.w - 2 * border + 2, cv.h - titleH - border + 2, 0, frameEdge, 255);
+		}
+
+		void CaptionButton(Canvas &cv, RECT rc, bool hover, CaptionKind kind) override
+		{
+			int w = rc.right - rc.left, h = rc.bottom - rc.top;
+			bool close = kind == CaptionClose;
+			if (close) cv.RoundRect(rc.left, rc.top, w, h, 0, hover ? 0xE04343 : 0xC75050, hover ? 0xE04343 : 0xC75050, 255);
+			else if (hover) cv.RoundRect(rc.left, rc.top, w, h, 0, 0xFFFFFF, 0xFFFFFF, 70);
+			Glyph(cv, rc.left + w / 2, rc.top + h / 2 + (kind == CaptionMin ? S(3) : 0), kind, close ? 0xFFFFFF : 0x000000, S(8), S(1.5f));
+		}
+
+		void Button(Canvas &cv, int x, int y, int w, int h, int state) override
+		{
+			static const uint32_t top[] = { 0xF0F0F0, 0xECF4FC, 0xDAECFC }, bottom[] = { 0xE5E5E5, 0xDCECFC, 0xC4E0FC }, edge[] = { 0xACACAC, 0x7EB4EA, 0x569DE5 };
+			cv.RoundRect(x, y, w, h, 0, top[state], bottom[state], 255);
+			cv.RoundFrame(x, y, w, h, 0, edge[state], 255);
+		}
+	};
+
+	// Windows 10: a white frame with a thin border, full-height caption buttons and flat controls.
+	struct Ten : Theme
+	{
+		Ten()
+		{
+			name = L"Windows 10";
+			radius = 0, boxRadius = 0;
+			capW[0] = capW[1] = capW[2] = 46, capH = 28, capTop = 1, capInset = 1;
+			heading = 0x000000, navInk = 0x000000, edge = 0xD9D9D9, groupEdge = 0xDCDCDC, strip = 0xFFFFFF;
+			tabOff[0] = tabOff[1] = 0xF0F0F0, tabHot[0] = tabHot[1] = 0xD8EAF9, tabHotEdge = 0x7EB4EA;
+			status[0] = status[1] = 0xF0F0F0, status[2] = 0xD7D7D7;
+			nav[0] = nav[1] = 0xFFFFFF, nav[2] = 0xF0F0F0;
+			navHot[0] = navHot[1] = navHot[2] = 0xE5F3FF, navSel[0] = navSel[1] = 0xCCE8FF, navSel[2] = 0x99D1FF;
+			box[0] = box[1] = 0xFFFFFF, box[2] = 0x333333, boxHot[0] = boxHot[1] = 0xFFFFFF, boxHot[2] = 0x0078D7;
+			mark = 0x000000, dot[0] = dot[1] = 0x000000;
+		}
+
+		void Frame(Canvas &cv, int titleH, int border, const std::wstring &title) override
+		{
+			cv.RoundRect(0, 0, cv.w, cv.h, 0, 0xFFFFFF, 0xFFFFFF, 255);
+			cv.RoundFrame(0, 0, cv.w, cv.h, 0, 0x6E6E6E, 200);
+			text->Draw(cv, S(10), (titleH - text->Measure(title).cy) / 2, title, 0x000000, false, cv.w - S(160));
+			(void)border;
+		}
+
+		void CaptionButton(Canvas &cv, RECT rc, bool hover, CaptionKind kind) override
+		{
+			int w = rc.right - rc.left, h = rc.bottom - rc.top;
+			bool close = kind == CaptionClose;
+			if (hover) cv.RoundRect(rc.left, rc.top, w, h, 0, close ? 0xE81123 : 0xE5E5E5, close ? 0xE81123 : 0xE5E5E5, 255);
+			Glyph(cv, rc.left + w / 2, rc.top + h / 2, kind, close && hover ? 0xFFFFFF : 0x000000, S(10), 1);
+		}
+
+		void Button(Canvas &cv, int x, int y, int w, int h, int state) override
+		{
+			static const uint32_t fill[] = { 0xE1E1E1, 0xE5F1FB, 0xCCE4F7 }, edge[] = { 0xADADAD, 0x0078D7, 0x005499 };
+			cv.RoundRect(x, y, w, h, 0, fill[state], fill[state], 255);
+			cv.RoundFrame(x, y, w, h, 0, edge[state], 255);
+		}
+	};
+
+	// Classic Mac OS (Platinum): grey windows, a ridged title bar with the name centred on a plain patch, a close
+	// box on the left, zoom and collapse boxes on the right, black-edged rounded buttons.
+	struct ClassicMac : Theme
+	{
+		ClassicMac()
+		{
+			name = L"Classic Mac";
+			page = 0xDDDDDD, pressedInk = 0xFFFFFF, heading = 0x000000, navInk = 0x000000, edge = 0x666666, groupEdge = 0x888888, strip = 0xDDDDDD;
+			tabOff[0] = 0xCCCCCC, tabOff[1] = 0xBBBBBB, tabHot[0] = 0xE6E6E6, tabHot[1] = 0xD0D0D0, tabHotEdge = 0x000000;
+			status[0] = status[1] = 0xDDDDDD, status[2] = 0x888888;
+			nav[0] = nav[1] = 0xEEEEEE, nav[2] = 0x888888;
+			navHot[0] = navHot[1] = 0xE0E0F0, navHot[2] = 0xB0B0D0, navSel[0] = navSel[1] = 0xCCCCFF, navSel[2] = 0x666699;
+			box[0] = box[1] = 0xFFFFFF, box[2] = 0x000000, boxHot[0] = boxHot[1] = 0xEEEEEE, boxHot[2] = 0x000000;
+			mark = 0x000000, dot[0] = dot[1] = 0x000000;
+			radius = 4, boxRadius = 0;
+			capW[0] = capW[1] = capW[2] = 13, capH = 13, capTop = 8, capGap = 5, capInset = 8;
+			capLeft[CaptionClose] = true;
+		}
+
+		void Frame(Canvas &cv, int titleH, int border, const std::wstring &title) override
+		{
+			cv.RoundRect(0, 0, cv.w, cv.h, 0, page, page, 255);
+			cv.RoundFrame(1, 1, cv.w - 2, cv.h - 2, 0, 0xFFFFFF, 220);
+			cv.RoundFrame(0, 0, cv.w, cv.h, 0, 0x000000, 255);
+			// the ridges
+			for (int y = S(6); y < titleH - S(6); y += 2)
+				for (int x = S(5); x < cv.w - S(5); x++)
+				{
+					cv.Blend(x, y, 0xFFFFFF, 255);
+					cv.Blend(x, y + 1, 0x999999, 255);
+				}
+			auto size = text->Measure(title, true);
+			int tx = std::max(S(30), (cv.w - int(size.cx)) / 2);
+			cv.RoundRect(tx - S(8), S(4), std::min(int(size.cx), cv.w - S(110)) + S(16), titleH - S(8), 0, page, page, 255);
+			text->Draw(cv, tx, (titleH - size.cy) / 2, title, 0x000000, true, cv.w - S(110));
+			cv.RoundFrame(border - 1, titleH - 1, cv.w - 2 * border + 2, cv.h - titleH - border + 2, 0, 0x888888, 255);
+		}
+
+		void CaptionButton(Canvas &cv, RECT rc, bool hover, CaptionKind kind) override
+		{
+			int w = rc.right - rc.left, h = rc.bottom - rc.top;
+			cv.RoundRect(rc.left - S(3), rc.top - S(2), w + S(6), h + S(4), 0, page, page, 255); // clear of the ridges
+			cv.RoundRect(rc.left, rc.top, w, h, 0, hover ? 0x999999 : 0xEEEEEE, hover ? 0x777777 : 0xBBBBBB, 255);
+			cv.RoundFrame(rc.left, rc.top, w, h, 0, 0x000000, 255);
+			if (kind == CaptionMax) cv.RoundFrame(rc.left, rc.top, w / 2 + 1, h / 2 + 1, 0, 0x000000, 255);
+			if (kind == CaptionMin)
+				for (int i = 0; i < 2; i++) cv.RoundRect(rc.left, rc.top + h / 2 - S(1) + i * S(2), w, 1, 0, 0x000000, 0x000000, 255);
+		}
+
+		void Button(Canvas &cv, int x, int y, int w, int h, int state) override
+		{
+			static const uint32_t top[] = { 0xEEEEEE, 0xF6F6F6, 0x666666 }, bottom[] = { 0xCCCCCC, 0xD8D8D8, 0x444444 };
+			int r = S(4);
+			cv.RoundRect(x, y, w, h, r, top[state], bottom[state], 255);
+			cv.RoundFrame(x, y, w, h, r, 0x000000, 255);
+			if (state != 2) cv.RoundFrame(x + 1, y + 1, w - 2, h - 2, r - 1, 0xFFFFFF, 150);
+		}
+
+		void Popup(Canvas &cv) override
+		{
+			cv.RoundRect(0, 0, cv.w, cv.h, 0, page, page, 255);
+			cv.RoundFrame(0, 0, cv.w, cv.h, 0, 0x000000, 255);
+			cv.RoundFrame(1, 1, cv.w - 2, cv.h - 2, 0, 0xFFFFFF, 220);
+		}
+	};
+
+	// Modern macOS: a light grey window with big rounded corners, the three coloured lights on the left, a centred
+	// title, white rounded buttons that turn the accent blue when picked, a segmented control for tabs.
+	struct ModernMac : Theme
+	{
+		ModernMac()
+		{
+			name = L"macOS";
+			page = 0xFFFFFF, pressedInk = 0xFFFFFF, heading = 0x6E6E73, navInk = 0x000000, edge = 0xD0D0D0, groupEdge = 0xDCDCDC, strip = 0xECECEC;
+			segmentTabs = true;
+			status[0] = status[1] = 0xECECEC, status[2] = 0xD8D8D8;
+			nav[0] = nav[1] = 0xE8E8EC, nav[2] = 0xD8D8D8;
+			navHot[0] = navHot[1] = navHot[2] = 0xDCDCE0, navSel[0] = navSel[1] = navSel[2] = 0xCFCFD5;
+			box[0] = box[1] = 0xFFFFFF, box[2] = 0xBFBFBF, boxHot[0] = boxHot[1] = 0xFFFFFF, boxHot[2] = 0x9A9A9A;
+			boxOn = 0x007AFF, mark = 0xFFFFFF, dot[0] = dot[1] = 0xFFFFFF;
+			radius = 10, boxRadius = 3;
+			capW[0] = capW[1] = capW[2] = 12, capH = 12, capTop = 8, capGap = 8, capInset = 12;
+			capLeft[0] = capLeft[1] = capLeft[2] = true;
+		}
+
+		void Frame(Canvas &cv, int titleH, int border, const std::wstring &title) override
+		{
+			int r = S(10);
+			cv.RoundRect(0, 0, cv.w, cv.h, r, 0xEDEDED, 0xE6E6E6, 255);
+			cv.RoundFrame(0, 0, cv.w, cv.h, r, 0x000000, 60);
+			cv.RoundFrame(1, 1, cv.w - 2, cv.h - 2, r - 1, 0xFFFFFF, 110);
+			auto size = text->Measure(title, true);
+			text->Draw(cv, std::max(S(80), (cv.w - int(size.cx)) / 2), (titleH - size.cy) / 2, title, 0x4D4D4D, true, cv.w - S(160));
+			cv.RoundFrame(border - 1, titleH - 1, cv.w - 2 * border + 2, cv.h - titleH - border + 2, 0, 0xD0D0D0, 255);
+		}
+
+		void CaptionButton(Canvas &cv, RECT rc, bool hover, CaptionKind kind) override
+		{
+			static const uint32_t fill[] = { 0xFEBC2E, 0x28C840, 0xFF5F57 }, rim[] = { 0xDEA123, 0x1AAB29, 0xE0443E }, ink[] = { 0x985712, 0x0B650D, 0x4D0000 };
+			int d = rc.right - rc.left;
+			cv.RoundRect(rc.left, rc.top, d, d, d / 2, fill[kind], fill[kind], 255);
+			cv.RoundFrame(rc.left, rc.top, d, d, d / 2, rim[kind], 255);
+			if (hover) Glyph(cv, rc.left + d / 2, rc.top + d / 2, kind, ink[kind], S(6), std::max(1, S(1.2f)), true);
+		}
+
+		void Button(Canvas &cv, int x, int y, int w, int h, int state) override
+		{
+			static const uint32_t top[] = { 0xFFFFFF, 0xF5F5F5, 0x3B95FF }, bottom[] = { 0xFFFFFF, 0xF0F0F0, 0x0A6CF0 }, edge[] = { 0xC4C4C4, 0xB4B4B4, 0x0A62D8 };
+			int r = S(5);
+			cv.RoundRect(x, y, w, h, r, top[state], bottom[state], 255);
+			cv.RoundFrame(x, y, w, h, r, edge[state], 255);
+		}
+
+		void Popup(Canvas &cv) override
+		{
+			cv.RoundRect(0, 0, cv.w, cv.h, S(10), 0xF2F2F2, 0xF2F2F2, 245);
+			cv.RoundFrame(0, 0, cv.w, cv.h, S(10), 0x000000, 45);
+		}
+	};
+
+	void Line(Canvas &cv, int x, int y, int w, int h, uint32_t c)
+	{
+		cv.RoundRect(x, y, w, h, 0, c, c, 255);
 	}
+
+	// The Windows 9x 3D edge: raised (buttons, windows) or sunken (fields, pressed buttons).
+	void Bevel(Canvas &cv, int x, int y, int w, int h, bool sunken)
+	{
+		uint32_t o1 = sunken ? 0x808080 : 0xFFFFFF, o2 = sunken ? 0xFFFFFF : 0x000000, i1 = sunken ? 0x000000 : 0xDFDFDF, i2 = sunken ? 0xDFDFDF : 0x808080;
+		Line(cv, x, y, w, 1, o1), Line(cv, x, y, 1, h, o1), Line(cv, x, y + h - 1, w, 1, o2), Line(cv, x + w - 1, y, 1, h, o2);
+		Line(cv, x + 1, y + 1, w - 2, 1, i1), Line(cv, x + 1, y + 1, 1, h - 2, i1), Line(cv, x + 1, y + h - 2, w - 2, 1, i2), Line(cv, x + w - 2, y + 1, 1, h - 2, i2);
+	}
+
+	// Windows 98: grey 3D chrome, a navy-to-blue title bar, small bevelled caption buttons.
+	struct NinetyEight : Theme
+	{
+		uint32_t titleRight = 0x1084D0; // the title bar fades from navy to this
+
+		NinetyEight()
+		{
+			name = L"Windows 98";
+			page = 0xC0C0C0, heading = 0x000000, navInk = 0x000000, navSelInk = 0xFFFFFF, edge = 0x808080, groupEdge = 0x808080, strip = 0xC0C0C0;
+			tabOff[0] = tabOff[1] = tabHot[0] = tabHot[1] = 0xC0C0C0, tabHotEdge = 0x808080;
+			status[0] = status[1] = 0xC0C0C0, status[2] = 0x808080;
+			nav[0] = nav[1] = 0xFFFFFF, nav[2] = 0x808080;
+			navHot[0] = navHot[1] = navHot[2] = 0xFFFFFF, navSel[0] = navSel[1] = navSel[2] = 0x000080;
+			box[0] = box[1] = 0xFFFFFF, box[2] = 0x808080, boxHot[0] = boxHot[1] = 0xFFFFFF, boxHot[2] = 0x000000;
+			mark = 0x000000, dot[0] = dot[1] = 0x000000;
+			radius = 0, boxRadius = 0;
+			capW[0] = capW[1] = capW[2] = 16, capH = 14, capTop = 8, capGap = 2, capInset = 8;
+		}
+
+		void Frame(Canvas &cv, int titleH, int border, const std::wstring &title) override
+		{
+			cv.RoundRect(0, 0, cv.w, cv.h, 0, page, page, 255);
+			Bevel(cv, 0, 0, cv.w, cv.h, false);
+			int bx = S(4), by = S(4), bw = cv.w - 2 * bx, bh = titleH - S(6);
+			for (int i = 0; i < bw; i++)
+			{
+				float t = bw > 1 ? float(i) / (bw - 1) : 0;
+				auto ch = [t](int a, int b) { return uint32_t(a + (b - a) * t); };
+				Line(cv, bx + i, by, 1, bh, (ch(0x00, int(titleRight >> 16)) << 16) | (ch(0x00, int(titleRight >> 8 & 0xFF)) << 8) | ch(0x80, int(titleRight & 0xFF)));
+			}
+			text->Draw(cv, S(8), by + (bh - text->Measure(title, true).cy) / 2, title, 0xFFFFFF, true, cv.w - S(90));
+			Bevel(cv, border - 2, titleH - 2, cv.w - 2 * border + 4, cv.h - titleH - border + 4, true);
+		}
+
+		void CaptionButton(Canvas &cv, RECT rc, bool hover, CaptionKind kind) override
+		{
+			int w = rc.right - rc.left, h = rc.bottom - rc.top;
+			Line(cv, rc.left, rc.top, w, h, page);
+			Bevel(cv, rc.left, rc.top, w, h, false);
+			(void)hover; // 98 had no hover
+			Glyph(cv, rc.left + w / 2, rc.top + h / 2 + (kind == CaptionMin ? S(2) : 0), kind, 0x000000, S(7), 2);
+		}
+
+		void Button(Canvas &cv, int x, int y, int w, int h, int state) override
+		{
+			Line(cv, x, y, w, h, page);
+			Bevel(cv, x, y, w, h, state == 2);
+		}
+
+		void Popup(Canvas &cv) override
+		{
+			Line(cv, 0, 0, cv.w, cv.h, page);
+			Bevel(cv, 0, 0, cv.w, cv.h, false);
+		}
+	};
+
+	// Windows XP Luna: a rounded blue title bar with bold white text, blue and red rounded caption buttons, white
+	// buttons with an orange glow on hover, green ticks.
+	struct XP : Theme
+	{
+		XP()
+		{
+			name = L"Windows XP";
+			page = 0xFCFCFE, heading = 0x0046D5, navInk = 0x215DC6, navSelInk = 0xFFFFFF, edge = 0x919B9C, groupEdge = 0xD0D0BF, strip = 0xECE9D8;
+			tabOff[0] = 0xFEFEFE, tabOff[1] = 0xECEBE6, tabHot[0] = 0xFFFFFF, tabHot[1] = 0xF4F3EE, tabHotEdge = 0xE68B2C;
+			status[0] = status[1] = 0xECE9D8, status[2] = 0xACA899;
+			nav[0] = 0xD6DFF7, nav[1] = 0xC6D3F7, nav[2] = 0x7BA2E7;
+			navHot[0] = navHot[1] = 0xE8EEFB, navHot[2] = 0x7BA2E7, navSel[0] = navSel[1] = navSel[2] = 0x316AC5;
+			box[0] = 0xDCDCD7, box[1] = 0xFFFFFF, box[2] = 0x1C5180, boxHot[0] = 0xFEDF9C, boxHot[1] = 0xFFFFFF, boxHot[2] = 0x1C5180;
+			mark = 0x21A121, dot[0] = 0x55D551, dot[1] = 0x0E8E0A;
+			radius = 3, boxRadius = 0;
+			capW[0] = capW[1] = capW[2] = 21, capH = 21, capTop = 4, capGap = 2, capInset = 5;
+		}
+
+		void Frame(Canvas &cv, int titleH, int border, const std::wstring &title) override
+		{
+			int r = S(8);
+			cv.RoundRect(0, 0, cv.w, cv.h, r, 0x0058EE, 0x0046D5, 255, true);
+			cv.RoundRect(1, 1, cv.w - 2, S(6), r, 0x8CBAFF, 0x2D7BF6, 255, true); // the light top edge
+			cv.RoundRect(0, titleH - S(4), cv.w, S(4), 0, 0x0A50D8, 0x0040C0, 255);
+			cv.RoundFrame(0, 0, cv.w, cv.h, r, 0x001EA0, 255, true);
+			auto size = text->Measure(title, true);
+			int ty = (titleH - size.cy) / 2;
+			text->Draw(cv, S(9) + 1, ty + 1, title, 0x0A1883, true, cv.w - S(100));
+			text->Draw(cv, S(9), ty, title, 0xFFFFFF, true, cv.w - S(100));
+			cv.RoundFrame(border - 1, titleH - 1, cv.w - 2 * border + 2, cv.h - titleH - border + 2, 0, 0x001EA0, 255);
+		}
+
+		void CaptionButton(Canvas &cv, RECT rc, bool hover, CaptionKind kind) override
+		{
+			int w = rc.right - rc.left, h = rc.bottom - rc.top;
+			bool close = kind == CaptionClose;
+			uint32_t top = close ? (hover ? 0xF5A189 : 0xE5866A) : (hover ? 0x8DBBFF : 0x6A9EFC);
+			uint32_t bottom = close ? (hover ? 0xD0482A : 0xC2391C) : (hover ? 0x2A6CF0 : 0x1B57D9);
+			cv.RoundRect(rc.left, rc.top, w, h, S(3), top, bottom, 255);
+			cv.RoundFrame(rc.left, rc.top, w, h, S(3), 0xFFFFFF, 230);
+			int cx = rc.left + w / 2, cy = rc.top + h / 2;
+			if (kind == CaptionMax)
+			{
+				int k = S(4.5f);
+				cv.RoundFrame(cx - k, cy - k, 2 * k + 1, 2 * k + 1, 0, 0xFFFFFF, 255);
+				Line(cv, cx - k, cy - k, 2 * k + 1, S(2.5f), 0xFFFFFF);
+			}
+			else Glyph(cv, cx, cy + (kind == CaptionMin ? S(4) : 0), kind, 0xFFFFFF, S(close ? 8.f : 7.f), S(2.5f));
+		}
+
+		void Button(Canvas &cv, int x, int y, int w, int h, int state) override
+		{
+			int r = S(3);
+			cv.RoundRect(x, y, w, h, r, state == 2 ? 0xE6E6E0 : 0xFFFFFF, state == 2 ? 0xE2E2DA : 0xECEBE6, 255);
+			cv.RoundFrame(x, y, w, h, r, 0x003C74, 255);
+			if (state == 1)
+			{
+				cv.RoundFrame(x + 1, y + 1, w - 2, h - 2, r - 1, 0xF8B330, 255);
+				cv.RoundFrame(x + 2, y + 2, w - 4, h - 4, std::max(0, r - 2), 0xFDD889, 255);
+			}
+		}
+
+		void Popup(Canvas &cv) override
+		{
+			cv.RoundRect(0, 0, cv.w, cv.h, 0, 0xFFFFE1, 0xFFFFE1, 255);
+			cv.RoundFrame(0, 0, cv.w, cv.h, 0, 0x000000, 255);
+		}
+	};
+
+	// TempleOS: white windows with a double blue border, blue text, [X]-style caption buttons in text.
+	struct Temple : Theme
+	{
+		static constexpr uint32_t blue = 0x0000AA, cyan = 0x55FFFF;
+
+		Temple()
+		{
+			name = L"TempleOS";
+			ink = blue, pressedInk = 0xFFFFFF, heading = blue, navInk = blue, navSelInk = 0xFFFFFF, edge = blue, groupEdge = blue, strip = 0xFFFFFF;
+			tabOff[0] = tabOff[1] = 0xFFFFFF, tabHot[0] = tabHot[1] = cyan, tabHotEdge = blue;
+			status[0] = status[1] = 0xFFFFFF, status[2] = blue;
+			nav[0] = nav[1] = 0xFFFFFF, nav[2] = blue;
+			navHot[0] = navHot[1] = cyan, navHot[2] = blue, navSel[0] = navSel[1] = navSel[2] = blue;
+			box[0] = box[1] = 0xFFFFFF, box[2] = blue, boxHot[0] = boxHot[1] = cyan, boxHot[2] = blue;
+			mark = blue, dot[0] = dot[1] = blue;
+			radius = 0, boxRadius = 0;
+			capW[0] = capW[1] = capW[2] = 24, capH = 20, capTop = 4, capGap = 2, capInset = 10;
+		}
+
+		void Frame(Canvas &cv, int titleH, int border, const std::wstring &title) override
+		{
+			cv.RoundRect(0, 0, cv.w, cv.h, 0, 0xFFFFFF, 0xFFFFFF, 255);
+			cv.RoundFrame(0, 0, cv.w, cv.h, 0, blue, 255);
+			cv.RoundFrame(S(3), S(3), cv.w - 2 * S(3), cv.h - 2 * S(3), 0, blue, 255);
+			auto size = text->Measure(title);
+			int tx = std::max(S(12), (cv.w - int(size.cx)) / 2);
+			Line(cv, tx - S(6), 0, std::min(int(size.cx), cv.w - S(120)) + S(12), S(4), 0xFFFFFF); // the title sits in the border
+			text->Draw(cv, tx, (titleH - size.cy) / 2, title, blue, false, cv.w - S(120));
+			cv.RoundFrame(border - 1, titleH - 1, cv.w - 2 * border + 2, cv.h - titleH - border + 2, 0, blue, 255);
+		}
+
+		void CaptionButton(Canvas &cv, RECT rc, bool hover, CaptionKind kind) override
+		{
+			static const wchar_t *labels[] = { L"[_]", L"[\u25A1]", L"[X]" };
+			int w = rc.right - rc.left, h = rc.bottom - rc.top;
+			if (hover) Line(cv, rc.left, rc.top, w, h, blue);
+			auto size = text->Measure(labels[kind]);
+			text->Draw(cv, rc.left + (w - size.cx) / 2, rc.top + (h - size.cy) / 2, labels[kind], hover ? 0xFFFFFF : blue);
+		}
+
+		void Button(Canvas &cv, int x, int y, int w, int h, int state) override
+		{
+			uint32_t fill = state == 2 ? blue : state == 1 ? cyan : 0xFFFFFF;
+			Line(cv, x, y, w, h, fill);
+			cv.RoundFrame(x, y, w, h, 0, blue, 255);
+		}
+
+		void Popup(Canvas &cv) override
+		{
+			Line(cv, 0, 0, cv.w, cv.h, 0xFFFFFF);
+			cv.RoundFrame(0, 0, cv.w, cv.h, 0, blue, 255);
+			cv.RoundFrame(S(3), S(3), cv.w - 2 * S(3), cv.h - 2 * S(3), 0, blue, 255);
+		}
+	};
+
+	// Windows 95: 98 without the title gradient.
+	struct NinetyFive : NinetyEight
+	{
+		NinetyFive()
+		{
+			name = L"Windows 95";
+			titleRight = 0x000080;
+		}
+	};
+
+	// Windows 3.1: a grey sizing border, a solid navy title bar with the name centred, the control-menu box on the
+	// left, arrow buttons on the right, white dialogs.
+	struct Three : Theme
+	{
+		Three()
+		{
+			name = L"Windows 3.1";
+			heading = 0x000000, navInk = 0x000000, navSelInk = 0xFFFFFF, edge = 0x000000, groupEdge = 0x000000, strip = 0xFFFFFF;
+			tabOff[0] = tabOff[1] = 0xC0C0C0, tabHot[0] = tabHot[1] = 0xC0C0C0, tabHotEdge = 0x000000;
+			status[0] = status[1] = 0xFFFFFF, status[2] = 0x000000;
+			nav[0] = nav[1] = 0xFFFFFF, nav[2] = 0x000000;
+			navHot[0] = navHot[1] = navHot[2] = 0xFFFFFF, navSel[0] = navSel[1] = navSel[2] = 0x000080;
+			box[0] = box[1] = 0xFFFFFF, box[2] = 0x000000, boxHot[0] = boxHot[1] = 0xFFFFFF, boxHot[2] = 0x000000;
+			mark = 0x000000, dot[0] = dot[1] = 0x000000;
+			radius = 0, boxRadius = 0;
+			capW[0] = capW[1] = capW[2] = 20, capH = 20, capTop = 4, capGap = 0, capInset = 4;
+			capLeft[CaptionClose] = true;
+		}
+
+		void Frame(Canvas &cv, int titleH, int border, const std::wstring &title) override
+		{
+			Line(cv, 0, 0, cv.w, cv.h, 0xC0C0C0);
+			cv.RoundFrame(0, 0, cv.w, cv.h, 0, 0x000000, 255);
+			int b = S(4);
+			Line(cv, b, b, cv.w - 2 * b, titleH - b, 0x000080);
+			cv.RoundFrame(b - 1, b - 1, cv.w - 2 * b + 2, titleH - b + 2, 0, 0x000000, 255);
+			auto size = text->Measure(title, true);
+			text->Draw(cv, std::max(S(30), (cv.w - int(size.cx)) / 2), b + (titleH - b - size.cy) / 2, title, 0xFFFFFF, true, cv.w - S(110));
+			cv.RoundFrame(border - 1, titleH - 1, cv.w - 2 * border + 2, cv.h - titleH - border + 2, 0, 0x000000, 255);
+		}
+
+		void CaptionButton(Canvas &cv, RECT rc, bool hover, CaptionKind kind) override
+		{
+			int w = rc.right - rc.left, h = rc.bottom - rc.top, cx = rc.left + w / 2, cy = rc.top + h / 2;
+			(void)hover;
+			Line(cv, rc.left, rc.top, w, h, 0xC0C0C0);
+			cv.RoundFrame(rc.left, rc.top, w, h, 0, 0x000000, 255);
+			if (kind == CaptionClose)
+			{
+				// the control-menu box: a white bar with a dark shadow
+				Line(cv, cx - S(6) + 1, cy - 1 + 1, S(12), S(3), 0x808080);
+				Line(cv, cx - S(6), cy - 1, S(12), S(3), 0xFFFFFF);
+				cv.RoundFrame(cx - S(6), cy - 1, S(12), S(3), 0, 0x000000, 255);
+				return;
+			}
+			Bevel(cv, rc.left + 1, rc.top + 1, w - 2, h - 2, false);
+			int k = S(4);
+			for (int i = 0; i <= k; i++) // an arrow: down to minimise, up to maximise
+				Line(cv, cx - i, kind == CaptionMin ? cy + k / 2 - i : cy - k / 2 + i, 2 * i + 1, 1, 0x000000);
+		}
+
+		void Button(Canvas &cv, int x, int y, int w, int h, int state) override
+		{
+			Line(cv, x, y, w, h, 0xC0C0C0);
+			cv.RoundFrame(x, y, w, h, S(2), 0x000000, 255);
+			uint32_t lt = state == 2 ? 0x808080 : 0xFFFFFF, rb = state == 2 ? 0xC0C0C0 : 0x808080;
+			Line(cv, x + 1, y + 1, w - 2, S(2), lt), Line(cv, x + 1, y + 1, S(2), h - 2, lt);
+			Line(cv, x + 1, y + h - 1 - S(2), w - 2, S(2), rb), Line(cv, x + w - 1 - S(2), y + 1, S(2), h - 2, rb);
+		}
+
+		void Popup(Canvas &cv) override
+		{
+			Line(cv, 0, 0, cv.w, cv.h, 0xFFFFFF);
+			cv.RoundFrame(0, 0, cv.w, cv.h, 0, 0x000000, 255);
+			cv.RoundFrame(1, 1, cv.w - 2, cv.h - 2, 0, 0x000000, 255);
+		}
+	};
+
+	// Windows 11: Windows 10's layout with rounded corners, a light Mica grey, rounded controls and the accent blue on
+	// picked buttons and ticked boxes.
+	struct Eleven : Ten
+	{
+		Eleven()
+		{
+			name = L"Windows 11";
+			radius = 8, boxRadius = 4, pressedInk = 0xFFFFFF, strip = 0xF3F3F3, edge = 0xE5E5E5;
+			tabOff[0] = tabOff[1] = 0xF3F3F3, tabHot[0] = tabHot[1] = 0xEAEAEA, tabHotEdge = 0xE5E5E5;
+			status[0] = status[1] = 0xF3F3F3, status[2] = 0xE5E5E5;
+			nav[0] = nav[1] = 0xF3F3F3, nav[2] = 0xE5E5E5;
+			navHot[0] = navHot[1] = navHot[2] = 0xEAEAEA, navSel[0] = navSel[1] = navSel[2] = 0xE0E0E0;
+			box[0] = box[1] = 0xFDFDFD, box[2] = 0x8A8A8A, boxHot[0] = boxHot[1] = 0xF3F3F3, boxHot[2] = 0x8A8A8A;
+			boxOn = 0x005FB8, mark = 0xFFFFFF, dot[0] = dot[1] = 0xFFFFFF;
+		}
+
+		void Frame(Canvas &cv, int titleH, int border, const std::wstring &title) override
+		{
+			int r = S(8);
+			cv.RoundRect(0, 0, cv.w, cv.h, r, 0xF3F3F3, 0xF3F3F3, 255);
+			cv.RoundFrame(0, 0, cv.w, cv.h, r, 0x000000, 60);
+			text->Draw(cv, S(12), (titleH - text->Measure(title).cy) / 2, title, 0x000000, false, cv.w - S(160));
+			(void)border;
+		}
+
+		void CaptionButton(Canvas &cv, RECT rc, bool hover, CaptionKind kind) override
+		{
+			int w = rc.right - rc.left, h = rc.bottom - rc.top;
+			bool close = kind == CaptionClose;
+			if (hover)
+			{
+				uint32_t c = close ? 0xC42B1C : 0xE9E9E9;
+				cv.RoundRect(rc.left, rc.top, w, h, close ? S(8) : 0, c, c, 255, true); // the close button follows the corner
+				if (close) Line(cv, rc.left, rc.top, w - S(8), h, c);
+			}
+			Glyph(cv, rc.left + w / 2, rc.top + h / 2, kind, close && hover ? 0xFFFFFF : 0x000000, S(10), 1);
+		}
+
+		void Button(Canvas &cv, int x, int y, int w, int h, int state) override
+		{
+			int r = S(4);
+			uint32_t fill = state == 2 ? 0x005FB8 : state == 1 ? 0xF6F6F6 : 0xFBFBFB;
+			cv.RoundRect(x, y, w, h, r, fill, fill, 255);
+			cv.RoundFrame(x, y, w, h, r, state == 2 ? 0x005FB8 : 0xE5E5E5, 255);
+			if (state != 2) Line(cv, x + r, y + h - 1, w - 2 * r, 1, 0xCCCCCC); // the darker bottom edge
+		}
+
+		void Popup(Canvas &cv) override
+		{
+			cv.RoundRect(0, 0, cv.w, cv.h, S(8), 0xF9F9F9, 0xF9F9F9, 250);
+			cv.RoundFrame(0, 0, cv.w, cv.h, S(8), 0x000000, 50);
+		}
+	};
+
+	Three threeTheme;
+	NinetyFive ninetyFiveTheme;
+	NinetyEight ninetyEightTheme;
+	XP xpTheme;
+	Vista vistaTheme;
+	Seven sevenTheme;
+	Eight eightTheme;
+	Ten tenTheme;
+	Eleven elevenTheme;
+	ClassicMac classicMacTheme;
+	ModernMac modernMacTheme;
+	Temple templeTheme;
+	Theme *const themes[] = { &threeTheme, &ninetyFiveTheme, &ninetyEightTheme, &xpTheme, &vistaTheme, &sevenTheme, &eightTheme, &tenTheme, &elevenTheme, &classicMacTheme, &modernMacTheme, &templeTheme };
+	constexpr int defaultTheme = 4; // Vista
+	Theme *theme = &vistaTheme;
 
 	// A top-level layered window that repaints its Canvas whenever Invalidate() is called.
 	struct Panel
@@ -597,6 +1260,7 @@ namespace
 	// secondary, as in TPT. The other tabs are immediate-mode Vista controls: each paint rebuilds the list of
 	// clickable rectangles (hits) that the mouse handler uses.
 	void OpenTorn(int tab);
+	void ThemeChanged(); // repaint every window
 	void Restart(int scale, bool windowed, bool force = false);
 	void LoadSceneTiles();
 
@@ -657,20 +1321,9 @@ namespace
 			return out;
 		}
 
-		RECT CloseRect()
-		{
-			return { cv.w - border - S(43), 1, cv.w - border, 1 + S(18) };
-		}
-		RECT MaxRect()
-		{
-			auto close = CloseRect();
-			return { close.left - S(27), close.top, close.left, close.bottom };
-		}
-		RECT MinRect()
-		{
-			auto max = MaxRect();
-			return { max.left - S(27), max.top, max.left, max.bottom };
-		}
+		RECT CloseRect() { return theme->CaptionRect(cv.w, border, CaptionClose); }
+		RECT MaxRect() { return theme->CaptionRect(cv.w, border, CaptionMax); }
+		RECT MinRect() { return theme->CaptionRect(cv.w, border, CaptionMin); }
 		// Below the tabs, above the status bar.
 		RECT Content()
 		{
@@ -711,14 +1364,14 @@ namespace
 			return rc;
 		}
 
-		// --- Vista controls; each draws itself and registers its hit rectangle.
+		// --- controls in the theme's look; each draws itself and registers its hit rectangle.
 
 		void PushButton(int x, int y, int w, const std::wstring &label, std::function<void()> action, const std::wstring &tip = L"", bool pressed = false)
 		{
 			RECT rc{ x, y, x + w, y + S(23) };
-			vista::Button(cv, x, y, w, S(23), pressed ? 2 : (Hovered(rc) ? 1 : 0));
+			theme->Button(cv, x, y, w, S(23), pressed ? 2 : (Hovered(rc) ? 1 : 0));
 			auto size = text->Measure(label);
-			text->Draw(cv, x + std::max(S(3), int(w - size.cx) / 2), y + (S(23) - size.cy) / 2, label, 0x000000, false, w - S(6));
+			text->Draw(cv, x + std::max(S(3), int(w - size.cx) / 2), y + (S(23) - size.cy) / 2, label, pressed ? theme->pressedInk : theme->ink, false, w - S(6));
 			Add(rc, std::move(action), tip);
 		}
 
@@ -728,35 +1381,37 @@ namespace
 			int b = S(13), w = b + S(6) + text->Measure(label).cx;
 			RECT rc{ x, y, x + w, y + S(20) };
 			bool hot = Hovered(rc);
-			int by = y + (S(20) - b) / 2, r = round ? b / 2 : S(2);
-			cv.RoundRect(x, by, b, b, r, hot ? 0xDEF3FD : 0xF4F4F4, hot ? 0xB1DFFD : 0xDEDEDE, 255);
-			cv.RoundFrame(x, by, b, b, r, hot ? 0x3C7FB1 : 0x8E8F8F, 255);
+			int by = y + (S(20) - b) / 2, r = round ? b / 2 : S(float(theme->boxRadius));
+			auto *c = hot ? theme->boxHot : theme->box;
+			bool filled = on && theme->boxOn;
+			cv.RoundRect(x, by, b, b, r, filled ? theme->boxOn : c[0], filled ? theme->boxOn : c[1], 255);
+			cv.RoundFrame(x, by, b, b, r, filled ? theme->boxOn : c[2], 255);
 			if (on && round)
 			{
 				int d = b / 2;
-				cv.RoundRect(x + (b - d) / 2, by + (b - d) / 2, d, d, d / 2, 0x8AD0F2, 0x1C64B4, 255);
+				cv.RoundRect(x + (b - d) / 2, by + (b - d) / 2, d, d, d / 2, theme->dot[0], theme->dot[1], 255);
 			}
 			if (on && !round)
 			{
 				int cx = x + b / 2, cy = by + b / 2, k = S(2.5f);
 				for (int t = 0; t < S(1.6f); t++)
 				{
-					for (int i = 0; i <= k; i++) cv.Blend(cx - k - 1 + i, cy + i - 1 + t, 0x1C3D6E, 255);
-					for (int i = 0; i <= 2 * k; i++) cv.Blend(cx - 1 + i, cy + k - 1 - i + t, 0x1C3D6E, 255);
+					for (int i = 0; i <= k; i++) cv.Blend(cx - k - 1 + i, cy + i - 1 + t, theme->mark, 255);
+					for (int i = 0; i <= 2 * k; i++) cv.Blend(cx - 1 + i, cy + k - 1 - i + t, theme->mark, 255);
 				}
 			}
-			text->Draw(cv, x + b + S(6), y + (S(20) - text->Measure(label).cy) / 2, label, 0x000000);
+			text->Draw(cv, x + b + S(6), y + (S(20) - text->Measure(label).cy) / 2, label, theme->ink);
 			Add(rc, std::move(action), tip);
 			return w;
 		}
 
-		// A Vista group box: a rounded pale outline with a blue heading; returns the top of its inside.
+		// A group box: an outline with a heading; returns the top of its inside.
 		int Group(int x, int y, int w, int h, const std::wstring &title)
 		{
-			cv.RoundFrame(x, y + S(8), w, h - S(8), S(3), 0xD5DFE5, 255);
+			cv.RoundFrame(x, y + S(8), w, h - S(8), S(float(std::min(theme->radius, 6))), theme->groupEdge, 255);
 			auto size = text->Measure(title);
-			cv.RoundRect(x + S(8), y, size.cx + S(8), size.cy, 0, 0xFFFFFF, 0xFFFFFF, 255);
-			text->Draw(cv, x + S(12), y, title, 0x1E395B);
+			cv.RoundRect(x + S(8), y, size.cx + S(8), size.cy, 0, theme->page, theme->page, 255);
+			text->Draw(cv, x + S(12), y, title, theme->heading);
 			return y + size.cy + S(4);
 		}
 
@@ -770,14 +1425,14 @@ namespace
 		void PaintElements()
 		{
 			auto c = Content();
-			cv.RoundRect(c.left, c.top, navW, c.bottom - c.top, 0, 0xF1F5FB, 0xE5EDF8, 255);
-			for (int j = c.top; j < c.bottom; j++) cv.Blend(c.left + navW, j, 0xA0AFC3, 255);
+			cv.RoundRect(c.left, c.top, navW, c.bottom - c.top, 0, theme->nav[0], theme->nav[1], 255);
+			for (int j = c.top; j < c.bottom; j++) cv.Blend(c.left + navW, j, theme->nav[2], 255);
 			auto sections = Sections();
 			for (int i = 0; i < int(sections.size()); i++)
 			{
 				auto rc = NavRect(i);
-				vista::NavItem(cv, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, i == section ? 2 : (Hovered(rc) ? 1 : 0));
-				text->Draw(cv, rc.left + S(6), rc.top + S(3), Wide(sections[i]->GetDescription()), 0x1E395B, i == section, rc.right - rc.left - S(10));
+				theme->NavItem(cv, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, i == section ? 2 : (Hovered(rc) ? 1 : 0));
+				text->Draw(cv, rc.left + S(6), rc.top + S(3), Wide(sections[i]->GetDescription()), i == section && theme->navSelInk != 0xFFFFFFFF ? theme->navSelInk : theme->navInk, i == section, rc.right - rc.left - S(10));
 				Add(rc, [this, i] { section = i, scroll = 0; });
 			}
 			auto tools = Tools();
@@ -795,7 +1450,7 @@ namespace
 				bool selected = tool == primary || tool == secondary;
 				Canvas tile;
 				tile.Resize(tileW, tileH);
-				vista::Button(tile, 0, 0, tileW, tileH, selected ? 2 : (Hovered(rc) ? 1 : 0));
+				theme->Button(tile, 0, 0, tileW, tileH, selected ? 2 : (Hovered(rc) ? 1 : 0));
 				if (tool == primary) tile.RoundFrame(0, 0, tileW, tileH, S(3), 0xD02020, 255);
 				if (tool == secondary) tile.RoundFrame(1, 1, tileW - 2, tileH - 2, S(3), 0x2050D0, 255);
 				auto col = tool->Colour;
@@ -816,7 +1471,7 @@ namespace
 					tile.RoundRect(S(5), S(5), sw, sw, S(2), rgb, rgb, 255);
 					tile.RoundFrame(S(5), S(5), sw, sw, S(2), 0x404040, 200);
 				}
-				text->Draw(tile, S(9) + sw, (tileH - text->Measure(Label(tool)).cy) / 2, Label(tool), 0x000000, false, tileW - sw - S(12));
+				text->Draw(tile, S(9) + sw, (tileH - text->Measure(Label(tool)).cy) / 2, Label(tool), selected ? theme->pressedInk : theme->ink, false, tileW - sw - S(12));
 				// Copy the tile in, clipped to the tool area.
 				for (int y = 0; y < tileH; y++)
 				{
@@ -1399,23 +2054,35 @@ namespace
 			};
 			PushButton(x + S(200), top, S(40), L"\u2212", [setScale] { setScale(uiScale - 0.25f); }, L"Smaller windows and text");
 			PushButton(x + S(246), top, S(40), L"+", [setScale] { setScale(uiScale + 0.25f); }, L"Bigger windows and text");
+			y += S(116);
+			top = Group(x, y, w, S(136), L"Look");
+			int lx = x + S(12), ly = top;
+			for (int i = 0; i < int(std::size(themes)); i++)
+			{
+				if (i && i % 3 == 0) lx = x + S(12), ly += S(28);
+				lx += Toggle(lx, ly, themes[i]->name, theme == themes[i], true, [i] {
+					theme = themes[i];
+					GlobalPrefs::Ref().Set("Overlay.Theme", i);
+					ThemeChanged();
+				}, L"Windows and menus look like this system's") + S(18);
+			}
 		}
 
 		void Paint() override
 		{
 			hits.clear();
-			vista::Frame(cv, titleH, border, fixedTab >= 0 ? tabNames[fixedTab] : L"The Powder Toy");
-			vista::CaptionButton(cv, MinRect(), Hovered(MinRect()), vista::CaptionMin);
-			vista::CaptionButton(cv, MaxRect(), Hovered(MaxRect()), vista::CaptionMax);
-			vista::CaptionButton(cv, CloseRect(), Hovered(CloseRect()), vista::CaptionClose);
+			theme->Frame(cv, titleH, border, fixedTab >= 0 ? tabNames[fixedTab] : L"The Powder Toy");
+			theme->CaptionButton(cv, MinRect(), Hovered(MinRect()), CaptionMin);
+			theme->CaptionButton(cv, MaxRect(), Hovered(MaxRect()), CaptionMax);
+			theme->CaptionButton(cv, CloseRect(), Hovered(CloseRect()), CaptionClose);
 			Add(MinRect(), [this] { ShowWindow(hwnd, SW_MINIMIZE); }, L"Minimise to the taskbar");
 			Add(MaxRect(), [this] { ShowWindow(hwnd, IsZoomed(hwnd) ? SW_RESTORE : SW_MAXIMIZE); }, IsZoomed(hwnd) ? L"Restore" : L"Maximise");
 			if (fixedTab >= 0) Add(CloseRect(), [this] { closing = true; }, L"Close (the tab is still in the main window)");
 			else Add(CloseRect(), [] { OverlayWindows::TogglePalette(); }, L"Close (the tray icon or Ctrl+Alt+E brings it back)");
 
-			// The tab strip: grey tabs on the glass, the selected one white and joined to the page.
+			// The tab strip: the selected tab joined to the page.
 			int tx = border + S(4);
-			cv.RoundRect(border, titleH, cv.w - 2 * border, tabH, 0, 0xF0F0F0, 0xF0F0F0, 255);
+			cv.RoundRect(border, titleH, cv.w - 2 * border, tabH, 0, theme->strip, theme->strip, 255);
 			for (int i = 0; i < int(std::size(tabNames)); i++)
 			{
 				if (fixedTab >= 0 && i != fixedTab) continue;
@@ -1423,20 +2090,20 @@ namespace
 				bool on = i == tab;
 				RECT rc{ tx, titleH + (on ? S(2) : S(4)), tx + tw, titleH + tabH + (on ? 1 : 0) };
 				bool hot = !on && Hovered(rc);
-				cv.RoundRect(rc.left, rc.top, tw, rc.bottom - rc.top, S(3), on ? 0xFFFFFF : (hot ? 0xEAF6FD : 0xF2F2F2), on ? 0xFFFFFF : (hot ? 0xA7D9F5 : 0xE3E3E3), 255, true);
-				cv.RoundFrame(rc.left, rc.top, tw, rc.bottom - rc.top + S(3), S(3), on ? 0x898C95 : (hot ? 0x3C7FB1 : 0x898C95), 255, true);
-				text->Draw(cv, tx + S(10), rc.top + (rc.bottom - rc.top - text->Measure(tabNames[i]).cy) / 2, tabNames[i], 0x000000);
+				theme->Tab(cv, rc, on, hot);
+				text->Draw(cv, tx + S(10), rc.top + (rc.bottom - rc.top - text->Measure(tabNames[i]).cy) / 2 - (theme->segmentTabs ? S(1) : 0), tabNames[i], theme->ink);
 				if (fixedTab < 0) Add(rc, [this, i] { tab = i, scroll = 0; }, L"Right-click: open this tab in its own window", [i] { OpenTorn(i); });
 				tx += tw + S(1);
 			}
 			// The page.
 			auto c = Content();
-			cv.RoundRect(c.left, c.top, c.right - c.left, c.bottom - c.top, 0, 0xFFFFFF, 0xFFFFFF, 255);
-			for (int i = c.left; i < c.right; i++) cv.Blend(i, c.top, 0x898C95, 255);
+			cv.RoundRect(c.left, c.top, c.right - c.left, c.bottom - c.top, 0, theme->page, theme->page, 255);
+			for (int i = c.left; i < c.right; i++) cv.Blend(i, c.top, theme->edge, 255);
 			// The selected tab's bottom edge opens into the page.
 			int sx = border + S(4);
 			for (int i = 0; i < tab && fixedTab < 0; i++) sx += text->Measure(tabNames[i]).cx + S(21);
-			for (int i = sx + 1; i < sx + text->Measure(tabNames[tab]).cx + S(19); i++) cv.Blend(i, c.top, 0xFFFFFF, 255);
+			if (!theme->segmentTabs)
+				for (int i = sx + 1; i < sx + text->Measure(tabNames[tab]).cx + S(19); i++) cv.Blend(i, c.top, theme->page, 255);
 
 			// Form pages scroll: rows outside the page are put back after, and controls there dropped.
 			bool form = tab >= 1 && tab <= 5;
@@ -1467,11 +2134,11 @@ namespace
 
 			// The status bar: what the hovered control does.
 			int sy = cv.h - border - statusH;
-			cv.RoundRect(border, sy, cv.w - 2 * border, statusH, 0, 0xF7F9FC, 0xDCE5F1, 255);
-			for (int i = border; i < cv.w - border; i++) cv.Blend(i, sy, 0xA0AFC3, 255);
+			cv.RoundRect(border, sy, cv.w - 2 * border, statusH, 0, theme->status[0], theme->status[1], 255);
+			for (int i = border; i < cv.w - border; i++) cv.Blend(i, sy, theme->status[2], 255);
 			if (hover >= 0 && hover < int(hits.size()))
 			{
-				text->Draw(cv, border + S(8), sy + S(3), hits[hover].tip, 0x1E395B, false, cv.w - 2 * border - S(16));
+				text->Draw(cv, border + S(8), sy + S(3), hits[hover].tip, theme->heading, false, cv.w - 2 * border - S(16));
 			}
 		}
 
@@ -1571,13 +2238,9 @@ namespace
 
 		void Paint() override
 		{
-			int r = S(6);
-			cv.RoundRect(0, 0, cv.w, cv.h, r, vista::glassTop, vista::glassBottom, vista::glassAlpha);
-			cv.RoundRect(1, 1, cv.w - 2, cv.h / 2, r, 0xFFFFFF, 0xFFFFFF, 60, true);
-			cv.RoundFrame(0, 0, cv.w, cv.h, r, 0x000000, 170);
-			cv.RoundFrame(1, 1, cv.w - 2, cv.h - 2, r - 1, 0xFFFFFF, 110);
+			theme->Popup(cv);
 			auto size = text->Measure(message, true);
-			text->Draw(cv, (cv.w - size.cx) / 2, (cv.h - size.cy) / 2, message, 0x000000, true, cv.w, S(5));
+			text->Draw(cv, (cv.w - size.cx) / 2, (cv.h - size.cy) / 2, message, 0x000000, true, cv.w, theme->glow ? S(float(theme->glow)) : 0);
 		}
 
 		LRESULT HitTest(int, int) override
@@ -1900,7 +2563,7 @@ namespace
 		}
 
 		ui::Point ClientOrigin() { return { border, titleH }; }
-		RECT CloseRect() { return { cv.w - border - S(43), 1, cv.w - border, 1 + S(18) }; }
+		RECT CloseRect() { return theme->CaptionRect(cv.w, border, CaptionClose); }
 		bool OnTop() { return ui::Engine::Ref().GetWindow() == window; }
 
 		// TPT's pixels for one rect (dialog pixels), scaled, between rows clipT and clipB.
@@ -2097,8 +2760,8 @@ namespace
 		{
 			if (framed)
 			{
-				vista::Frame(cv, titleH, border, title);
-				vista::CaptionButton(cv, CloseRect(), hoverClose, vista::CaptionClose);
+				theme->Frame(cv, titleH, border, title);
+				theme->CaptionButton(cv, CloseRect(), hoverClose, CaptionClose);
 			}
 			if (!items.empty())
 			{
@@ -2163,6 +2826,13 @@ namespace
 		}
 	};
 	std::vector<std::unique_ptr<HostWindow>> hosts;
+
+	void ThemeChanged()
+	{
+		DirtyAll();
+		for (auto &h : hosts)
+			if (h) h->dirty = true;
+	}
 	bool skinDialogs = true; // ponytail: no setting yet; false shows TPT's own look
 
 	// A TPT drop-down list or context menu, shown as a real Windows menu. TrackPopupMenu runs its own message loop,
@@ -2456,6 +3126,7 @@ void OverlayWindows::Init(void *mainHwnd)
 	float heightScale = GetSystemMetrics(SM_CYSCREEN) / 1080.f;
 	uiScale = prefs.Get("Overlay.UIScale", std::max(1.f, std::round(std::max(dpiScale, heightScale) * 4) / 4));
 	showTPTMenus = prefs.Get("Overlay.ShowTPTMenus", false);
+	theme = themes[std::clamp(prefs.Get("Overlay.Theme", defaultTheme), 0, int(std::size(themes)) - 1)];
 	text = new Text;
 	text->SetScale();
 	AddTrayIcon();

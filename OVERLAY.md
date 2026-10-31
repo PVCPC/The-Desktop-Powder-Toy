@@ -183,8 +183,15 @@ Assessment, in the order I'd do it (effort: S = an hour or two, M = a session, L
 5. [x] **Auto pass-through while a game or full-screen app has focus** (S). Done 2026-10-30: SHQueryUserNotificationState
    twice a second (busy / D3D full screen / presentation, foreground not TPT); the input mode itself is kept.
    Overlay tab checkbox, Overlay.AutoPassThrough.
-6. [ ] **More OS themes** (M each): XP, 7, 10/11, classic Mac OS, macOS, Linux. Start by turning the `vista::`
-   drawing into a theme interface when the second theme starts. Theme choice in Overlay settings.
+6. [x] **More OS themes** (M each). Done 2026-10-30: `Theme` interface (frame, caption buttons, buttons, popups,
+   colours) with Windows 3.1, 95, 98, XP, Vista, 7, 8, 10, 11, Classic Mac (Platinum), macOS and TempleOS. Overlay
+   tab -> Look (Overlay.Theme, live switch). Linux skins not done (add when wanted).
+   - [ ] **Look as two dropdowns** (user request 2026-10-30): a Windows dropdown (every Windows version above) and a
+     macOS dropdown, instead of one radio list.
+   - [ ] **The 8 eras of Mac UI** (user request 2026-10-30), each its own entry in the macOS dropdown: System 1-6
+     (1-bit), System 7 (colour), Mac OS 8-9 Platinum, Mac OS X Aqua (10.0-10.2), Brushed metal / Aqua (10.3-10.4),
+     Leopard-Mavericks unified grey (10.5-10.9), Yosemite-Mojave flat (10.10-10.15), Big Sur and later (11+). The
+     current Classic Mac = Platinum and macOS = Big Sur+.
 7. [x] Black particles inside the zoom window (S); menus fade when unused (S). Done 2026-10-30: the zoom box is opaque
    (a magnifier); TPT's own menus, when shown, fade out after 3 s without the mouse over them.
 8. [-] Other platforms: X11 / Wayland input regions, macOS (L; only if someone needs them). Deferred by the
