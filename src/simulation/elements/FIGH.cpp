@@ -57,6 +57,35 @@ void Element::Element_FIGH()
 	ChangeType = &changeType;
 }
 
+// Desktop pets: with no stickman to chase, a fighter strolls, stops to look round, hops up steps and mostly turns
+// back at a drop (now and then it jumps off anyway).
+static int PetComm(Simulation *sim, playerst *figh, int f)
+{
+	static int dir[MAX_FIGHTERS], left[MAX_FIGHTERS];
+	if (--left[f] <= 0)
+	{
+		dir[f] = sim->rng.chance(1, 3) ? 0 : (sim->rng.chance(1, 2) ? 1 : 2);
+		left[f] = sim->rng.between(40, 240);
+	}
+	if (!dir[f])
+	{
+		return 0;
+	}
+	bool goLeft = dir[f] == 1;
+	int fx = goLeft ? int(figh->legs[4]) - 6 : int(figh->legs[12]) + 6, fy = int(goLeft ? figh->legs[5] : figh->legs[13]);
+	if (sim->eval_move(PT_FIGH, fx, fy + 6, nullptr) && sim->eval_move(PT_FIGH, fx, fy + 14, nullptr) && !sim->rng.chance(1, 30))
+	{
+		dir[f] = goLeft ? 2 : 1;
+		return 0;
+	}
+	int comm = goLeft ? 0x01 : 0x02;
+	if (!sim->eval_move(PT_FIGH, fx, fy - 1, nullptr) || !sim->eval_move(PT_FIGH, fx, fy - 4, nullptr))
+	{
+		comm |= 0x04;
+	}
+	return comm;
+}
+
 static int update(UPDATE_FUNC_ARGS)
 {
 	auto &sd = SimulationData::CRef();
@@ -143,7 +172,7 @@ static int update(UPDATE_FUNC_ARGS)
 		}
 		break;
 	default:
-		figh->comm = 0;
+		figh->comm = sim->petWander ? PetComm(sim, figh, (unsigned char)parts[i].tmp) : 0;
 		break;
 	}
 

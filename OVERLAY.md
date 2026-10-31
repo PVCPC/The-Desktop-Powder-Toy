@@ -331,6 +331,13 @@ tray menu: the tray menu stays native on purpose.
 - [x] Resizable overlay:window (2026-10-31): the sim is screen-sized there too; the window shows its top-left corner
   and the play area follows the window (blit, SetWindowedView; Overlay.WindowedView.W/H). Tested: 612x384, 494x287
   and 161x120 views keep exactly the stone inside them. TPT's own bars aren't shown in that mode (side windows).
+- [x] Fun group (2026-10-31; Simulation tab, Overlay.Fun.*, all off): pets = FIGH with `sim->petWander` (FIGH.cpp
+  PetComm: wander, turn at drops, hop steps), topped up every 120 ticks; weather from the top row (snow/rain/sawdust
+  leaves, by month or fixed), each removed after a while; Recycle Bin icon kills loose particles on it; music =
+  IAudioMeterInformation peak, a jump over the running level makes resting powders hop; broom = 8x8 moving wall at
+  the cursor where clicks go to the desktop; window closed/opened = TossAbove on the band over it (TickFun,
+  TickWindowWalls). Tested headless: pets walk, snow falls and piles, bin eats 30/30 grains, close throws the
+  pile up. Music and broom untested (no simulated input or audio).
 
 ## Ideas
 

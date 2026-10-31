@@ -37,6 +37,10 @@ What's new
   out that fly off in the window's colour, DEST and black holes chew through, and you see what's really behind
   through the holes. Explosions can even shake your real windows (its own slider, off by default). Only the overlay
   is broken: clearing the sim mends everything.
+- **Fun switches** (Simulation window, all off by default): stick figure pets that wander your windows and
+  taskbar; snow, rain or leaves by the season; the Recycle Bin eats sand that lands on it; sand hops to the beat
+  of whatever your PC plays; the mouse pointer as a broom; closing a window throws its pile off; new windows
+  shake sand loose.
 - **Your sand stays**: the scene is saved when you quit and comes back next time.
 - **Light on the CPU**: when nothing moves it drops to a few frames a second (about a quarter of one core).
 - **Uses every core**: plain particles (sand, water and the like) update and are drawn across all CPU cores, and so

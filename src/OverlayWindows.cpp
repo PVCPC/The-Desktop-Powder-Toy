@@ -22,6 +22,7 @@
 #include "simulation/Air.h"
 #include "simulation/ElementGraphics.h"
 #include "simulation/SimulationData.h"
+#include "simulation/ElementClasses.h"
 #include "SimulationConfig.h"
 #include "gui/game/Menu.h"
 #include "gui/game/Brush.h"
@@ -81,6 +82,10 @@
 #pragma comment(lib, "oleaut32.lib")
 #include <d3d11.h>
 #include <dxgi1_2.h>
+#include <mmdeviceapi.h>
+#include <endpointvolume.h>
+#include <ctime>
+#include <deque>
 // the Overlay tab's pass-through apps (Overlay.PassApps)
 static std::vector<ByteString> PassApps();
 static void SetPassApps(const std::vector<ByteString> &apps);
@@ -95,6 +100,13 @@ namespace
 	float uiScale = 1;
 	bool windowWalls = true;            // open windows are walls to particles (Overlay.WindowWalls)
 	bool iconWalls = true;              // and so are the desktop icons (Overlay.IconWalls)
+	// The Simulation tab's Fun group (Overlay.Fun.*), all off by default
+	struct
+	{
+		float pets = 0, weather = 0, music = 0; // pets: how many; weather and music 0-3
+		int weatherKind = 0;                    // 0 by the season, 1 snow, 2 rain, 3 leaves
+		bool bin = false, broom = false, closeToss = false, openShake = false;
+	} fun;
 	HWND mainWindow = nullptr;    // TPT's own window
 	std::string recording;        // Overlay.Keys.<name> being recorded in the Overlay tab, or empty
 	std::function<void()> later; // run on the next tick, outside any window's message handling
@@ -2585,6 +2597,54 @@ namespace
 			}
 			y += S(26) * int(std::size(feel)) + S(94);
 
+			top = Group(x, y, w, S(26) * 8 + S(8), L"Fun");
+			struct FunToggle { const wchar_t *name, *tip; bool *v; const char *pref; };
+			FunToggle funToggles[] = {
+				{ L"Recycle Bin eats sand", L"Sand that lands on the Recycle Bin icon disappears into it (with icons as walls)", &fun.bin, "Bin" },
+				{ L"Mouse is a broom", L"Where clicks go to the desktop, the mouse pointer is a solid paddle that shoves and scoops sand", &fun.broom, "Broom" },
+				{ L"Closing a window throws its sand", L"Close or minimise a window and the pile on it is tossed off", &fun.closeToss, "CloseToss" },
+				{ L"New windows shake sand loose", L"A window that opens bumps the sand above it into the air", &fun.openShake, "OpenShake" },
+			};
+			for (int i = 0; i < int(std::size(funToggles)); i++)
+			{
+				auto f = funToggles[i];
+				Toggle(x + S(12), top + i * S(26), f.name, *f.v, false, [f] {
+					*f.v = !*f.v;
+					GlobalPrefs::Ref().Set(ByteString("Overlay.Fun.") + f.pref, *f.v);
+				}, f.tip);
+			}
+			struct FunSlider { const wchar_t *name, *tip; float *v; float hi; const char *pref; bool count; };
+			FunSlider funSliders[] = {
+				{ L"Pets", L"Stick figures that wander your windows and taskbar (how many). Fire and long falls can kill them; new ones drop in", &fun.pets, 10, "Pets", true },
+				{ L"Weather", L"Snow, rain or leaves falling from the top of the screen (how heavy). It melts or fades after a while", &fun.weather, 3, "Weather", false },
+				{ L"Music bounce", L"Sand hops and fire flares to the beat of whatever your PC is playing (only the sound level is read)", &fun.music, 3, "Music", false },
+			};
+			int sy = top + int(std::size(funToggles)) * S(26);
+			for (auto &f : funSliders)
+			{
+				Caption(x + S(12), sy, f.name);
+				wchar_t val[16];
+				if (f.count) swprintf(val, 16, *f.v >= 1 ? L"%d" : L"off", int(*f.v));
+				else swprintf(val, 16, *f.v > 0 ? L"%d%%" : L"off", int(std::lround(*f.v * 100)));
+				Caption(x + w - S(60), sy, val);
+				Slider(x + S(160), sy, w - S(232), *f.v, 0, f.hi, [f](float v) {
+					*f.v = f.count ? std::round(v) : std::round(v * 20) / 20;
+					GlobalPrefs::Ref().Set(ByteString("Overlay.Fun.") + f.pref, *f.v);
+				}, f.tip);
+				sy += S(26);
+			}
+			Caption(x + S(12), sy, L"Weather is");
+			const wchar_t *kinds[] = { L"By season", L"Snow", L"Rain", L"Leaves" };
+			int kx = x + S(160);
+			for (int i = 0; i < 4; i++)
+			{
+				kx += Toggle(kx, sy, kinds[i], fun.weatherKind == i, true, [i] {
+					fun.weatherKind = i;
+					GlobalPrefs::Ref().Set("Overlay.Fun.WeatherKind", i);
+				}) + S(18);
+			}
+			y += S(26) * 8 + S(16);
+
 			top = Group(x, y, w, S(76), L"Gravity");
 			const wchar_t *gravs[] = { L"Vertical", L"Off", L"Radial", L"Custom" };
 			int gx = x + S(12);
@@ -4668,6 +4728,11 @@ void OverlayWindows::Init(void *mainHwnd)
 	overlayFeel.shardParticles = prefs.Get("Overlay.Feel.ShardParticles", false);
 	for (auto [v, name] : { std::pair{ &overlayFeel.grip, "Grip" }, { &overlayFeel.fling, "Fling" }, { &overlayFeel.push, "Push" }, { &overlayFeel.wind, "Wind" }, { &overlayFeel.scorch, "Scorch" }, { &overlayFeel.frost, "Frost" }, { &overlayFeel.acid, "Acid" }, { &overlayFeel.water, "Water" }, { &overlayFeel.acidEat, "AcidEat" }, { &overlayFeel.blast, "Blast" }, { &overlayFeel.holeOpacity, "HoleSolid" }, { &overlayFeel.shards, "Shards" }, { &overlayFeel.shardSize, "ShardSize" }, { &overlayFeel.blackHole, "BlackHole" }, { &overlayFeel.shake, "Shake" } })
 		*v = prefs.Get(ByteString("Overlay.Feel.") + name, *v);
+	for (auto [v, name] : { std::pair{ &fun.pets, "Pets" }, { &fun.weather, "Weather" }, { &fun.music, "Music" } })
+		*v = prefs.Get(ByteString("Overlay.Fun.") + name, *v);
+	for (auto [v, name] : { std::pair{ &fun.bin, "Bin" }, { &fun.broom, "Broom" }, { &fun.closeToss, "CloseToss" }, { &fun.openShake, "OpenShake" } })
+		*v = prefs.Get(ByteString("Overlay.Fun.") + name, *v);
+	fun.weatherKind = prefs.Get("Overlay.Fun.WeatherKind", 0);
 	// Default UI scale: the larger of Windows' display scaling (TPT is DPI aware) and screen height / 1080, in
 	// quarter steps. Overridable.
 	HDC screen = GetDC(nullptr);
@@ -5177,6 +5242,7 @@ struct DeskIcon
 	RECT r;
 	std::shared_ptr<const std::vector<uint8_t>> shape; // (r.right - r.left) squared, 1 = solid; null = the whole square
 	uintptr_t id; // the same item from pass to pass (a hash of its item ID)
+	bool bin = false; // the Recycle Bin
 };
 // Null (a plain square for now) when not cached yet and this pass's budget of new pictures is spent: a desktop can
 // hold hundreds of icons, and fetching them all at once takes seconds.
@@ -5270,7 +5336,13 @@ static std::vector<DeskIcon> ReadDesktopIcons(IFolderView2 *&view, HWND &list)
 				ClientToScreen(list, &p);
 				int x = p.x, y = p.y + 6; // matched by eye against sand resting on icons
 				auto id = std::hash<std::string_view>{}({ (const char *)item, ILGetSize(item) });
-				icons.push_back({ { x, y, x + size, y + size }, IconShape(item, size, budget), id });
+				static PIDLIST_ABSOLUTE binItem = [] {
+					PIDLIST_ABSOLUTE p = nullptr;
+					SHGetKnownFolderIDList(FOLDERID_RecycleBinFolder, 0, nullptr, &p);
+					return p;
+				}();
+				bool bin = binItem && ILIsEqual(binItem, PCIDLIST_ABSOLUTE(item)); // a desktop item's ID is also its full one
+				icons.push_back({ { x, y, x + size, y + size }, IconShape(item, size, budget), id, bin });
 			}
 			CoTaskMemFree(item);
 		}
@@ -5426,6 +5498,132 @@ ByteString OverlayWindows::PassApp(void *hwnd)
 	return std::find(apps.begin(), apps.end(), name) != apps.end() ? name : ByteString();
 }
 
+// Throws what sits in the band above a sim rectangle into the air: up hard when the window under it closes, a
+// lighter bump when one opens below it.
+static void TossAbove(Simulation *sim, int x0, int y0, int x1, bool close)
+{
+	auto &elements = SimulationData::CRef().elements;
+	for (int y = std::max(0, y0 - (close ? 40 : 80)); y < std::min(YRES, y0); y++)
+		for (int x = std::max(0, x0); x < std::min(XRES, x1); x++)
+		{
+			int r = sim->pmap[y][x];
+			if (!r || !(elements[TYP(r)].Properties & (TYPE_PART | TYPE_LIQUID))) continue;
+			auto &p = sim->parts[ID(r)];
+			p.vy -= close ? 1.5f + 3 * sim->rng.uniform01() : 1 + 2 * sim->rng.uniform01();
+			p.vx += (sim->rng.uniform01() - 0.5f) * (close ? 5 : 2);
+		}
+}
+
+// The Fun group's pets, weather and music, once per sim tick (not while paused)
+static void TickFun(Simulation *sim)
+{
+	static int last = -1;
+	if (sim->currentTick == last) return;
+	last = sim->currentTick;
+	auto &elements = SimulationData::CRef().elements;
+
+	// Pets: fighters that wander (FIGH's PetComm), dropped in from the top every two seconds while there are too few
+	sim->petWander = fun.pets >= 1;
+	static std::vector<int> pets;
+	std::erase_if(pets, [sim](int i) { return sim->parts[i].type != PT_FIGH; });
+	while (int(pets.size()) > int(fun.pets))
+	{
+		sim->kill_part(pets.back());
+		pets.pop_back();
+	}
+	if (sim->currentTick % 120 == 0 && int(pets.size()) < int(fun.pets))
+	{
+		int i = sim->create_part(-1, sim->rng.between(XRES / 10, XRES * 9 / 10), 8, PT_FIGH);
+		if (i >= 0) pets.push_back(i);
+	}
+
+	// Weather from the top edge; each flake, drop or leaf goes after a while (snow even once melted)
+	static std::deque<std::tuple<int, int, int>> fallen; // particle, type, the tick it goes
+	if (fun.weather > 0)
+	{
+		int kind = fun.weatherKind;
+		if (!kind)
+		{
+			time_t now = time(nullptr);
+			tm local;
+			localtime_s(&local, &now);
+			int m = local.tm_mon + 1;
+			kind = m == 12 || m <= 2 ? 1 : m >= 9 && m <= 11 ? 3 : 2;
+		}
+		static const uint32_t autumn[] = { 0xFFC0501A, 0xFFD9822B, 0xFFB8860B, 0xFF8B4513, 0xFFCC3300 };
+		float n = fun.weather * XRES / 600.f;
+		int count = int(n) + (sim->rng.uniform01() < n - int(n));
+		for (int k = 0; k < count; k++)
+		{
+			int type = kind == 1 ? PT_SNOW : kind == 2 ? PT_WATR : PT_SAWD;
+			int i = sim->create_part(-1, sim->rng.between(CELL, XRES - CELL - 1), CELL, type); // the outer cell kills particles
+			if (i < 0) continue;
+			auto &p = sim->parts[i];
+			if (kind == 1) p.temp = 263.15f, p.vx = sim->rng.uniform01() - 0.5f;
+			if (kind == 2) p.vy = 3;
+			if (kind == 3) p.dcolour = autumn[sim->rng.between(0, 4)], p.vx = (sim->rng.uniform01() - 0.5f) * 2;
+			fallen.push_back({ i, type, sim->currentTick + (kind == 1 ? 5400 : kind == 2 ? 300 : 3600) });
+		}
+	}
+	while (!fallen.empty() && std::get<2>(fallen.front()) <= sim->currentTick)
+	{
+		auto [i, type, until] = fallen.front();
+		fallen.pop_front();
+		int t = sim->parts[i].type;
+		if (t == type || (type == PT_SNOW && t == PT_WATR)) sim->kill_part(i);
+	}
+
+	// Music: the speakers' peak level (Windows' own meter, nothing recorded); a jump over the recent level is a beat
+	// that makes resting sand and liquid hop and fire flare
+	if (fun.music > 0)
+	{
+		static IAudioMeterInformation *meter = nullptr;
+		static int retry = 0;
+		if (!meter && --retry <= 0)
+		{
+			retry = 300;
+			CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+			IMMDeviceEnumerator *devices = nullptr;
+			IMMDevice *speakers = nullptr;
+			if (SUCCEEDED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&devices))) &&
+			    SUCCEEDED(devices->GetDefaultAudioEndpoint(eRender, eConsole, &speakers)))
+			{
+				speakers->Activate(__uuidof(IAudioMeterInformation), CLSCTX_ALL, nullptr, (void **)&meter);
+			}
+			if (speakers) speakers->Release();
+			if (devices) devices->Release();
+		}
+		float peak = 0;
+		if (meter && FAILED(meter->GetPeakValue(&peak)))
+		{
+			meter->Release(); // the speakers changed: find the new ones
+			meter = nullptr;
+		}
+		static float level = 0;
+		static int since = 0;
+		bool beat = ++since > 8 && peak > 0.05f && peak > level * 1.4f;
+		level = level * 0.9f + peak * 0.1f;
+		if (beat)
+		{
+			since = 0;
+			float hop = fun.music * peak, chance = std::min(1.f, hop * 0.8f);
+			for (int i = 0; i < std::min(NPART, sim->parts.active + 1); i++)
+			{
+				auto &p = sim->parts[i];
+				if (p.type == PT_FIRE)
+				{
+					p.life += int(20 * hop);
+				}
+				else if (p.type && (elements[p.type].Properties & (TYPE_PART | TYPE_LIQUID)) && std::abs(p.vy) < 0.3f && sim->rng.uniform01() < chance)
+				{
+					p.vy -= 1 + 3 * hop;
+					p.vx += (sim->rng.uniform01() - 0.5f) * hop * 2;
+				}
+			}
+		}
+	}
+}
+
 static void TickWindowWalls()
 {
 	auto *sim = GameController::Ref().GetModel()->GetSimulation();
@@ -5480,8 +5678,12 @@ static void TickWindowWalls()
 		}
 		lastCursor = cursor;
 	}
+	TickFun(sim);
 	bool doWindows = windowWalls && OverlayGetLayer() == OverlayLayer::OnTop;
 	bool doIcons = iconWalls && OverlayGetLayer() != OverlayLayer::BehindIcons;
+	// Mouse is a broom: a small solid block at the pointer where clicks go to the desktop, moving like a window
+	POINT at;
+	bool broom = fun.broom && !overlayWindowed && GetCursorPos(&at) && GetAncestor(WindowFromPoint(at), GA_ROOT) != mainWindow;
 	// The overlay spans every monitor; where none is (beside a shorter one) is solid, so sand stops at its edge
 	static std::vector<RECT> gaps = [] {
 		std::vector<RECT> mons, out;
@@ -5511,7 +5713,7 @@ static void TickWindowWalls()
 		}
 		return out;
 	}();
-	if (overlayWindowed || (!doWindows && !doIcons && gaps.empty()) || sw <= 0 || sh <= 0)
+	if (overlayWindowed || (!doWindows && !doIcons && gaps.empty() && !broom) || sw <= 0 || sh <= 0)
 	{
 		sim->pixelWalls.clear();
 		wallRects.clear();
@@ -5550,7 +5752,33 @@ static void TickWindowWalls()
 		c.wins->push_back(w);
 		return TRUE;
 	}, LPARAM(&ctx));
+	if (!wallRects.empty() && (fun.closeToss || fun.openShake))
+	{
+		auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); };
+		auto toss = [&](const RECT &r, bool close) {
+			TossAbove(sim, px(r.left - sr.left, WINDOWW, sw), px(r.top - sr.top, WINDOWH, sh), px(r.right - sr.left, WINDOWW, sw), close);
+		};
+		for (auto &[hwnd, r] : wallRects)
+			if (fun.closeToss && !now.count(hwnd)) toss(r, true);
+		for (auto &[hwnd, r] : now)
+			if (fun.openShake && !wallRects.count(hwnd)) toss(r, false);
+	}
 	wallRects = std::move(now);
+	static POINT broomAt{ -1, -1 };
+	if (broom)
+	{
+		auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); };
+		int cx = px(at.x - sr.left, WINDOWW, sw), cy = px(at.y - sr.top, WINDOWH, sh), b = 4;
+		OverlayWall w{ std::max(0, cx - b), std::max(0, cy - b), std::min(XRES, cx + b), std::min(YRES, cy + b),
+		               broomAt.x >= 0 ? cx - broomAt.x : 0, broomAt.x >= 0 ? cy - broomAt.y : 0, {} };
+		w.id = 2; // not a window handle
+		broomAt = { cx, cy };
+		if (w.x1 > w.x0 && w.y1 > w.y0) wins.push_back(w);
+	}
+	else
+	{
+		broomAt = { -1, -1 };
+	}
 	for (auto &r : gaps)
 	{
 		auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); };
@@ -5581,6 +5809,13 @@ static void TickWindowWalls()
 			}
 			w.id = icon.id;
 			iconsNow[icon.id] = r;
+			if (fun.bin && icon.bin) // the Recycle Bin swallows whatever loose stuff lands on it
+			{
+				auto &elements = SimulationData::CRef().elements;
+				for (int y = std::max(0, w.y0 - 3); y < std::min(YRES, w.y1); y++)
+					for (int x = w.x0; x < w.x1; x++)
+						if (int r = sim->pmap[y][x]; r && !(elements[TYP(r)].Properties & TYPE_SOLID)) sim->kill_part(ID(r));
+			}
 			if (w.x1 > w.x0 && w.y1 > w.y0) wins.push_back(w);
 		}
 	iconRects = std::move(iconsNow);
