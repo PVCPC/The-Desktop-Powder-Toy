@@ -12,6 +12,7 @@
 #include "client/SaveInfo.h"
 #include "client/http/SearchSavesRequest.h"
 #include "client/http/ThumbnailRequest.h"
+#include "client/http/Request.h"
 #include "gui/SavePreviewType.h"
 #include "client/GameSave.h"
 #include "gui/game/GameView.h"
@@ -2948,8 +2949,8 @@ namespace
 
 			text->Draw(cv, x0, y, L"Welcome to The Powder Toy", title);
 			y += text->Measure(L"Ag", title).cy + S(2);
-			text->Draw(cv, x0, y, L"Version " + std::to_wstring(DISPLAY_VERSION[0]) + L"." + std::to_wstring(DISPLAY_VERSION[1]) +
-			                          L"  \u00B7  running on your desktop", subtitle);
+			text->Draw(cv, x0, y, L"Desktop " DESKTOP_VERSION L"  \u00B7  The Powder Toy " + std::to_wstring(DISPLAY_VERSION[0]) + L"." +
+			                          std::to_wstring(DISPLAY_VERSION[1]), subtitle);
 			y += text->Measure(L"Ag", subtitle).cy + S(8);
 			int lx = x0;
 			for (auto [label, url] : { std::pair{ L"powdertoy.co.uk", L"https://powdertoy.co.uk" },
@@ -4470,10 +4471,14 @@ namespace
 		{
 			OverlayWindows::TogglePalette();
 		}
+		if (lp == NIN_BALLOONUSERCLICK)
+		{
+			ShellExecuteW(nullptr, L"open", L"https://github.com/PVCPC/The-Desktop-Powder-Toy/releases/latest", nullptr, nullptr, SW_SHOWNORMAL);
+		}
 		if (lp == WM_RBUTTONUP)
 		{
 			// The plain Windows menu: settings and the way into the Vista windows.
-			enum { elements = 1, inputBase = 10, showMenus = 20, exitItem = 99 };
+			enum { elements = 1, pause, clear, inputBase = 10, showMenus = 20, exitItem = 99 };
 			auto &prefs = GlobalPrefs::Ref();
 			auto label = [&](const wchar_t *text, const char *keyName, const char *fallback) {
 				return std::wstring(text) + L"\t" + Platform::WinWiden(prefs.Get(ByteString("Overlay.Keys.") + keyName, ByteString(fallback)));
@@ -4481,6 +4486,8 @@ namespace
 			HMENU menu = CreatePopupMenu();
 			bool open = palette && IsWindowVisible(palette->hwnd);
 			AppendMenuW(menu, MF_STRING | (open ? MF_CHECKED : 0), elements, label(L"Elements window", "Palette", "Ctrl+Alt+E").c_str());
+			AppendMenuW(menu, MF_STRING, pause, GameController::Ref().GetPaused() ? L"Resume" : L"Pause");
+			AppendMenuW(menu, MF_STRING, clear, L"Clear the sim");
 			AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 			std::wstring modes[] = { L"Input: Auto", label(L"Input: Pass-through", "PassThrough", "Ctrl+Alt+P"), label(L"Input: Locked to TPT", "Locked", "Ctrl+Alt+L") };
 			for (int i = 0; i < int(OverlayInput::Count); i++)
@@ -4501,6 +4508,8 @@ namespace
 			{
 				OverlayWindows::TogglePalette();
 			}
+			if (cmd == pause) GameController::Ref().SetPaused(!GameController::Ref().GetPaused());
+			if (cmd == clear) GameController::Ref().ClearSim();
 			if (cmd >= inputBase && cmd < inputBase + int(OverlayInput::Count))
 			{
 				OverlaySetInput(OverlayInput(cmd - inputBase));
@@ -4590,6 +4599,46 @@ void OverlayWindows::Tick()
 		return;
 	}
 	TickWindowWalls();
+	static std::unique_ptr<http::Request> release;
+	static bool checked = false;
+	if (!checked)
+	{
+		checked = true;
+		release = std::make_unique<http::Request>("https://api.github.com/repos/PVCPC/The-Desktop-Powder-Toy/releases/latest");
+		release->Start();
+	}
+	if (release && release->CheckDone())
+	{
+		ByteString tag;
+		try
+		{
+			auto [status, data] = release->Finish();
+			auto at = data.find("\"tag_name\"");
+			if (status == 200 && at != data.npos)
+			{
+				auto q = data.find('"', data.find(':', at) + 1) + 1;
+				tag = data.substr(q, data.find('"', q) - q);
+			}
+		}
+		catch (const http::RequestError &) {}
+		release.reset();
+		auto version = [](const std::wstring &v) { // "v1.2.3" or "1.2.3" -> {1, 2, 3}
+			std::array<int, 3> n{};
+			swscanf_s(v.c_str() + (v.size() && v[0] == L'v'), L"%d.%d.%d", &n[0], &n[1], &n[2]);
+			return n;
+		};
+		auto &prefs = GlobalPrefs::Ref();
+		if (tag.size() && version(Platform::WinWiden(tag)) > version(DESKTOP_VERSION) && tag != prefs.Get("Overlay.ToldVersion", ByteString()))
+		{
+			prefs.Set("Overlay.ToldVersion", tag);
+			tray.uFlags = NIF_INFO;
+			wcscpy_s(tray.szInfoTitle, (L"The Desktop Powder Toy " + Platform::WinWiden(tag) + L" is out").c_str());
+			wcscpy_s(tray.szInfo, L"Click to download it.");
+			tray.dwInfoFlags = NIIF_INFO;
+			Shell_NotifyIconW(NIM_MODIFY, &tray);
+			tray.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+		}
+	}
 	static std::vector<Notification *> seen;
 	auto notes = GameController::Ref().GetModel()->GetNotifications();
 	if (notes != seen)
