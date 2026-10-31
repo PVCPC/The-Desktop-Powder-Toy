@@ -22,6 +22,7 @@
 #include <optional>
 #include <map>
 #include <cstdint>
+#include <mutex>
 
 constexpr int CHANNELS = int(MAX_TEMP - 73) / 100 + 2;
 
@@ -116,13 +117,33 @@ struct RenderableSimulation
 	bool useLuaCallbacks = false;
 };
 
+// Simulation::rng. While plain particles update on several threads (Simulation::parallelUpdate), each thread draws from
+// its own RNG instead.
+class SimRNG : public RNG
+{
+public:
+	static thread_local RNG *local;
+	SimRNG &operator=(const RNG &other) { RNG::operator=(other); return *this; }
+	unsigned int operator()() { return local ? (*local)() : RNG::operator()(); }
+	unsigned int gen() { return local ? local->gen() : RNG::gen(); }
+	int between(int lower, int upper) { return local ? local->between(lower, upper) : RNG::between(lower, upper); }
+	bool chance(int numerator, unsigned int denominator) { return local ? local->chance(numerator, denominator) : RNG::chance(numerator, denominator); }
+	float uniform01() { return local ? local->uniform01() : RNG::uniform01(); }
+	double uniform01Double() { return local ? local->uniform01Double() : RNG::uniform01Double(); }
+};
+
 class Simulation : public RenderableSimulation
 {
 public:
 	GravityPtr grav;
 	std::unique_ptr<Air> air;
 
-	RNG rng;
+	SimRNG rng;
+	// Plain particles (no update function of their own) update on every core, in blocks far enough apart not to
+	// touch; the rest after them, one at a time. Off: TPT's original single-threaded order.
+	bool parallelUpdate = true;
+	bool parallelPhase = false; // the blocks are running: creating, killing and changing particles take parallelLock
+	std::recursive_mutex parallelLock;
 
 	int replaceModeSelected = 0;
 	int replaceModeFlags = 0;

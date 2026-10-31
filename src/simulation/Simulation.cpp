@@ -1,4 +1,5 @@
 #include "Simulation.h"
+#include "common/Parallel.h"
 #include "Air.h"
 #include "ElementClasses.h"
 #include "TransitionConstants.h"
@@ -38,8 +39,15 @@ namespace
 		bool TransitionPhase(int i, const Neighbourhood &neighbourhood);
 
 		void UpdateParticles(int start, int end) final override;
+		void UpdateParticle(int i, bool parallel);
+		void UpdateParticlesParallel();
 	};
 }
+
+thread_local RNG *SimRNG::local = nullptr;
+
+// Held while the parallel blocks run (Simulation::parallelUpdate): the free list, element counts and wall maps are shared.
+#define PARALLEL_GUARD std::unique_lock<std::recursive_mutex> parallelGuard(parallelLock, std::defer_lock); if (parallelPhase) parallelGuard.lock()
 
 static float remainder_p(float x, float y);
 
@@ -947,6 +955,7 @@ int Simulation::get_wavelength_bin(int *wm)
 
 void Simulation::set_emap(int x, int y)
 {
+	PARALLEL_GUARD;
 	int x1, x2;
 
 	if (!is_wire_off(x, y))
@@ -1769,6 +1778,7 @@ Simulation::GetNormalResult Simulation::get_normal_interp<false, const Simulatio
 
 void Simulation::kill_part(int i)//kills particle number i
 {
+	PARALLEL_GUARD;
 	if (i < 0 || i >= NPART)
 		return;
 	
@@ -1812,6 +1822,7 @@ void Parts::Free(int i)
 // Returns true if the particle was killed
 bool Simulation::part_change_type(int i, int x, int y, int t)
 {
+	PARALLEL_GUARD;
 	if (x<0 || y<0 || x>=XRES || y>=YRES || i>=NPART || t<0 || t>=PT_NUM || !parts[i].type)
 		return false;
 
@@ -1857,6 +1868,7 @@ bool Simulation::part_change_type(int i, int x, int y, int t)
 //tv = Type (PMAPBITS bits) + Var (32-PMAPBITS bits), var is usually 0
 int Simulation::create_part(int p, int x, int y, int t, int v)
 {
+	PARALLEL_GUARD;
 	int i, oldType = PT_NONE;
 
 	auto &sd = SimulationData::CRef();
@@ -2301,120 +2313,191 @@ SimulationImpl::Neighbourhood SimulationImpl::GetNeighbourhood(int i) const
 void SimulationImpl::UpdateParticles(int start, int end)
 {
 	//the main particle loop function, goes over all particles.
-	auto &sd = SimulationData::CRef();
-	auto &elements = sd.elements;
+	if (parallelUpdate && start == 0 && end >= NPART && !legacy_enable && !water_equal_test)
+	{
+		UpdateParticlesParallel();
+		return;
+	}
 	for (auto i = start; i < end && i < parts.active; i++)
 	{
-		auto t = parts[i].type;
-		if (!t)
-		{
-			continue;
-		}
-		debug_mostRecentlyUpdated = i;
-
-		auto x = int(parts[i].x+0.5f);
-		auto y = int(parts[i].y+0.5f);
-
-		// Kill a particle off screen
-		if (x<CELL || y<CELL || x>=XRES-CELL || y>=YRES-CELL)
-		{
-			kill_part(i);
-			continue;
-		}
-
-		// Kill a particle in a wall where it isn't supposed to go
-		if (bmap[y/CELL][x/CELL] &&
-		   (bmap[y/CELL][x/CELL]==WL_WALL ||
-		    bmap[y/CELL][x/CELL]==WL_WALLELEC ||
-		    bmap[y/CELL][x/CELL]==WL_ALLOWAIR ||
-		    (bmap[y/CELL][x/CELL]==WL_DESTROYALL) ||
-		    (bmap[y/CELL][x/CELL]==WL_ALLOWLIQUID && !(elements[t].Properties&TYPE_LIQUID)) ||
-		    (bmap[y/CELL][x/CELL]==WL_ALLOWPOWDER && !(elements[t].Properties&TYPE_PART)) ||
-		    (bmap[y/CELL][x/CELL]==WL_ALLOWGAS && !(elements[t].Properties&TYPE_GAS)) || //&& elements[t].Falldown!=0 && parts[i].type!=PT_FIRE && parts[i].type!=PT_SMKE && parts[i].type!=PT_CFLM) ||
-		            (bmap[y/CELL][x/CELL]==WL_ALLOWENERGY && !(elements[t].Properties&TYPE_ENERGY)) ||
-		    (bmap[y/CELL][x/CELL]==WL_EWALL && !emap[y/CELL][x/CELL])) && (t!=PT_STKM) && (t!=PT_STKM2) && (t!=PT_FIGH))
-		{
-			kill_part(i);
-			continue;
-		}
-
-		// Make sure that STASIS'd particles don't tick.
-		if (bmap[y/CELL][x/CELL] == WL_STASIS && emap[y/CELL][x/CELL]<8) {
-			continue;
-		}
-
-		if (bmap[y/CELL][x/CELL]==WL_DETECT && emap[y/CELL][x/CELL]<8)
-			set_emap(x/CELL, y/CELL);
-
-		//adding to velocity from the particle's velocity
-		vx[y/CELL][x/CELL] = vx[y/CELL][x/CELL]*elements[t].AirLoss + elements[t].AirDrag*parts[i].vx;
-		vy[y/CELL][x/CELL] = vy[y/CELL][x/CELL]*elements[t].AirLoss + elements[t].AirDrag*parts[i].vy;
-
-		if (elements[t].HotAir)
-		{
-			if (t==PT_GAS||t==PT_NBLE)
-			{
-				if (pv[y/CELL][x/CELL]<3.5f)
-					pv[y/CELL][x/CELL] += 4.0f*elements[t].HotAir*(3.5f-pv[y/CELL][x/CELL]);
-			}
-			else//add the hotair variable to the pressure map, like black hole, or white hole.
-			{
-				pv[y/CELL][x/CELL] += 4.0f*elements[t].HotAir;
-			}
-		}
-
-		auto neighbourhood = GetNeighbourhood(i);
-
-		//velocity updates for the particle
-		if (t != PT_SPNG || !(parts[i].flags&FLAG_MOVABLE))
-		{
-			parts[i].vx *= elements[t].Loss;
-			parts[i].vy *= elements[t].Loss;
-		}
-		//particle gets velocity from the vx and vy maps
-		parts[i].vx += elements[t].Advection*vx[y/CELL][x/CELL] + neighbourhood.pGravX;
-		parts[i].vy += elements[t].Advection*vy[y/CELL][x/CELL] + neighbourhood.pGravY;
-
-
-		if (elements[t].Diffusion)//the random diffusion that gasses have
-		{
-			parts[i].vx += elements[t].Diffusion*(2.0f*rng.uniform01()-1.0f);
-			parts[i].vy += elements[t].Diffusion*(2.0f*rng.uniform01()-1.0f);
-		}
-
-		auto transitionOccurred = TransitionPhase(i, neighbourhood);
-		if (!parts[i].type)
-		{
-			continue;
-		}
-		if (transitionOccurred)
-		{
-			t = parts[i].type;
-		}
-
-		//call the particle update function, if there is one
-		if (elements[t].Update)
-		{
-			if ((*(elements[t].Update))(this, i, x, y, neighbourhood.surround_space, neighbourhood.nt, parts, pmap))
-				continue;
-			x = int(parts[i].x+0.5f);
-			y = int(parts[i].y+0.5f);
-		}
-
-		if(legacy_enable)//if heat sim is off
-			Element::legacyUpdate(this, i,x,y,neighbourhood.surround_space,neighbourhood.nt, parts, pmap);
-
-		if (parts[i].type == PT_NONE)//if its dead, skip to next particle
-			continue;
-
-		if (transitionOccurred)
-			continue;
-
-		if (!parts[i].vx&&!parts[i].vy)//if its not moving, skip to next particle, movement code it next
-			continue;
-
-		MovementPhase(i, neighbourhood);
+		UpdateParticle(i, false);
 	}
+}
+
+// The sim in 64-pixel blocks, run in four passes (a checkerboard of 2x2), so blocks running together are a whole block
+// apart. A plain particle (no update function or ChangeType of its own, not energy, not in a wall cell, slow enough)
+// can't reach further than 64 pixels in a tick: its move (velocity up to 20) plus a liquid's sideways search (30)
+// plus heat and air (a cell). Those run in their blocks on all cores, in index order within a block; everything
+// else runs after, one at a time, in index order, as before.
+void SimulationImpl::UpdateParticlesParallel()
+{
+	auto &sd = SimulationData::CRef();
+	auto &elements = sd.elements;
+	constexpr int B = 64, reach = 20;
+	int bw = (XRES + B - 1) / B, bh = (YRES + B - 1) / B;
+	static std::vector<std::vector<int>> blocks;
+	static std::vector<uint8_t> done;
+	blocks.resize(size_t(bw) * bh);
+	for (auto &b : blocks) b.clear();
+	done.assign(NPART, 0);
+	for (int i = 0; i < parts.active; i++)
+	{
+		auto &p = parts[i];
+		int t = p.type;
+		if (!t || elements[t].Update || elements[t].ChangeType || (elements[t].Properties & TYPE_ENERGY)) continue;
+		int x = int(p.x + 0.5f), y = int(p.y + 0.5f);
+		if (x < CELL || y < CELL || x >= XRES - CELL || y >= YRES - CELL || bmap[y / CELL][x / CELL]) continue;
+		float gx = 0, gy = 0;
+		if (!(elements[t].Properties & TYPE_SOLID) && (elements[t].Gravity || elements[t].NewtonianGravity))
+			GetGravityField(x, y, elements[t].Gravity, elements[t].NewtonianGravity, gx, gy);
+		float a = elements[t].Advection, d = elements[t].Diffusion;
+		if (std::abs(p.vx) + a * std::abs(vx[y / CELL][x / CELL]) + d + std::abs(gx) > reach ||
+		    std::abs(p.vy) + a * std::abs(vy[y / CELL][x / CELL]) + d + std::abs(gy) > reach)
+			continue;
+		blocks[size_t(y / B) * bw + x / B].push_back(i);
+		done[i] = 1;
+	}
+	std::vector<unsigned int> seeds(blocks.size());
+	for (auto &s : seeds) s = rng.gen();
+	parallelPhase = true;
+	for (int pass = 0; pass < 4; pass++)
+	{
+		std::vector<int> run;
+		for (int by = pass / 2; by < bh; by += 2)
+			for (int bx = pass % 2; bx < bw; bx += 2)
+				if (!blocks[size_t(by) * bw + bx].empty()) run.push_back(by * bw + bx);
+		OverlayParallel(int(run.size()), [&](int k) {
+			RNG own;
+			own.seed(seeds[run[k]]);
+			SimRNG::local = &own;
+			for (int i : blocks[run[k]])
+				if (parts[i].type) UpdateParticle(i, true);
+			SimRNG::local = nullptr;
+		});
+	}
+	parallelPhase = false;
+	for (int i = 0; i < parts.active; i++)
+		if (!done[i]) UpdateParticle(i, false);
+}
+
+void SimulationImpl::UpdateParticle(int i, bool parallel)
+{
+	auto &sd = SimulationData::CRef();
+	auto &elements = sd.elements;
+	auto t = parts[i].type;
+	if (!t)
+	{
+		return;
+	}
+	if (!parallel) debug_mostRecentlyUpdated = i;
+
+	auto x = int(parts[i].x+0.5f);
+	auto y = int(parts[i].y+0.5f);
+
+	// Kill a particle off screen
+	if (x<CELL || y<CELL || x>=XRES-CELL || y>=YRES-CELL)
+	{
+		kill_part(i);
+		return;
+	}
+
+	// Kill a particle in a wall where it isn't supposed to go
+	if (bmap[y/CELL][x/CELL] &&
+	   (bmap[y/CELL][x/CELL]==WL_WALL ||
+	    bmap[y/CELL][x/CELL]==WL_WALLELEC ||
+	    bmap[y/CELL][x/CELL]==WL_ALLOWAIR ||
+	    (bmap[y/CELL][x/CELL]==WL_DESTROYALL) ||
+	    (bmap[y/CELL][x/CELL]==WL_ALLOWLIQUID && !(elements[t].Properties&TYPE_LIQUID)) ||
+	    (bmap[y/CELL][x/CELL]==WL_ALLOWPOWDER && !(elements[t].Properties&TYPE_PART)) ||
+	    (bmap[y/CELL][x/CELL]==WL_ALLOWGAS && !(elements[t].Properties&TYPE_GAS)) || //&& elements[t].Falldown!=0 && parts[i].type!=PT_FIRE && parts[i].type!=PT_SMKE && parts[i].type!=PT_CFLM) ||
+	            (bmap[y/CELL][x/CELL]==WL_ALLOWENERGY && !(elements[t].Properties&TYPE_ENERGY)) ||
+	    (bmap[y/CELL][x/CELL]==WL_EWALL && !emap[y/CELL][x/CELL])) && (t!=PT_STKM) && (t!=PT_STKM2) && (t!=PT_FIGH))
+	{
+		kill_part(i);
+		return;
+	}
+
+	// Make sure that STASIS'd particles don't tick.
+	if (bmap[y/CELL][x/CELL] == WL_STASIS && emap[y/CELL][x/CELL]<8) {
+		return;
+	}
+
+	if (bmap[y/CELL][x/CELL]==WL_DETECT && emap[y/CELL][x/CELL]<8)
+		set_emap(x/CELL, y/CELL);
+
+	//adding to velocity from the particle's velocity
+	vx[y/CELL][x/CELL] = vx[y/CELL][x/CELL]*elements[t].AirLoss + elements[t].AirDrag*parts[i].vx;
+	vy[y/CELL][x/CELL] = vy[y/CELL][x/CELL]*elements[t].AirLoss + elements[t].AirDrag*parts[i].vy;
+
+	if (elements[t].HotAir)
+	{
+		if (t==PT_GAS||t==PT_NBLE)
+		{
+			if (pv[y/CELL][x/CELL]<3.5f)
+				pv[y/CELL][x/CELL] += 4.0f*elements[t].HotAir*(3.5f-pv[y/CELL][x/CELL]);
+		}
+		else//add the hotair variable to the pressure map, like black hole, or white hole.
+		{
+			pv[y/CELL][x/CELL] += 4.0f*elements[t].HotAir;
+		}
+	}
+
+	auto neighbourhood = GetNeighbourhood(i);
+
+	//velocity updates for the particle
+	if (t != PT_SPNG || !(parts[i].flags&FLAG_MOVABLE))
+	{
+		parts[i].vx *= elements[t].Loss;
+		parts[i].vy *= elements[t].Loss;
+	}
+	//particle gets velocity from the vx and vy maps
+	parts[i].vx += elements[t].Advection*vx[y/CELL][x/CELL] + neighbourhood.pGravX;
+	parts[i].vy += elements[t].Advection*vy[y/CELL][x/CELL] + neighbourhood.pGravY;
+
+
+	if (elements[t].Diffusion)//the random diffusion that gasses have
+	{
+		parts[i].vx += elements[t].Diffusion*(2.0f*rng.uniform01()-1.0f);
+		parts[i].vy += elements[t].Diffusion*(2.0f*rng.uniform01()-1.0f);
+	}
+
+	auto transitionOccurred = TransitionPhase(i, neighbourhood);
+	if (!parts[i].type)
+	{
+		return;
+	}
+	if (transitionOccurred)
+	{
+		t = parts[i].type;
+	}
+
+	// on a parallel block, a particle that just turned into something with its own update (which may reach far) waits
+	// for the next tick to run it
+	if (parallel && transitionOccurred && elements[t].Update)
+		return;
+
+	//call the particle update function, if there is one
+	if (elements[t].Update)
+	{
+		if ((*(elements[t].Update))(this, i, x, y, neighbourhood.surround_space, neighbourhood.nt, parts, pmap))
+			return;
+		x = int(parts[i].x+0.5f);
+		y = int(parts[i].y+0.5f);
+	}
+
+	if(legacy_enable)//if heat sim is off
+		Element::legacyUpdate(this, i,x,y,neighbourhood.surround_space,neighbourhood.nt, parts, pmap);
+
+	if (parts[i].type == PT_NONE)//if its dead, skip to next particle
+		return;
+
+	if (transitionOccurred)
+		return;
+
+	if (!parts[i].vx&&!parts[i].vy)//if its not moving, skip to next particle, movement code it next
+		return;
+
+	MovementPhase(i, neighbourhood);
 }
 
 bool SimulationImpl::TransitionPhase(int i, const Neighbourhood &neighbourhood)
