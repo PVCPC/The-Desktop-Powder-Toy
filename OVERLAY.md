@@ -122,6 +122,12 @@ overlay, and TPT only runs the top screen, so **the sim freezes while any dialog
      value parses. Sign: Delete and Move (Move hands over to TPT's sign window, which follows the mouse). Tested with
      posted messages: property WATR saved to prefs, new sign created. Modal on TPT's thread: the sim waits while open.
      Not shown: picking a property from a particle (TPT's window still does that).
+   - [x] Options, most used (2026-10-30), through TPT's OptionsModel (same prefs): Simulation tab "Heat and air"
+     (heat sim, water equalisation, air temperature/pressure, vorticity, convection, temperature scale) and Overlay
+     tab "TPT settings" (perfect circle, pressure in saves, smooth scrolling, quit without asking, avatars, deco
+     colour space) + "All of TPT's options..." for the rest. Lists = native menus, numbers = a Windows dialog that
+     only accepts valid, in-range values. Tested: vorticity 5 refused, 0.5 saved. Not native yet: window/scale,
+     FPS/draw limits, data folder, startup request, console key, clipboard, std redirect.
    - [x] Real Vista-style menus, drop-downs and dialogs (user request 2026-10-30): today the hosted ones are TPT's
      pixel UI inside a Vista frame. First: Settings, drop-down lists, context menus.
      - [x] Drop-down lists and context menus are real Windows menus (ui::Window::MenuItems; TrackPopupMenu on its

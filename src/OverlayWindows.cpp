@@ -24,6 +24,8 @@
 #include "graphics/Renderer.h"
 #include "gui/game/RenderPreset.h"
 #include "gui/game/IntroText.h"
+#include "gui/options/OptionsModel.h"
+#include "Format.h"
 #include "gui/dialogues/ErrorMessage.h"
 #include "client/Client.h"
 #include "simulation/SaveRenderer.h"
@@ -2444,6 +2446,39 @@ namespace
 				ax += Toggle(ax, ay, airs[i], sim->air->airMode == i, true, [sim, i] { sim->air->airMode = i; }) + S(18);
 			}
 			Toggle(x + S(12), ay + S(24), L"Ambient heat", gc.GetAHeatEnable(), false, [] { GameController::Ref().ToggleAHeat(); }, L"The air carries heat (U)");
+			y += S(108);
+
+			auto &opts = Options();
+			auto scale = opts.GetTemperatureScale();
+			top = Group(x, y, w, S(36) + S(24) + 5 * S(32), L"Heat and air");
+			int half = (w - S(24)) / 2, lx = x + S(12), bx = x + S(220), nw = std::min(S(200), x + w - S(12) - bx);
+			Toggle(lx, top, L"Heat simulation", opts.GetHeatSimulation(), false, [&opts] { opts.SetHeatSimulation(!opts.GetHeatSimulation()); },
+			       L"Off = the old heatless sim some old saves need");
+			Toggle(lx + half, top, L"Water equalisation", opts.GetWaterEqualisation(), false, [&opts] { opts.SetWaterEqualisation(!opts.GetWaterEqualisation()); },
+			       L"Liquids level out like connected water (slow)");
+			int ry = top + S(30);
+			auto row = [&](const wchar_t *label) {
+				Caption(lx, ry + S(3), label);
+				int at = ry;
+				ry += S(32);
+				return at;
+			};
+			StringBuilder temp;
+			temp << Format::Precision(2);
+			format::RenderTemperature(temp, opts.GetAmbientAirTemperature(), scale);
+			NumberButton(bx, row(L"Air temperature"), nw, "Ambient air temperature", temp.Build(),
+			             FloatSetting(MIN_TEMP, MAX_TEMP, [scale](const String &s) { return format::StringToTemperature(s, scale); }, [&opts](float v) { opts.SetAmbientAirTemperature(v); }),
+			             L"The air's temperature at the edges (with ambient heat); a unit like 20C or 300K works");
+			NumberButton(bx, row(L"Air pressure"), nw, "Ambient air pressure", String::Build(Format::Precision(2), opts.GetEdgePressure()),
+			             FloatSetting(MIN_PRESSURE, MAX_PRESSURE, [](const String &s) { return s.ToNumber<float>(); }, [&opts](float v) { opts.SetEdgePressure(v); }),
+			             L"The pressure at the edges");
+			NumberButton(bx, row(L"Vorticity"), nw, "Vorticity confinement", String::Build(Format::Precision(2), opts.GetVorticityCoeff()),
+			             FloatSetting(0, 1, [](const String &s) { return s.ToNumber<float>(); }, [&opts](float v) { opts.SetVorticityCoeff(v); }),
+			             L"How much the air keeps its swirls, 0 to 1");
+			ListButton(bx, row(L"Heat convection"), nw, { L"None", L"Legacy", L"Boussinesq" }, opts.GetConvectionMode(),
+			           [&opts](int i) { opts.SetConvectionMode(i); }, L"How hot air rises");
+			ListButton(bx, row(L"Temperatures in"), nw, { L"Kelvin", L"Celsius", L"Fahrenheit" }, int(scale),
+			           [&opts](int i) { opts.SetTemperatureScale(TempScale(i)); }, L"For the HUD and typed temperatures");
 		}
 
 		void PaintDisplay()
@@ -2979,6 +3014,79 @@ namespace
 			family(0, L"Windows", windowsThemes);
 			family(1, L"Mac", macThemes);
 			Toggle(x + S(12), top + 2 * S(32), L"TempleOS", current == templeIndex, true, [] { SetTheme(templeIndex); }, L"Windows and menus look like TempleOS");
+			y += S(116);
+
+			auto &opts = Options();
+			top = Group(x, y, w, S(36) + 3 * S(24) + 2 * S(32), L"TPT settings");
+			int half = (w - S(24)) / 2, lx = x + S(12);
+			Toggle(lx, top, L"Perfect circle brush", opts.GetPerfectCircle(), false, [&opts] { opts.SetPerfectCircle(!opts.GetPerfectCircle()); }, L"Rounder small circle brushes");
+			Toggle(lx + half, top, L"Pressure in saves", opts.GetIncludePressure(), false, [&opts] { opts.SetIncludePressure(!opts.GetIncludePressure()); },
+			       L"Saves and stamps keep the air pressure");
+			Toggle(lx, top + S(24), L"Smooth scrolling", opts.GetMomentumScroll(), false, [&opts] { opts.SetMomentumScroll(!opts.GetMomentumScroll()); }, L"Momentum scrolling in TPT's lists");
+			Toggle(lx + half, top + S(24), L"Quit without asking", opts.GetFastQuit(), false, [&opts] { opts.SetFastQuit(!opts.GetFastQuit()); }, L"No confirmation when closing TPT");
+			Toggle(lx, top + 2 * S(24), L"Show avatars", opts.GetShowAvatars(), false, [&opts] { opts.SetShowAvatars(!opts.GetShowAvatars()); }, L"Profile pictures in the online browser");
+			int ry = top + 3 * S(24) + S(4);
+			Caption(lx, ry + S(3), L"Deco colour space");
+			ListButton(x + S(220), ry, std::min(S(200), x + w - S(232)), { L"sRGB", L"Linear", L"Gamma 2.2", L"Gamma 1.8" }, opts.GetDecoSpace(),
+			           [&opts](int i) { opts.SetDecoSpace(i); }, L"How deco colours blend");
+			PushButton(lx, ry + S(32), S(200), L"All of TPT's options\u2026", [] { GameController::Ref().OpenOptions(); }, L"TPT's own settings window: everything else");
+		}
+
+		// TPT's settings, through its own options model (which saves the prefs).
+		static OptionsModel &Options()
+		{
+			static OptionsModel options(GameController::Ref().GetModel());
+			return options;
+		}
+
+		// A setting picked from a list: the choice on a button, the list as a native menu under it.
+		void ListButton(int bx, int by, int bw, std::vector<std::wstring> names, int current, std::function<void(int)> set, const std::wstring &tip)
+		{
+			PushButton(bx, by, bw, current >= 0 && current < int(names.size()) ? names[current] : L"\u2014", [this, names, current, set, bx, by, bw] {
+				later = [this, names, current, set, rc = RECT{ bx, by, bx + bw, by + S(23) }] {
+					HMENU m = CreatePopupMenu();
+					for (int i = 0; i < int(names.size()); i++) AppendMenuW(m, MF_STRING | (i == current ? MF_CHECKED : 0), UINT(i + 1), names[i].c_str());
+					POINT p{ rc.left, rc.bottom };
+					ClientToScreen(hwnd, &p);
+					int cmd = TrackPopupMenu(m, TPM_RETURNCMD | TPM_NONOTIFY, p.x, p.y, 0, hwnd, nullptr);
+					DestroyMenu(m);
+					if (cmd > 0) set(cmd - 1);
+					dirty = true;
+				};
+			}, tip);
+			for (int i = 0, k = S(4), ax = bx + bw - S(20), ay = by + S(10); i <= k; i++) Line(cv, ax + i, ay + i, 2 * (k - i) + 1, 1, theme->ink); // the arrow
+		}
+
+		// A number setting: the value on a button; a click asks for a new one. use(text, apply): is it valid, and
+		// when apply, set it.
+		void NumberButton(int bx, int by, int bw, const String &title, const String &value, std::function<bool(const String &, bool)> use, const std::wstring &tip)
+		{
+			PushButton(bx, by, bw, Wide(value), [this, title, value, use] {
+				later = [this, title, value, use] {
+					int none = 0;
+					String text = value;
+					if (OverlayWindows::Form(title, title + ":", {}, none, text, {}, [use](int, const String &v) { return use(v, false); }) == 1) use(text, true);
+					dirty = true;
+				};
+			}, tip);
+		}
+
+		// A float typed in, within [lo, hi].
+		static std::function<bool(const String &, bool)> FloatSetting(float lo, float hi, std::function<float(const String &)> parse, std::function<void(float)> set)
+		{
+			return [=](const String &s, bool apply) {
+				try
+				{
+					float v = parse(s);
+					if (!(v >= lo && v <= hi)) return false;
+					if (apply) set(v);
+					return true;
+				}
+				catch (const std::exception &)
+				{
+					return false;
+				}
+			};
 		}
 
 		// A theme family's list as a menu under its button.
@@ -4649,7 +4757,7 @@ int OverlayWindows::Form(const String &title, const String &prompt, const std::v
 	struct State
 	{
 		std::function<bool(int, const String &)> valid;
-		HWND combo, edit, ok;
+		HWND combo = nullptr, edit, ok;
 		int result = -1;
 		void Check()
 		{
@@ -4692,7 +4800,8 @@ int OverlayWindows::Form(const String &title, const String &prompt, const std::v
 	SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0);
 	HFONT font = CreateFontIndirectW(&ncm.lfMessageFont);
 
-	int cw = D(340), ch = D(146);
+	int dy = options.empty() ? 32 : 0; // no drop-down: everything moves up
+	int cw = D(340), ch = D(146 - dy);
 	RECT wr{ 0, 0, cw, ch };
 	DWORD style = WS_POPUP | WS_CAPTION | WS_SYSMENU, ex = WS_EX_DLGMODALFRAME | WS_EX_TOPMOST;
 	AdjustWindowRectEx(&wr, style, FALSE, ex);
@@ -4708,15 +4817,18 @@ int OverlayWindows::Form(const String &title, const String &prompt, const std::v
 		return c;
 	};
 	child(L"STATIC", Wide(prompt).c_str(), 0, 12, 12, 316, 18, -1);
-	st.combo = child(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 12, 36, 160, 300, idCombo);
-	for (auto &o : options) SendMessageW(st.combo, CB_ADDSTRING, 0, LPARAM(Wide(o).c_str()));
-	SendMessageW(st.combo, CB_SETCURSEL, WPARAM(choice), 0);
-	st.edit = child(L"EDIT", Wide(text).c_str(), ES_AUTOHSCROLL | WS_TABSTOP, 12, 68, 316, 24, idEdit);
+	if (!options.empty())
+	{
+		st.combo = child(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 12, 36, 160, 300, idCombo);
+		for (auto &o : options) SendMessageW(st.combo, CB_ADDSTRING, 0, LPARAM(Wide(o).c_str()));
+		SendMessageW(st.combo, CB_SETCURSEL, WPARAM(choice), 0);
+	}
+	st.edit = child(L"EDIT", Wide(text).c_str(), ES_AUTOHSCROLL | WS_TABSTOP, 12, 68 - dy, 316, 24, idEdit);
 	if (limit) SendMessageW(st.edit, EM_SETLIMITTEXT, WPARAM(limit), 0);
 	int bx = 12;
-	for (int i = 0; i < int(extras.size()); i++, bx += 81) child(L"BUTTON", Wide(extras[i]).c_str(), BS_PUSHBUTTON | WS_TABSTOP, bx, 108, 75, 26, idExtra + i);
-	st.ok = child(L"BUTTON", L"OK", BS_DEFPUSHBUTTON | WS_TABSTOP, 172, 108, 75, 26, IDOK);
-	child(L"BUTTON", L"Cancel", BS_PUSHBUTTON | WS_TABSTOP, 253, 108, 75, 26, IDCANCEL);
+	for (int i = 0; i < int(extras.size()); i++, bx += 81) child(L"BUTTON", Wide(extras[i]).c_str(), BS_PUSHBUTTON | WS_TABSTOP, bx, 108 - dy, 75, 26, idExtra + i);
+	st.ok = child(L"BUTTON", L"OK", BS_DEFPUSHBUTTON | WS_TABSTOP, 172, 108 - dy, 75, 26, IDOK);
+	child(L"BUTTON", L"Cancel", BS_PUSHBUTTON | WS_TABSTOP, 253, 108 - dy, 75, 26, IDCANCEL);
 	SetWindowLongPtrW(dlg, GWLP_USERDATA, LONG_PTR(&st));
 	st.Check();
 	st.result = -1;
@@ -4738,7 +4850,7 @@ int OverlayWindows::Form(const String &title, const String &prompt, const std::v
 	wchar_t buf[512];
 	GetWindowTextW(st.edit, buf, 512);
 	text = Platform::WinNarrow(buf).FromUtf8();
-	choice = int(SendMessageW(st.combo, CB_GETCURSEL, 0, 0));
+	if (st.combo) choice = int(SendMessageW(st.combo, CB_GETCURSEL, 0, 0));
 	EnableWindow(owner, TRUE);
 	DestroyWindow(dlg);
 	DeleteObject(font);
