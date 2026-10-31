@@ -2548,7 +2548,7 @@ namespace
 				{ L"Acid etching", L"How fast acid pits the windows it touches (cleared with the sim)", &overlayFeel.acid, 3, "Acid" },
 				{ L"Water streaks", L"How much water streaks the windows it runs over (they dry)", &overlayFeel.water, 3, "Water" },
 				{ L"Acid eats windows", L"How fast acid eats holes in windows and icons (with Destructible on)", &overlayFeel.acidEat, 3, "AcidEat" },
-				{ L"Hole opacity", L"How solid a hole's inside is drawn: full shows the wallpaper behind, off shows the window itself with only the rim", &overlayFeel.holeOpacity, 1, "HoleOpacity" },
+				{ L"Hole opacity", L"0: holes are fully see-through to whatever is really behind the window (your other windows, the desktop). Up: the broken part of the window fades back in", &overlayFeel.holeOpacity, 1, "HoleSolid" },
 				{ L"Shards", L"How many bits chip off and fly when something breaks a window (off: none)", &overlayFeel.shards, 3, "Shards" },
 				{ L"Shard size", L"How big each chip is, in sim pixels", &overlayFeel.shardSize, 6, "ShardSize" },
 				{ L"Black holes", L"How far and hard black holes (NBHL) tear at windows and icons near them (with Destructible on)", &overlayFeel.blackHole, 3, "BlackHole" },
@@ -4665,7 +4665,7 @@ void OverlayWindows::Init(void *mainHwnd)
 	overlayFeel.destructible = prefs.Get("Overlay.Feel.Destructible", false);
 	overlayFeel.shardTint = prefs.Get("Overlay.Feel.ShardTint", true);
 	overlayFeel.shardParticles = prefs.Get("Overlay.Feel.ShardParticles", false);
-	for (auto [v, name] : { std::pair{ &overlayFeel.grip, "Grip" }, { &overlayFeel.fling, "Fling" }, { &overlayFeel.push, "Push" }, { &overlayFeel.wind, "Wind" }, { &overlayFeel.scorch, "Scorch" }, { &overlayFeel.frost, "Frost" }, { &overlayFeel.acid, "Acid" }, { &overlayFeel.water, "Water" }, { &overlayFeel.acidEat, "AcidEat" }, { &overlayFeel.blast, "Blast" }, { &overlayFeel.holeOpacity, "HoleOpacity" }, { &overlayFeel.shards, "Shards" }, { &overlayFeel.shardSize, "ShardSize" }, { &overlayFeel.blackHole, "BlackHole" }, { &overlayFeel.shake, "Shake" } })
+	for (auto [v, name] : { std::pair{ &overlayFeel.grip, "Grip" }, { &overlayFeel.fling, "Fling" }, { &overlayFeel.push, "Push" }, { &overlayFeel.wind, "Wind" }, { &overlayFeel.scorch, "Scorch" }, { &overlayFeel.frost, "Frost" }, { &overlayFeel.acid, "Acid" }, { &overlayFeel.water, "Water" }, { &overlayFeel.acidEat, "AcidEat" }, { &overlayFeel.blast, "Blast" }, { &overlayFeel.holeOpacity, "HoleSolid" }, { &overlayFeel.shards, "Shards" }, { &overlayFeel.shardSize, "ShardSize" }, { &overlayFeel.blackHole, "BlackHole" }, { &overlayFeel.shake, "Shake" } })
 		*v = prefs.Get(ByteString("Overlay.Feel.") + name, *v);
 	// Default UI scale: the larger of Windows' display scaling (TPT is DPI aware) and screen height / 1080, in
 	// quarter steps. Overridable.
@@ -4983,6 +4983,123 @@ static const std::vector<uint32_t> &HoleBackdrop(RECT sr, int sw, int sh)
 	return backdrop;
 }
 
+static std::map<HWND, RECT> wallRects, frameRects; // the wall windows when the sim last read them / at the frame drawn
+
+// What is really behind holed windows: the windows under each one, captured with PrintWindow a few times a second on
+// a worker thread (scaled to sim pixels), over the wallpaper.
+namespace
+{
+	struct Shot { int w = 0, h = 0; std::vector<uint32_t> px; }; // the whole window (GetWindowRect), in sim pixels
+	std::mutex shotLock;
+	std::map<HWND, Shot> shots;
+	std::vector<HWND> shotWanted;
+	RECT shotScreen{}; // the overlay's screen rect: sim pixel size
+}
+
+static void ShotWorker()
+{
+	for (;;)
+	{
+		std::this_thread::sleep_for(std::chrono::milliseconds(250));
+		std::vector<HWND> want;
+		RECT sr;
+		{
+			std::lock_guard lock(shotLock);
+			want = shotWanted;
+			sr = shotScreen;
+		}
+		int sw = sr.right - sr.left, sh = sr.bottom - sr.top;
+		std::map<HWND, Shot> got;
+		for (auto hwnd : want)
+		{
+			RECT r;
+			if (sw <= 0 || sh <= 0 || !GetWindowRect(hwnd, &r) || r.right <= r.left || r.bottom <= r.top) continue;
+			int ww = r.right - r.left, wh = r.bottom - r.top;
+			HDC screen = GetDC(nullptr), dc = CreateCompatibleDC(screen);
+			BITMAPINFO bi{};
+			bi.bmiHeader = { sizeof(BITMAPINFOHEADER), ww, -wh, 1, 32, BI_RGB };
+			void *bits = nullptr;
+			HBITMAP bmp = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+			if (bmp)
+			{
+				auto old = SelectObject(dc, bmp);
+				if (PrintWindow(hwnd, dc, 2 /* PW_RENDERFULLCONTENT: GPU-drawn windows too */))
+				{
+					Shot s{ std::max(1, ww * WINDOWW / sw), std::max(1, wh * WINDOWH / sh), {} };
+					s.px.resize(size_t(s.w) * s.h);
+					for (int y = 0; y < s.h; y++)
+						for (int x = 0; x < s.w; x++)
+						{
+							int ix = std::min(ww - 1, int((x + 0.5) * sw / WINDOWW)), iy = std::min(wh - 1, int((y + 0.5) * sh / WINDOWH));
+							s.px[size_t(y) * s.w + x] = ((uint32_t *)bits)[size_t(iy) * ww + ix] & 0xFFFFFF;
+						}
+					got[hwnd] = std::move(s);
+				}
+				SelectObject(dc, old);
+				DeleteObject(bmp);
+			}
+			DeleteDC(dc);
+			ReleaseDC(nullptr, screen);
+		}
+		std::lock_guard lock(shotLock);
+		shots = std::move(got);
+	}
+}
+
+// The wallpaper, and in each holed window's holes the windows under it, topmost first.
+static const uint32_t *HoleBehind(const Simulation *sim, RECT sr)
+{
+	int sw = sr.right - sr.left, sh = sr.bottom - sr.top;
+	static std::vector<uint32_t> behind;
+	behind = HoleBackdrop(sr, sw, sh);
+	static bool started = false;
+	if (!started) std::thread(ShotWorker).detach(), started = true;
+	std::vector<HWND> want;
+	std::lock_guard lock(shotLock);
+	shotScreen = sr;
+	auto px = [](long v, int n, int nw) { return int(std::floor(double(v) * n / nw)); }; // screen -> sim pixels
+	for (auto &[id, m] : sim->windowMarks)
+	{
+		HWND top = HWND(id);
+		if (!m.any[Simulation::MarkHole] || !wallRects.count(top)) continue; // icons: just the wallpaper
+		auto &hole = m.a[Simulation::MarkHole];
+		struct Under { int x0, y0; const Shot *shot; };
+		std::vector<Under> under;
+		for (HWND h = GetWindow(top, GW_HWNDNEXT); h && under.size() < 12; h = GetWindow(h, GW_HWNDNEXT))
+		{
+			BOOL cloaked = FALSE;
+			DwmGetWindowAttribute(h, DWMWA_CLOAKED, &cloaked, sizeof(cloaked));
+			wchar_t cls[32];
+			GetClassNameW(h, cls, 32);
+			RECT r;
+			if (h == mainWindow || !IsWindowVisible(h) || IsIconic(h) || cloaked || !wcscmp(cls, L"Progman") || !wcscmp(cls, L"WorkerW") ||
+			    !GetWindowRect(h, &r))
+				continue;
+			int x0 = px(r.left - sr.left, WINDOWW, sw), y0 = px(r.top - sr.top, WINDOWH, sh);
+			int x1 = px(r.right - sr.left, WINDOWW, sw), y1 = px(r.bottom - sr.top, WINDOWH, sh);
+			if (x1 <= m.x || y1 <= m.y || x0 >= m.x + m.w || y0 >= m.y + m.h) continue;
+			want.push_back(h);
+			auto it = shots.find(h);
+			if (it != shots.end()) under.push_back({ x0, y0, &it->second });
+		}
+		for (int j = 0; j < m.h; j++)
+			for (int i = 0; i < m.w; i++)
+			{
+				int x = m.x + i, y = m.y + j;
+				if (!hole[size_t(j) * m.w + i] || x < 0 || y < 0 || x >= XRES || y >= YRES) continue;
+				for (auto &u : under)
+				{
+					int sx = x - u.x0, sy = y - u.y0;
+					if (sx < 0 || sy < 0 || sx >= u.shot->w || sy >= u.shot->h) continue;
+					behind[size_t(y) * XRES + x] = u.shot->px[size_t(sy) * u.shot->w + sx];
+					break;
+				}
+			}
+	}
+	shotWanted = std::move(want);
+	return behind.data();
+}
+
 void OverlayWindows::ApplySimMasks(uint32_t *argb, int w, const uint8_t *occupied)
 {
 	if (!&GameController::Ref())
@@ -5025,7 +5142,7 @@ void OverlayWindows::ApplySimMasks(uint32_t *argb, int w, const uint8_t *occupie
 	{
 		RECT sr;
 		GetWindowRect(mainWindow, &sr);
-		if (sr.right > sr.left && sr.bottom > sr.top) backdrop = HoleBackdrop(sr, sr.right - sr.left, sr.bottom - sr.top).data();
+		if (sr.right > sr.left && sr.bottom > sr.top) backdrop = HoleBehind(sim, sr);
 	}
 	OverlayDrawMarks(sim, argb, w, occupied, 2, backdrop);
 	if (!full)
@@ -5208,7 +5325,6 @@ static std::vector<DeskIcon> DesktopIcons()
 // pile on title bars and flow around windows. A window moving onto particles shoves each one along its move to the
 // first free pixel past it, at the window's speed; one that appeared or grew lifts them out over its top. One with
 // no room left stays put, hidden under the window (never deleted).
-static std::map<HWND, RECT> wallRects, frameRects; // the wall windows when the sim last read them / at the frame drawn
 
 void OverlayWindows::FrameWalls(std::vector<uint8_t> &mask, uint8_t bit)
 {
