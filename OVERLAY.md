@@ -222,13 +222,15 @@ Assessment, in the order I'd do it (effort: S = an hour or two, M = a session, L
    frames (same slot + type, < 8 px) are cut out and drawn as GPU squares sliding from old to new position
    (one tick of latency). Window walls run once per sim tick. The black-particle mask uses the shown frame's
    positions (live pmap is a tick ahead: it painted black squares). No sliding while zoom is on.
-   Measured: 117-121 frames/s with ~3000 grains sliding, sim steady at 60. Behind-icons layer: old GDI path.
+   Measured: 117-121 frames/s with ~3000 grains sliding, sim steady at 60.
    Later (user: no added latency): no tick of lag any more. The newest sim frame is shown at once and moving
    grains are carried on at their speed (not into a still grain or a wall); TPT's render thread is off on the
    overlay (it shows the frame from a tick before); one GPU frame queued. Sand on a rising window is lifted with
    it each drawn frame (WindowShifts: windows moved since the frame's walls); the window cut-out uses the frame's
    walls, not the live ones (those erased the pile's bottom rows: the "sinking"). Measured with a rising test
    window: pile 0-1 px above the title bar, as at rest. Frame loops in parallel bands: prep 2.1 -> 0.5 ms.
+   Behind-icons layer on the GPU too: the view window is re-parented into the desktop window, just above ours
+   (ours goes alpha 0); tested: sand falls behind the icons. Switching layers at run time: untested.
    2026-10-30 later: pixel-exact and every frame (user: "smoother, less blocky"). Windows are no longer WL_WALL
    cells but Simulation::pixelWalls, a per-pixel mask eval_move and brush drawing respect; unlike walls it never
    deletes particles, which fixes the ~2% grain loss. Tested: a pile rides a rising window with a smooth edge,

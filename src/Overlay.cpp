@@ -281,7 +281,19 @@ float4 PartPs(V i) : SV_Target { return i.col; }
 		}
 		if (!gpu) return false;
 		auto &g = *gpu;
-		if (!g.alphaSet) g.alphaSet = SetLayeredWindowAttributes(hwnd, 0, 1, LWA_ALPHA);
+		// Behind the icons ours is a child of Explorer's desktop window (ApplyLayer): the view goes in with it, just
+		// above it, and ours turns invisible (it takes no clicks there).
+		HWND desk = GetParent(hwnd);
+		if (GetAncestor(g.view, GA_PARENT) != (desk ? desk : GetDesktopWindow()))
+		{
+			auto style = GetWindowLongPtrW(g.view, GWL_STYLE);
+			SetWindowLongPtrW(g.view, GWL_STYLE, desk ? (style | WS_CHILD) & ~LONG_PTR(WS_POPUP) : (style & ~LONG_PTR(WS_CHILD)) | WS_POPUP);
+			SetParent(g.view, desk);
+			if (!desk) SetWindowLongPtrW(g.view, GWLP_HWNDPARENT, LONG_PTR(hwnd)); // owned by ours again: just above it
+			g.at = {};
+			g.alphaSet = false;
+		}
+		if (!g.alphaSet) g.alphaSet = SetLayeredWindowAttributes(hwnd, 0, desk ? 0 : 1, LWA_ALPHA);
 		RECT wr;
 		GetWindowRect(hwnd, &wr);
 		if (!IsWindowVisible(hwnd) || IsIconic(hwnd))
@@ -289,18 +301,21 @@ float4 PartPs(V i) : SV_Target { return i.col; }
 			ShowWindow(g.view, SW_HIDE);
 			return true;
 		}
-		if (!EqualRect(&wr, &g.at) || !IsWindowVisible(g.view))
+		HWND above = desk ? GetWindow(hwnd, GW_HWNDPREV) : nullptr; // what the view goes under, to sit on ours
+		if (!EqualRect(&wr, &g.at) || !IsWindowVisible(g.view) || (desk && above != g.view))
 		{
 			g.at = wr;
-			SetWindowPos(g.view, nullptr, wr.left, wr.top, wr.right - wr.left, wr.bottom - wr.top,
-			             SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+			RECT r = wr;
+			if (desk) MapWindowPoints(HWND_DESKTOP, desk, (POINT *)&r, 2);
+			SetWindowPos(g.view, desk ? (above ? above : HWND_TOP) : nullptr, r.left, r.top, r.right - r.left, r.bottom - r.top,
+			             (desk ? 0 : SWP_NOZORDER) | SWP_NOACTIVATE | SWP_SHOWWINDOW);
 		}
 		// clicks: ours takes them only over a drawn pixel (or alpha 1: empty space that catches clicks)
 		POINT cur;
 		GetCursorPos(&cur);
 		int cx = int((cur.x - wr.left) * int64_t(w) / std::max(1L, wr.right - wr.left));
 		int cy = int((cur.y - wr.top) * int64_t(h) / std::max(1L, wr.bottom - wr.top));
-		bool miss = cx < 0 || cy < 0 || cx >= w || cy >= h || !(argb[size_t(cy) * w + cx] >> 24);
+		bool miss = desk || cx < 0 || cy < 0 || cx >= w || cy >= h || !(argb[size_t(cy) * w + cx] >> 24);
 		if (miss != cursorMiss)
 		{
 			cursorMiss = miss;
@@ -490,7 +505,7 @@ float4 PartPs(V i) : SV_Target { return i.col; }
 			SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex & ~LONG_PTR(WS_EX_LAYERED));
 			SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED);
 			SetLayeredWindowAttributes(hwnd, layerKey, 0, LWA_COLORKEY);
-			if (gpu) gpu->alphaSet = false, ShowWindow(gpu->view, SW_HIDE);
+			if (gpu) gpu->alphaSet = false; // GpuPresent moves the view in with it
 			// see-through until the first frame (an unpainted window is black over the whole desktop)
 			RECT rc;
 			GetClientRect(hwnd, &rc);
@@ -842,8 +857,8 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 		}
 	}
 	OverlayWindows::ClearUnderWindows(argb.data(), w, h, ww, wh);
+	if (GpuPresent(argb.data(), w, h, ww, wh, empty)) return;
 	bool keyed = GetParent(hwnd);
-	if (!keyed && GpuPresent(argb.data(), w, h, ww, wh, empty)) return;
 	if (keyed)
 	{
 		// Behind the icons, inside Explorer's desktop window: Windows 11 24H2 and later refuse per-pixel alpha
