@@ -310,9 +310,11 @@ void SDLSetScreen()
 		LoadWindowPosition();
 		if (overlayMode && !overlayWindowed)
 		{
-			// The overlay covers its monitor; a saved normal-window position would push it off screen.
-			auto centred = SDL_WINDOWPOS_CENTERED_DISPLAY(SDL_GetWindowDisplayIndex(sdl_window));
-			SDL_SetWindowPosition(sdl_window, centred, centred);
+			// The overlay starts at its monitor's corner (hidden menus hang off the right and bottom edges); a saved
+			// normal-window position would push it off screen.
+			SDL_Rect display;
+			SDL_GetDisplayBounds(SDL_GetWindowDisplayIndex(sdl_window), &display);
+			SDL_SetWindowPosition(sdl_window, display.x, display.y);
 		}
 	}
 	ApplyFpsLimit();

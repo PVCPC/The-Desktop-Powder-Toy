@@ -75,7 +75,7 @@ namespace
 	void ApplyPassThrough()
 	{
 		bool pass = input == OverlayInput::PassThrough || fullScreenApp || layer == OverlayLayer::BehindIcons;
-		OverlayWindows::SetPassThrough(pass);
+		OverlayWindows::SetPassThrough(fullScreenApp);
 		auto ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
 		ex = pass ? ex | WS_EX_TRANSPARENT : ex & ~LONG_PTR(WS_EX_TRANSPARENT);
 		SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex);
@@ -249,7 +249,8 @@ std::pair<Vec2<int>, int> OverlaySimSize(int scale)
 	Vec2<int> screen(GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
 	for (scale = std::max(scale, 1); ; scale++)
 	{
-		auto cells = (screen / scale - Vec2(BARSIZE, MENUSIZE)) / CELL;
+		bool menus = GlobalPrefs::Ref().Get("Overlay.ShowTPTMenus", false);
+		auto cells = (screen / scale - (menus ? Vec2(BARSIZE, MENUSIZE) : Vec2(0, 0))) / CELL; // hidden menus: off screen
 		// pmap holds the particle index above PMAPBITS
 		if (int64_t(cells.X) * cells.Y * CELL * CELL <= (int64_t(1) << (31 - PMAPBITS)))
 		{
@@ -348,9 +349,13 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 		dibW = ww;
 		dibH = wh;
 	}
-	// Black is alpha 0: see-through, and clicks on it reach the desktop. Locked mode gives it alpha 1 instead:
+	// Black is alpha 0: see-through, and clicks on it reach the desktop. Catching clicks gives it alpha 1 instead:
 	// still invisible, but it catches clicks. Black particles stay solid, and hidden menu bars are always clear.
-	uint32_t empty = input == OverlayInput::Locked ? 0x01000000 : 0;
+	// Auto: empty space catches clicks while TPT is the app in front, and passes them once another app is.
+	DWORD fg = 0;
+	GetWindowThreadProcessId(GetForegroundWindow(), &fg);
+	bool catchEmpty = input == OverlayInput::Locked || (input == OverlayInput::Auto && fg == GetCurrentProcessId());
+	uint32_t empty = catchEmpty ? 0x01000000 : 0;
 	argb.resize(size_t(w) * h);
 	for (int i = 0; i < w * h; i++)
 	{

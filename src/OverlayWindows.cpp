@@ -597,7 +597,7 @@ namespace
 	// secondary, as in TPT. The other tabs are immediate-mode Vista controls: each paint rebuilds the list of
 	// clickable rectangles (hits) that the mouse handler uses.
 	void OpenTorn(int tab);
-	void Restart(int scale, bool windowed);
+	void Restart(int scale, bool windowed, bool force = false);
 	void LoadSceneTiles();
 
 	struct SideWindow : Panel
@@ -1319,7 +1319,7 @@ namespace
 				return Platform::WinWiden(prefs.Get(ByteString("Overlay.Keys.") + name, ByteString(fallback)));
 			};
 			int top = Group(x, y, w, S(100), L"Clicks go to");
-			const wchar_t *modes[] = { L"Auto: particles and menus to TPT, empty space to the desktop", L"Pass-through: everything to the desktop", L"Locked: everything to TPT" };
+			const wchar_t *modes[] = { L"Auto: TPT while it's in front, the desktop once another app is", L"Pass-through: the sim takes no clicks (side windows still do)", L"Locked: everything to TPT" };
 			for (int i = 0; i < int(OverlayInput::Count); i++)
 			{
 				Toggle(x + S(12), top + i * S(24), modes[i], int(OverlayGetInput()) == i, true, [i] { OverlaySetInput(OverlayInput(i)); });
@@ -1337,7 +1337,8 @@ namespace
 			Toggle(x + S(12), top, L"Show TPT's own menus too", showTPTMenus, false, [] {
 				showTPTMenus = !showTPTMenus;
 				GlobalPrefs::Ref().Set("Overlay.ShowTPTMenus", showTPTMenus);
-			});
+				if (!overlayWindowed) Restart(ui::Engine::Ref().windowFrameOps.scale, false, true); // they need room on screen
+			}, L"Restarts TPT: the sim leaves room for the menus");
 			Toggle(x + S(12), top + S(24), L"Pass clicks through while a full-screen app or game is in front", overlayAutoPass, false, [] {
 				overlayAutoPass = !overlayAutoPass;
 				GlobalPrefs::Ref().Set("Overlay.AutoPassThrough", overlayAutoPass);
@@ -1693,9 +1694,9 @@ namespace
 
 	// Saves the scene, sets the new pixel size and starts a fresh TPT, which loads the scene; this one quits.
 	// The other pixel size or mode: the scene goes along in tiles, the new TPT loads it, this one quits.
-	void Restart(int scale, bool windowed)
+	void Restart(int scale, bool windowed, bool force)
 	{
-		if (scale == ui::Engine::Ref().windowFrameOps.scale && windowed == overlayWindowed) return;
+		if (!force && scale == ui::Engine::Ref().windowFrameOps.scale && windowed == overlayWindowed) return;
 		auto *model = GameController::Ref().GetModel();
 		auto *sim = model->GetSimulation();
 		for (int y = 0; y < YCELLS; y += 255)
@@ -2391,6 +2392,7 @@ namespace
 			{
 				showTPTMenus = !showTPTMenus;
 				prefs.Set("Overlay.ShowTPTMenus", showTPTMenus);
+				if (!overlayWindowed) Restart(ui::Engine::Ref().windowFrameOps.scale, false, true);
 			}
 			if (cmd == exitItem)
 			{
@@ -2685,23 +2687,55 @@ void OverlayWindows::ApplySimMasks(uint32_t *argb, int w)
 	}
 }
 
-// A few times a second: every visible window's rectangle becomes wall cells, so particles pile on title bars and
-// flow around windows. Only empty cells are taken, and only those are given back.
+// A moving window shoves the particles in its way: each one goes along the move to the first free pixel past the
+// window, at the window's speed.
+static void PushOut(Simulation *sim, int cx, int cy, int mx, int my, const std::vector<uint8_t> &want)
+{
+	float len = std::hypot(float(mx), float(my));
+	float sx = mx / len * CELL, sy = my / len * CELL;
+	float vx = std::clamp(mx / 2.f, -10.f, 10.f), vy = std::clamp(my / 2.f, -10.f, 10.f); // per frame; this runs every other one
+	for (int py = cy * CELL; py < (cy + 1) * CELL; py++)
+		for (int px = cx * CELL; px < (cx + 1) * CELL; px++)
+		{
+			int r = sim->pmap[py][px];
+			if (!r) continue;
+			for (int k = 1; k < 128; k++)
+			{
+				int tx = int(std::lround(px + sx * k)), ty = int(std::lround(py + sy * k));
+				if (tx < 0 || ty < 0 || tx >= XRES || ty >= YRES) break; // nowhere to go: stays (buried in the wall)
+				if (want[size_t(ty / CELL) * XCELLS + tx / CELL] || sim->bmap[ty / CELL][tx / CELL] || sim->pmap[ty][tx]) continue;
+				auto &part = sim->parts[ID(r)];
+				part.x = float(tx);
+				part.y = float(ty);
+				part.vx = vx;
+				part.vy = vy;
+				sim->pmap[ty][tx] = r;
+				sim->pmap[py][px] = 0;
+				break;
+			}
+		}
+}
+
+// Every other frame: every visible window's rectangle becomes wall cells, so particles pile on title bars and
+// flow around windows, and moving windows push them. Only empty cells are taken, and only those are given back.
 // ponytail: a save made meanwhile includes these walls; strip them in the save path if that bothers anyone.
 static void TickWindowWalls()
 {
 	if (overlayWindowed) return; // no desktop to have windows on
 	static int frames = 0;
-	if (++frames % 20) return;
+	if (++frames % 2) return;
+	static std::map<HWND, RECT> last; // where each window was on the last tick
+	std::map<HWND, RECT> now;
 	auto *sim = GameController::Ref().GetModel()->GetSimulation();
 	ourWalls.resize(size_t(XCELLS) * YCELLS);
 	std::vector<uint8_t> want(ourWalls.size());
+	std::vector<std::pair<int16_t, int16_t>> moved(ourWalls.size()); // the covering window's move since last tick, sim pixels
 	RECT sr;
 	GetWindowRect(mainWindow, &sr);
 	int sw = sr.right - sr.left, sh = sr.bottom - sr.top;
 	if (windowWalls && OverlayGetLayer() == OverlayLayer::OnTop && sw > 0 && sh > 0)
 	{
-		struct Ctx { std::vector<uint8_t> *want; RECT sr; int sw, sh; } ctx{ &want, sr, sw, sh };
+		struct Ctx { std::vector<uint8_t> *want; std::vector<std::pair<int16_t, int16_t>> *moved; std::map<HWND, RECT> *last, *now; RECT sr; int sw, sh; } ctx{ &want, &moved, &last, &now, sr, sw, sh };
 		EnumWindows([](HWND hwnd, LPARAM lp) -> BOOL {
 			auto &c = *(Ctx *)lp;
 			auto ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
@@ -2710,8 +2744,9 @@ static void TickWindowWalls()
 			wchar_t cls[32];
 			GetClassNameW(hwnd, cls, 32);
 			if (hwnd == mainWindow || !IsWindowVisible(hwnd) || IsIconic(hwnd) || cloaked || (ex & WS_EX_TRANSPARENT) ||
-			    ((ex & WS_EX_TOOLWINDOW) && GetWindowThreadProcessId(hwnd, nullptr) != GetCurrentThreadId()) ||
-			    !wcscmp(cls, L"Progman") || !wcscmp(cls, L"WorkerW") || !wcscmp(cls, L"Shell_TrayWnd"))
+			    ((ex & WS_EX_TOOLWINDOW) && GetWindowThreadProcessId(hwnd, nullptr) != GetCurrentThreadId() &&
+			     wcscmp(cls, L"Shell_TrayWnd") && wcscmp(cls, L"Shell_SecondaryTrayWnd")) || // the taskbar is a floor
+			    !wcscmp(cls, L"Progman") || !wcscmp(cls, L"WorkerW"))
 			{
 				return TRUE;
 			}
@@ -2721,8 +2756,19 @@ static void TickWindowWalls()
 			auto cell = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw / CELL)); };
 			int x0 = std::max(0, cell(r.left - c.sr.left, WINDOWW, c.sw)), x1 = std::min(XCELLS, cell(r.right - c.sr.left, WINDOWW, c.sw));
 			int y0 = std::max(0, cell(r.top - c.sr.top, WINDOWH, c.sh)), y1 = std::min(YCELLS, cell(r.bottom - c.sr.top, WINDOWH, c.sh));
+			(*c.now)[hwnd] = r;
+			int16_t mx = 0, my = 0;
+			if (auto it = c.last->find(hwnd); it != c.last->end())
+			{
+				mx = int16_t((r.left - it->second.left) * WINDOWW / c.sw);
+				my = int16_t((r.top - it->second.top) * WINDOWH / c.sh);
+			}
 			for (int y = y0; y < y1; y++)
-				for (int x = x0; x < x1; x++) (*c.want)[size_t(y) * XCELLS + x] = 1;
+				for (int x = x0; x < x1; x++)
+				{
+					(*c.want)[size_t(y) * XCELLS + x] = 1;
+					(*c.moved)[size_t(y) * XCELLS + x] = { mx, my };
+				}
 			return TRUE;
 		}, LPARAM(&ctx));
 	}
@@ -2733,6 +2779,7 @@ static void TickWindowWalls()
 			auto &b = sim->bmap[y][x];
 			if (want[i] && !ourWalls[i] && !b)
 			{
+				if (auto [mx, my] = moved[i]; mx || my) PushOut(sim, x, y, mx, my, want);
 				b = WL_WALL;
 				ourWalls[i] = 1;
 			}
@@ -2742,6 +2789,7 @@ static void TickWindowWalls()
 				ourWalls[i] = 0;
 			}
 		}
+	last = std::move(now);
 }
 
 void OverlayWindows::ClearUnderWindows(uint32_t *argb, int w, int h, int ww, int wh)

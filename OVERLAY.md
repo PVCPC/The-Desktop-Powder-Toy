@@ -11,8 +11,8 @@ clicks on see-through pixels reach the desktop and windows behind. Windows only 
 
 | Mode | Empty space | Particles and menus | Hotkey (default) |
 |---|---|---|---|
-| Auto | clicks go to the desktop | clicks go to TPT | Ctrl+Alt+O cycles modes |
-| Pass-through | desktop | desktop (TPT takes no input) | Ctrl+Alt+P toggles |
+| Auto | TPT while a TPT window is in front, the desktop once another app is | TPT | Ctrl+Alt+O cycles modes |
+| Pass-through | desktop | desktop (the side windows still work) | Ctrl+Alt+P toggles |
 | Locked | TPT (alpha 1: invisible but hit-testable) | TPT | Ctrl+Alt+L toggles |
 
 The hotkeys are global (polled each frame, so they work while TPT is unfocused) and customisable in
@@ -177,7 +177,8 @@ Assessment, in the order I'd do it (effort: S = an hour or two, M = a session, L
    few times a second. Then react to the active window (e.g. it shakes off sand when moved). Desktop icons (S-M,
    read from Explorer's icon list view). Files: undecided, needs a concrete idea first.
    Done 2026-10-30: every visible window (DWM frame bounds, not cloaked/tool/transparent) is invisible WL_WALL cells,
-   3x a second, only in empty cells and only those given back; a moved or closed window drops its sand. Simulation
+   every other frame (moving windows push particles out along the move at the window's speed, 2026-10-30; tested:
+   a pile rides up on a rising window, ~2% of the pushed grains lost; the taskbar is a floor), only in empty cells and only those given back; a moved or closed window drops its sand. Simulation
    tab toggle (Overlay.WindowWalls). Desktop icons and files: not done (no concrete idea yet; add when wanted).
 5. [x] **Auto pass-through while a game or full-screen app has focus** (S). Done 2026-10-30: SHQueryUserNotificationState
    twice a second (busy / D3D full screen / presentation, foreground not TPT); the input mode itself is kept.
