@@ -10,6 +10,9 @@
 #include "gui/game/Notification.h"
 #include "client/SaveFile.h"
 #include "client/SaveInfo.h"
+#include "client/http/SearchSavesRequest.h"
+#include "client/http/ThumbnailRequest.h"
+#include "gui/SavePreviewType.h"
 #include "client/GameSave.h"
 #include "gui/game/GameView.h"
 #include "graphics/VideoBuffer.h"
@@ -2135,10 +2138,25 @@ namespace
 			bool tried = false;
 		};
 		std::vector<Local> locals;
+		// powdertoy.co.uk's saves, a page at a time (the Saves tab's Online saves)
+		struct Online
+		{
+			int id, date, up, down;
+			std::wstring name, author;
+			std::unique_ptr<http::ThumbnailRequest> req;
+			std::unique_ptr<VideoBuffer> thumb;
+			bool tried = false;
+		};
+		std::vector<Online> online;
+		std::unique_ptr<http::SearchSavesRequest> searching;
+		std::wstring onlineQuery, onlineStatus = L"Loading\u2026";
+		int onlineSort = 0, onlinePeriod = 0, onlinePage = 0, onlinePer = 12, onlineTotal = 0; // sort: popular, new, favourites, mine
+		bool onlineSearch = true; // search again at the next tick
 		DWORD localsAt = 0; // when the folders were last listed
 		static constexpr int savesTab = 4;
 		std::wstring query; // Elements tab search: tools from every section whose name or description has it
-		bool typing = false; // the search box has the keyboard
+		bool typing = false; // a search box has the keyboard
+		std::wstring *typed = &query; // which one: the elements' or the online saves'
 		static constexpr const wchar_t *tabNames[] = { L"Elements", L"Tools", L"Simulation", L"Display", L"Saves", L"Overlay", L"Welcome" };
 		static constexpr int toolsTab = 1, welcomeTab = 6;
 
@@ -2220,8 +2238,9 @@ namespace
 		}
 
 		// The search box takes the keyboard from TPT until Enter, Esc or a click elsewhere.
-		void StartTyping()
+		void StartTyping(std::wstring *field = nullptr)
 		{
+			typed = field ? field : &query;
 			typing = true;
 			SetForegroundWindow(hwnd);
 			SetFocus(hwnd);
@@ -2236,17 +2255,23 @@ namespace
 		{
 			if (!typing) return false;
 			if (msg == WM_KILLFOCUS) typing = false;
-			else if (msg == WM_KEYDOWN && wp == VK_ESCAPE) query.clear(), StopTyping();
+			else if (msg == WM_KEYDOWN && wp == VK_ESCAPE) typed->clear(), StopTyping();
+			else if (msg == WM_KEYDOWN && wp == VK_RETURN && typed == &onlineQuery)
+			{
+				onlinePage = 0;
+				onlineSearch = true;
+				StopTyping();
+			}
 			else if (msg == WM_KEYDOWN && wp == VK_RETURN)
 			{
 				auto tools = Tools();
 				if (!tools.empty()) GameController::Ref().SetActiveTool(0, tools[0]);
 				StopTyping();
 			}
-			else if (msg == WM_CHAR && wp == VK_BACK && !query.empty()) query.pop_back();
-			else if (msg == WM_CHAR && wp >= 32) query += wchar_t(wp);
+			else if (msg == WM_CHAR && wp == VK_BACK && !typed->empty()) typed->pop_back();
+			else if (msg == WM_CHAR && wp >= 32) *typed += wchar_t(wp);
 			else return msg == WM_CHAR;
-			scroll = 0;
+			if (typed == &query) scroll = 0;
 			dirty = true;
 			return true;
 		}
@@ -2354,12 +2379,13 @@ namespace
 			auto sr = SearchRect();
 			int sw = sr.right - sr.left, sh = sr.bottom - sr.top;
 			cv.RoundRect(sr.left, sr.top, sw, sh, S(3), 0xFFFFFF, 0xFFFFFF, 255);
-			cv.RoundFrame(sr.left, sr.top, sw, sh, S(3), typing ? 0x3C7FB1 : (Hovered(sr) ? 0x7EB4EA : 0xABADB3), 255);
-			auto shown = query.empty() && !typing ? std::wstring(L"Search elements") : query;
+			bool here = typing && typed == &query;
+			cv.RoundFrame(sr.left, sr.top, sw, sh, S(3), here ? 0x3C7FB1 : (Hovered(sr) ? 0x7EB4EA : 0xABADB3), 255);
+			auto shown = query.empty() && !here ? std::wstring(L"Search elements") : query;
 			auto qs = text->Measure(shown.empty() ? std::wstring(L" ") : shown);
 			int ty = sr.top + (sh - qs.cy) / 2;
 			text->Draw(cv, sr.left + S(6), ty, shown, query.empty() ? 0x6D6D6D : 0x000000, false, sw - S(12));
-			if (typing) Line(cv, sr.left + S(6) + (query.empty() ? 0 : std::min(int(qs.cx), sw - S(12))), ty, std::max(1, S(1)), qs.cy, 0x000000); // the caret
+			if (here) Line(cv, sr.left + S(6) + (query.empty() ? 0 : std::min(int(qs.cx), sw - S(12))), ty, std::max(1, S(1)), qs.cy, 0x000000); // the caret
 			Add(sr, [this] { StartTyping(); }, L"Type to find an element by name or description; Enter picks the first, Esc clears");
 			auto tools = Tools();
 			auto area = ToolArea();
@@ -2698,6 +2724,7 @@ namespace
 			PushButton(x + S(12), top + S(29), bw, L"Stamps\u2026", [] { GameController::Ref().OpenStamps(); }, L"Saved selections (K)");
 			PushButton(x + S(12) + bw + S(6), top + S(29), bw, L"Reload", [] { GameController::Ref().ReloadSim(); }, L"Back to the last loaded save (F5)");
 			y += S(104);
+			PaintOnline(x, y, w);
 			// The rest of what TPT's bottom button row had (it's hidden while the side window is open).
 			top = Group(x, y, w, S(125), L"Online");
 			PushButton(x + S(12), top, bw, L"Browse\u2026", [] { GameController::Ref().OpenSearch(""); }, L"Saves on powdertoy.co.uk");
@@ -2748,6 +2775,133 @@ namespace
 					    [this, path = l.path, stamp = l.stamp, name = l.name] { later = [this, path, stamp, name] { LocalMenu(path, stamp, name); }; });
 				}
 				y += S(74) + rows * (cellH + pad);
+			}
+		}
+
+		// powdertoy.co.uk's saves: a search box, sort, a page of thumbnails (click: TPT's preview, to open, vote,
+		// comment) and page buttons. y moves past it.
+		void PaintOnline(int x, int &y, int w)
+		{
+			int tw = S(124), th = S(78), cellH = th + S(38), pad = S(8);
+			int cols = std::max(1, (w - S(24) + pad) / (tw + pad));
+			if (onlinePer != cols * 3)
+			{
+				onlinePer = cols * 3; // a wider window: more a page
+				onlineSearch = true;
+			}
+			int rows = online.empty() ? 1 : (int(online.size()) + cols - 1) / cols;
+			int h = S(31) + S(36) + rows * (cellH + pad) + S(31) + S(8);
+			int top = Group(x, y, w, h, L"Online saves");
+			RECT sr{ x + S(12), top, x + w - S(12), top + S(23) };
+			int sw = sr.right - sr.left, sh = sr.bottom - sr.top;
+			bool here = typing && typed == &onlineQuery;
+			cv.RoundRect(sr.left, sr.top, sw, sh, S(3), 0xFFFFFF, 0xFFFFFF, 255);
+			cv.RoundFrame(sr.left, sr.top, sw, sh, S(3), here ? 0x3C7FB1 : (Hovered(sr) ? 0x7EB4EA : 0xABADB3), 255);
+			auto shown = onlineQuery.empty() && !here ? std::wstring(L"Search saves") : onlineQuery;
+			auto qs = text->Measure(shown.empty() ? std::wstring(L" ") : shown);
+			int ty = sr.top + (sh - qs.cy) / 2;
+			text->Draw(cv, sr.left + S(6), ty, shown, onlineQuery.empty() ? 0x6D6D6D : 0x000000, false, sw - S(12));
+			if (here) Line(cv, sr.left + S(6) + (onlineQuery.empty() ? 0 : std::min(int(qs.cx), sw - S(12))), ty, std::max(1, S(1)), qs.cy, 0x000000);
+			Add(sr, [this] { StartTyping(&onlineQuery); }, L"Words, user:name or a save ID; Enter searches, Esc clears");
+			int ry = top + S(31), sx = x + S(12);
+			const wchar_t *sorts[] = { L"Popular", L"New", L"Favourites", L"Mine" };
+			bool signedIn = Client::Ref().GetAuthUser().has_value();
+			for (int i = 0; i < (signedIn ? 4 : 2); i++)
+			{
+				sx += Toggle(sx, ry, sorts[i], onlineSort == i, true, [this, i] { onlineSort = i, onlinePage = 0, onlineSearch = true; }) + S(14);
+			}
+			if (onlineSort == 0)
+			{
+				ListButton(x + w - S(12) - S(140), ry, S(140), { L"All time", L"Today", L"This week", L"This month", L"This year" }, onlinePeriod,
+				           [this](int i) { onlinePeriod = i, onlinePage = 0, onlineSearch = true; }, L"Popular saves from this time");
+			}
+			int gy = ry + S(36);
+			if (online.empty()) Caption(x + S(12), gy, onlineStatus, 0x6D6D6D);
+			for (int i = 0; i < int(online.size()); i++)
+			{
+				auto &o = online[i];
+				int cx = x + S(12) + (i % cols) * (tw + pad), cy = gy + (i / cols) * (cellH + pad);
+				RECT rc{ cx, cy, cx + tw, cy + cellH };
+				cv.RoundRect(cx, cy, tw, th, 0, 0x000000, 0x000000, 255);
+				if (o.thumb)
+				{
+					auto size = o.thumb->Size();
+					int ox = cx + (tw - size.X) / 2, oy = cy + (th - size.Y) / 2;
+					for (int py = 0; py < size.Y; py++)
+						for (int px = 0; px < size.X; px++) cv.Blend(ox + px, oy + py, o.thumb->Data()[py * size.X + px] & 0xFFFFFF, 255);
+				}
+				cv.RoundFrame(cx - 1, cy - 1, tw + 2, th + 2, 0, Hovered(rc) ? 0x3C7FB1 : 0xABADB3, 255);
+				auto ns = text->Measure(o.name);
+				text->Draw(cv, cx + std::max(0, (tw - int(ns.cx)) / 2), cy + th + S(3), o.name, theme->ink, false, tw);
+				auto info = L"\u25B2" + std::to_wstring(o.up) + L" \u25BC" + std::to_wstring(o.down) + L"  " + o.author;
+				auto is = text->Measure(info, Text::Style{ 10, FW_NORMAL, false, false, 0x6D6D6D });
+				text->Draw(cv, cx + std::max(0, (tw - int(is.cx)) / 2), cy + th + S(19), info, Text::Style{ 10, FW_NORMAL, false, false, 0x6D6D6D });
+				Add(rc, [id = o.id, date = o.date] { GameController::Ref().OpenSavePreview(id, date, savePreviewNormal); },
+				    o.name + L" by " + o.author + L": click to see it, then open");
+			}
+			int py = gy + rows * (cellH + pad), pages = std::max(1, (onlineTotal + onlinePer - 1) / onlinePer);
+			if (onlinePage > 0) PushButton(x + S(12), py, S(110), L"\u25C0 Previous", [this] { onlinePage--, onlineSearch = true; });
+			if (onlinePage + 1 < pages) PushButton(x + w - S(12) - S(110), py, S(110), L"Next \u25B6", [this] { onlinePage++, onlineSearch = true; });
+			auto page = L"Page " + std::to_wstring(onlinePage + 1) + L" of " + std::to_wstring(pages);
+			Caption(x + (w - int(text->Measure(page).cx)) / 2, py + S(3), page, 0x6D6D6D);
+			y += h + S(8);
+		}
+
+		// The Online saves search and its thumbnails, polled while the Saves tab shows
+		void TickOnline()
+		{
+			if (onlineSearch && !searching)
+			{
+				onlineSearch = false;
+				auto sort = onlineSort == 1 ? http::sortByDate : http::sortByVotes;
+				auto category = onlineSort == 2 ? http::categoryFavourites : onlineSort == 3 ? http::categoryMyOwn : http::categoryNone;
+				auto period = onlineSort == 0 ? http::Period(onlinePeriod) : http::allSaves;
+				searching = std::make_unique<http::SearchSavesRequest>(onlinePage * onlinePer, onlinePer, Platform::WinNarrow(onlineQuery), period, sort, category);
+				searching->Start();
+				online.clear();
+				onlineStatus = L"Loading\u2026";
+				dirty = true;
+			}
+			if (searching && searching->CheckDone())
+			{
+				try
+				{
+					auto [total, saves] = searching->Finish();
+					onlineTotal = total;
+					for (auto &s : saves)
+					{
+						Online o{ s->GetID(), s->GetVersion(), s->GetVotesUp(), s->GetVotesDown(), Wide(s->GetName()), Platform::WinWiden(s->GetUserName()) };
+						online.push_back(std::move(o));
+					}
+					onlineStatus = online.empty() ? L"No saves found" : L"";
+				}
+				catch (const http::RequestError &ex)
+				{
+					onlineStatus = L"Couldn't reach powdertoy.co.uk: " + Platform::WinWiden(ex.what());
+				}
+				searching.reset();
+				dirty = true;
+			}
+			for (auto &o : online)
+			{
+				if (!o.tried)
+				{
+					o.tried = true;
+					o.req = std::make_unique<http::ThumbnailRequest>(o.id, o.date, Vec2<int>{ S(124), S(78) });
+					o.req->Start();
+				}
+				if (o.req && o.req->CheckDone())
+				{
+					try
+					{
+						o.thumb = o.req->Finish();
+					}
+					catch (const http::RequestError &)
+					{
+					}
+					o.req.reset();
+					dirty = true;
+				}
 			}
 		}
 
@@ -3212,6 +3366,7 @@ namespace
 		void TickLocals()
 		{
 			if (tab != savesTab || !IsWindowVisible(hwnd)) return;
+			TickOnline();
 			if (GetTickCount() - localsAt > 2000)
 			{
 				ScanLocals();

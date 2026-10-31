@@ -173,6 +173,9 @@ Assessment, in the order I'd do it (effort: S = an hour or two, M = a session, L
    - [x] Display: view modes, HUD, decorations, gravity field, link to TPT's render options
    - [x] Simulation: play area, pause/step/reload/clear, edges, gravity, air, ambient heat
    - [x] Saves and stamps: buttons that open TPT's own browsers (a native Vista save list is a later step)
+   - [x] Native online save browser (2026-10-31, Saves tab "Online saves"): search box (Enter), Popular / New
+     (+ Favourites / Mine when signed in), period, pages of thumbnails with votes and author; click = TPT's
+     preview. Tested against powdertoy.co.uk: front page, "rocket" search, click opens the preview.
    - [x] Overlay settings: input mode, TPT's menus, shortcut list
    - [x] Hotkey recording and UI scale in the Overlay tab
    - [x] Tear tabs off into their own windows; dock the window to a screen edge (2026-10-30: right-click a tab =
