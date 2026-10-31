@@ -1,3 +1,49 @@
+The Desktop Powder Toy
+======================
+
+A fork of [The Powder Toy](https://github.com/The-Powder-Toy/The-Powder-Toy) that runs the simulation **on your
+Windows desktop**: sand piles up on your open windows and desktop icons, water pours off title bars, and
+everything you don't draw stays see-through and clickable. All of the original game is still here; the original
+README follows below.
+
+Our work is on the [`overlay`](../../tree/overlay) branch. Details, design notes and the to-do list are in
+[OVERLAY.md](OVERLAY.md).
+
+![Sand piled on an open window, water running off another](docs/overlay/sand-on-windows.png)
+
+What's new
+----------
+
+- **Desktop overlay** (`powder.exe overlay:on`): a borderless window over the whole screen. Empty pixels are
+  see-through, and clicks on them go to whatever is behind.
+- **Windows and icons are walls.** Every open window is solid to particles, pixel-exact, and moving one shoves
+  the sand around: lift a window and its pile rides up with it. Desktop icons are walls in their real shapes, so
+  sand drapes over them.
+- **Three layers**: over everything, under app windows (over the wallpaper), or behind the desktop icons like a
+  live wallpaper.
+- **Input modes** for where clicks go: Auto (TPT while it's in front, the desktop otherwise), Pass-through and
+  Locked, with global hotkeys (Ctrl+Alt+O / P / L, customisable). Full-screen apps and games are detected and the
+  overlay steps aside.
+- **Desktop-style menus**: TPT's side bar and tool strip move into real Windows windows (Elements, Simulation,
+  Display, Saves, Overlay tabs) that can be dragged, docked, torn into separate windows and hidden to the tray
+  icon. Dragging one doesn't freeze the simulation.
+- **Big, resizable sim**: the sim fills the screen (422x110 cells at 3x on a 5120x1440 display), with a
+  play area you can resize at run time. Saves made at stock size still open in normal TPT.
+- **Smooth and low latency**: frames go to the GPU (Direct3D 11 + DirectComposition) and are drawn at the
+  screen's refresh rate (120 Hz+) while the physics stays at 60. Moving grains are carried forward between
+  physics steps, so there's no added frame of lag, and sand stays on a moving window.
+- `overlay:window` runs TPT in its normal window but with the new side windows and tray.
+
+![The side windows: Tools, Simulation, Display, Saves and the main window with its Welcome tab](docs/overlay/desktop.png)
+
+| Simulation | Display |
+|---|---|
+| ![Simulation window](docs/overlay/simulation-window.png) | ![Display window](docs/overlay/display-window.png) |
+
+Windows only for now. Build as below, then run `powder.exe overlay:on`.
+
+---
+
 The Powder Toy - June 2026
 ==========================
 
