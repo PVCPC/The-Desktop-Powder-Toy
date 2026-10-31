@@ -36,7 +36,7 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 	for (auto &w : walls)
 	{
 		int mx = w.mx, my = w.my, fx = 0, fy = 0;
-		if (w.id && std::abs(mx) <= 40 && std::abs(my) <= 40)
+		if (w.id && !w.solid && std::abs(mx) <= 40 && std::abs(my) <= 40) // icons jump when dropped: nothing to fling
 		{
 			auto &h = moves[w.id] = lastMoves[w.id];
 			std::rotate(h.begin(), h.begin() + 1, h.end());
@@ -51,13 +51,21 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 				h.fill({ int(std::lround(bx)), int(std::lround(by)) }); // flung once; the speed it has now carries on
 			}
 		}
-		if (w.solid || (!mx && !my && !fx && !fy) || std::abs(mx) > 40 || std::abs(my) > 40) continue;
-		int top = w.y0 - my - 1; // the row just above the old top edge
-		if (top < 0 || top >= YRES) continue;
+		// a dropped icon takes its pile with it however far it went; a window jumping (snapping, maximising) leaves it
+		if (!w.id || (!mx && !my && !fx && !fy) || (!w.solid && (std::abs(mx) > 40 || std::abs(my) > 40))) continue;
 		struct Rider { int r, x, y; };
 		std::vector<Rider> riders;
 		for (int x = std::max(0, w.x0 - mx); x < std::min(XRES, w.x1 - mx); x++)
+		{
+			int top = w.y0 - my - 1; // the row just above the old top edge (an icon: of its shape in this column)
+			if (w.solid)
+			{
+				while (top + 1 < w.y1 - my && !w.solid(x + mx, top + 1 + my)) top++;
+				if (top + 1 >= w.y1 - my) continue; // nothing of it in this column
+			}
+			if (top >= YRES) continue;
 			for (int y = top; y >= 0 && sim->pmap[y][x]; y--) riders.push_back({ sim->pmap[y][x], x, y });
+		}
 		// front ones first: a rider's old spot is then never taken by one moved before it, so a blocked one stays put
 		std::sort(riders.begin(), riders.end(), [mx, my](const Rider &a, const Rider &b) { return a.x * mx + a.y * my > b.x * mx + b.y * my; });
 		for (auto &p : riders) sim->pmap[p.y][p.x] = 0;

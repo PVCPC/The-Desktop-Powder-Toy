@@ -4949,6 +4949,7 @@ struct DeskIcon
 {
 	RECT r;
 	std::shared_ptr<const std::vector<uint8_t>> shape; // (r.right - r.left) squared, 1 = solid; null = the whole square
+	uintptr_t id; // the same item from pass to pass (a hash of its item ID)
 };
 // Null (a plain square for now) when not cached yet and this pass's budget of new pictures is spent: a desktop can
 // hold hundreds of icons, and fetching them all at once takes seconds.
@@ -5041,7 +5042,8 @@ static std::vector<DeskIcon> ReadDesktopIcons(IFolderView2 *&view, HWND &list)
 			{
 				ClientToScreen(list, &p);
 				int x = p.x, y = p.y + 6; // matched by eye against sand resting on icons
-				icons.push_back({ { x, y, x + size, y + size }, IconShape(item, size, budget) });
+				auto id = std::hash<std::string_view>{}({ (const char *)item, ILGetSize(item) });
+				icons.push_back({ { x, y, x + size, y + size }, IconShape(item, size, budget), id });
 			}
 			CoTaskMemFree(item);
 		}
@@ -5267,6 +5269,8 @@ static void TickWindowWalls()
 	}, LPARAM(&ctx));
 	wallRects = std::move(now);
 	auto icons = doIcons ? DesktopIcons() : std::vector<DeskIcon>{};
+	static std::map<uintptr_t, RECT> iconRects; // where each icon was on the last tick
+	std::map<uintptr_t, RECT> iconsNow;
 	if (doIcons)
 		for (auto &icon : icons)
 		{
@@ -5274,15 +5278,22 @@ static void TickWindowWalls()
 			auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); };
 			OverlayWall w{ std::max(0, px(r.left - sr.left, WINDOWW, sw)), std::max(0, px(r.top - sr.top, WINDOWH, sh)),
 			               std::min(XRES, px(r.right - sr.left, WINDOWW, sw)), std::min(YRES, px(r.bottom - sr.top, WINDOWH, sh)), 0, 0, {} };
-			if (icon.shape)
-				// each sim pixel takes the icon pixel under its centre
-				w.solid = [&icon, sr, sw, sh](int x, int y) {
-					int n = icon.r.right - icon.r.left;
-					int ix = int(sr.left + (x + 0.5) * sw / WINDOWW) - icon.r.left, iy = int(sr.top + (y + 0.5) * sh / WINDOWH) - icon.r.top;
-					return ix >= 0 && iy >= 0 && ix < n && iy < n && (*icon.shape)[size_t(iy) * n + ix];
-				};
+			// each sim pixel takes the icon pixel under its centre (the whole square while its picture isn't in yet)
+			w.solid = [&icon, sr, sw, sh](int x, int y) {
+				int n = icon.r.right - icon.r.left;
+				int ix = int(sr.left + (x + 0.5) * sw / WINDOWW) - icon.r.left, iy = int(sr.top + (y + 0.5) * sh / WINDOWH) - icon.r.top;
+				return ix >= 0 && iy >= 0 && ix < n && iy < n && (!icon.shape || (*icon.shape)[size_t(iy) * n + ix]);
+			};
+			if (auto it = iconRects.find(icon.id); it != iconRects.end())
+			{
+				w.mx = px(r.left - it->second.left, WINDOWW, sw);
+				w.my = px(r.top - it->second.top, WINDOWH, sh);
+			}
+			w.id = icon.id;
+			iconsNow[icon.id] = r;
 			if (w.x1 > w.x0 && w.y1 > w.y0) wins.push_back(w);
 		}
+	iconRects = std::move(iconsNow);
 
 	OverlayApplyWalls(sim, wins);
 }

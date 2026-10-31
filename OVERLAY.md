@@ -295,7 +295,9 @@ tray menu: the tray menu stays native on purpose.
 
 - [x] (2026-10-31: `Simulation::windowMarks`, tested on a test window) More window marks, on the scorch system (Simulation::windowSoot gets a kind per pixel): frost from ice, LN2 and
   cryo (pale, melts away slowly), acid etching (greenish pits), water streaks (faint, dry out). A slider each.
-- [ ] Icons carry and fling sand like windows (riding is windows-only today: icon walls are shaped, `w.solid`).
+- [x] Icons carry sand (2026-10-31): an icon only moves when dropped, so its pile jumps with it (no fling: a jump has no
+  speed). Icons have ids (hash of the item ID) and moves; riders sit on the top of the shape per column. Window drag
+  tests unchanged; not tried on real icons (needs the user to drop one).
 - [ ] Water clings to windows: runs down the sides and drips off the bottom edge instead of bouncing off.
 - [ ] Explosions shake nearby windows a few pixels (moves other apps' windows: off by default, a switch to enable).
 - [ ] Falling-sand CPU (~1 core with lots of sand moving): profile TPT's own update and trim what the overlay adds.
