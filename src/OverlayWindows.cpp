@@ -4,7 +4,7 @@
 #include "OverlayWalls.h"
 #ifdef _WIN32
 #undef _WIN32_WINNT
-#define _WIN32_WINNT 0x0601 // IFolderView2 for the desktop icons (the build targets XP)
+#define _WIN32_WINNT 0x0602 // IFolderView2 for the desktop icons, IDesktopWallpaper for holes (the build targets XP)
 #include "Overlay.h"
 #include "gui/game/GameController.h"
 #include "gui/game/GameModel.h"
@@ -73,6 +73,9 @@
 #include <commctrl.h>
 #include <commoncontrols.h>
 #include <exdisp.h>
+#include <shobjidl.h>
+#include <wincodec.h>
+#pragma comment(lib, "windowscodecs.lib")
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "oleaut32.lib")
 #include <d3d11.h>
@@ -2544,10 +2547,15 @@ namespace
 				{ L"Frost", L"How fast ice, LN2 and cryo frost the windows they touch (it melts)", &overlayFeel.frost, 3, "Frost" },
 				{ L"Acid etching", L"How fast acid pits the windows it touches (cleared with the sim)", &overlayFeel.acid, 3, "Acid" },
 				{ L"Water streaks", L"How much water streaks the windows it runs over (they dry)", &overlayFeel.water, 3, "Water" },
-				{ L"Acid eats windows", L"Experiment: acid eats holes in windows and icons (only in the overlay: clear the sim to mend them)", &overlayFeel.acidEat, 3, "AcidEat" },
-				{ L"Blasts break windows", L"Experiment: explosions blow holes in windows and icons (only in the overlay: clear the sim to mend them)", &overlayFeel.blast, 3, "Blast" },
+				{ L"Acid eats windows", L"How fast acid eats holes in windows and icons (with Destructible on)", &overlayFeel.acidEat, 3, "AcidEat" },
+				{ L"Blasts break windows", L"How big a hole explosions blow in windows and icons (with Destructible on)", &overlayFeel.blast, 3, "Blast" },
 			};
-			top = Group(x, y, w, S(26) * int(std::size(feel)) + S(8), L"Desktop physics");
+			top = Group(x, y, w, S(26) * int(std::size(feel)) + S(34), L"Desktop physics");
+			Toggle(x + S(12), top, L"Destructible windows and icons", overlayFeel.destructible, false, [] {
+				overlayFeel.destructible = !overlayFeel.destructible;
+				GlobalPrefs::Ref().Set("Overlay.Feel.Destructible", overlayFeel.destructible);
+			}, L"Acid and explosions eat holes in windows and icons. Only in the overlay: the real windows and icons are never touched, and clearing the sim mends them");
+			top += S(26);
 			for (int i = 0; i < int(std::size(feel)); i++)
 			{
 				auto &f = feel[i];
@@ -2561,7 +2569,7 @@ namespace
 					GlobalPrefs::Ref().Set(ByteString("Overlay.Feel.") + f.pref, *f.v);
 				}, f.tip);
 			}
-			y += S(26) * int(std::size(feel)) + S(16);
+			y += S(26) * int(std::size(feel)) + S(42);
 
 			top = Group(x, y, w, S(76), L"Gravity");
 			const wchar_t *gravs[] = { L"Vertical", L"Off", L"Radial", L"Custom" };
@@ -4641,6 +4649,7 @@ void OverlayWindows::Init(void *mainHwnd)
 	auto &prefs = GlobalPrefs::Ref();
 	windowWalls = prefs.Get("Overlay.WindowWalls", true);
 	iconWalls = prefs.Get("Overlay.IconWalls", true);
+	overlayFeel.destructible = prefs.Get("Overlay.Feel.Destructible", false);
 	for (auto [v, name] : { std::pair{ &overlayFeel.grip, "Grip" }, { &overlayFeel.fling, "Fling" }, { &overlayFeel.push, "Push" }, { &overlayFeel.wind, "Wind" }, { &overlayFeel.scorch, "Scorch" }, { &overlayFeel.frost, "Frost" }, { &overlayFeel.acid, "Acid" }, { &overlayFeel.water, "Water" }, { &overlayFeel.acidEat, "AcidEat" }, { &overlayFeel.blast, "Blast" } })
 		*v = prefs.Get(ByteString("Overlay.Feel.") + name, *v);
 	// Default UI scale: the larger of Windows' display scaling (TPT is DPI aware) and screen height / 1080, in
@@ -4888,6 +4897,77 @@ bool OverlayWindows::HideTPTMenus()
 	return !showTPTMenus && palette && IsWindowVisible(palette->hwnd);
 }
 
+// What a hole eaten in a window shows: the desktop wallpaper behind it, per monitor, in sim pixels (XRES x YRES,
+// 0x00RRGGBB). Rebuilt now and then while there are holes (slideshows, moved overlay).
+// ponytail: wallpaper drawn as "fill" (cover, centred) whatever the fit setting; read IDesktopWallpaper::GetPosition if it matters.
+static const std::vector<uint32_t> &HoleBackdrop(RECT sr, int sw, int sh)
+{
+	static std::vector<uint32_t> backdrop;
+	static ULONGLONG built = 0;
+	static RECT builtFor{};
+	if (!backdrop.empty() && GetTickCount64() - built < 30000 && EqualRect(&sr, &builtFor)) return backdrop;
+	built = GetTickCount64(), builtFor = sr;
+	backdrop.assign(size_t(XRES) * YRES, 0x1A1A1A);
+	CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED); // already on (S_FALSE) or another mode: either is fine
+	IDesktopWallpaper *wall = nullptr;
+	IWICImagingFactory *wic = nullptr;
+	UINT monitors = 0;
+	if (FAILED(CoCreateInstance(CLSID_DesktopWallpaper, nullptr, CLSCTX_ALL, IID_PPV_ARGS(&wall))) ||
+	    FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic))) ||
+	    FAILED(wall->GetMonitorDevicePathCount(&monitors)))
+		monitors = 0;
+	COLORREF solid = 0x1A1A1A;
+	if (wall) wall->GetBackgroundColor(&solid);
+	for (UINT i = 0; i < monitors; i++)
+	{
+		LPWSTR id = nullptr, file = nullptr;
+		RECT mr;
+		if (FAILED(wall->GetMonitorDevicePathAt(i, &id)) || FAILED(wall->GetMonitorRECT(id, &mr)))
+		{
+			CoTaskMemFree(id);
+			continue;
+		}
+		wall->GetWallpaper(id, &file);
+		std::vector<uint8_t> px;
+		UINT iw = 0, ih = 0;
+		IWICBitmapDecoder *dec = nullptr;
+		IWICBitmapFrameDecode *frame = nullptr;
+		IWICFormatConverter *conv = nullptr;
+		if (file && *file && SUCCEEDED(wic->CreateDecoderFromFilename(file, nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand, &dec)) &&
+		    SUCCEEDED(dec->GetFrame(0, &frame)) && SUCCEEDED(wic->CreateFormatConverter(&conv)) &&
+		    SUCCEEDED(conv->Initialize(frame, GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone, nullptr, 0, WICBitmapPaletteTypeCustom)) &&
+		    SUCCEEDED(conv->GetSize(&iw, &ih)) && iw && ih)
+		{
+			px.resize(size_t(iw) * ih * 4);
+			if (FAILED(conv->CopyPixels(nullptr, iw * 4, UINT(px.size()), px.data()))) px.clear();
+		}
+		for (IUnknown *p : std::initializer_list<IUnknown *>{ conv, frame, dec })
+			if (p) p->Release();
+		CoTaskMemFree(file);
+		CoTaskMemFree(id);
+		double mw = mr.right - mr.left, mh = mr.bottom - mr.top;
+		double scale = px.empty() ? 1 : std::max(mw / iw, mh / ih), ox = (mw - iw * scale) / 2, oy = (mh - ih * scale) / 2;
+		for (int y = 0; y < YRES; y++)
+			for (int x = 0; x < XRES; x++)
+			{
+				double sx = sr.left + (x + 0.5) * sw / WINDOWW, sy = sr.top + (y + 0.5) * sh / WINDOWH; // screen point
+				if (sx < mr.left || sx >= mr.right || sy < mr.top || sy >= mr.bottom) continue;
+				auto &b = backdrop[size_t(y) * XRES + x];
+				if (px.empty())
+				{
+					b = GetRValue(solid) << 16 | GetGValue(solid) << 8 | GetBValue(solid);
+					continue;
+				}
+				int ix = std::clamp(int((sx - mr.left - ox) / scale), 0, int(iw) - 1), iy = std::clamp(int((sy - mr.top - oy) / scale), 0, int(ih) - 1);
+				auto *q = &px[(size_t(iy) * iw + ix) * 4];
+				b = q[2] << 16 | q[1] << 8 | q[0];
+			}
+	}
+	if (wic) wic->Release();
+	if (wall) wall->Release();
+	return backdrop;
+}
+
 void OverlayWindows::ApplySimMasks(uint32_t *argb, int w, const uint8_t *occupied)
 {
 	if (!&GameController::Ref())
@@ -4925,7 +5005,14 @@ void OverlayWindows::ApplySimMasks(uint32_t *argb, int w, const uint8_t *occupie
 			}
 		}
 	});
-	OverlayDrawMarks(sim, argb, w, occupied, 2);
+	const uint32_t *backdrop = nullptr;
+	if (std::any_of(sim->windowMarks.begin(), sim->windowMarks.end(), [](auto &m) { return m.second.any[Simulation::MarkHole]; }))
+	{
+		RECT sr;
+		GetWindowRect(mainWindow, &sr);
+		if (sr.right > sr.left && sr.bottom > sr.top) backdrop = HoleBackdrop(sr, sr.right - sr.left, sr.bottom - sr.top).data();
+	}
+	OverlayDrawMarks(sim, argb, w, occupied, 2, backdrop);
 	if (!full)
 	{
 		// A faint frame just outside the area, so you can see where it ends.

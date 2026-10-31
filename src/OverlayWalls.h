@@ -21,12 +21,14 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls);
 // grip is the chance (0-1) that a grain rides a moving window each tick.
 struct OverlayFeel
 {
-	float grip = 1, fling = 1, push = 1, wind = 1, scorch = 1, frost = 1, acid = 1, water = 1, acidEat = 0, blast = 0;
+	float grip = 1, fling = 1, push = 1, wind = 1, scorch = 1, frost = 1, acid = 1, water = 1, acidEat = 1, blast = 1;
+	bool destructible = false; // acid and blasts eat holes in windows and icons (overlay only)
 };
 extern OverlayFeel overlayFeel;
 
 // Draws the marks on windows (Simulation::windowMarks) on the frame where the window walls are (occupied & wallBit).
-void OverlayDrawMarks(const Simulation *sim, uint32_t *argb, int stride, const uint8_t *occupied, uint8_t wallBit);
+// Holes show backdrop (XRES x YRES, 0x00RRGGBB: what is behind the window) when given.
+void OverlayDrawMarks(const Simulation *sim, uint32_t *argb, int stride, const uint8_t *occupied, uint8_t wallBit, const uint32_t *backdrop = nullptr);
 
 // The mouse moved by (dx, dy) to (x, y), in sim pixels, where the sim takes no clicks: it stirs the air there.
 void OverlayCursorWind(Simulation *sim, int x, int y, int dx, int dy);
