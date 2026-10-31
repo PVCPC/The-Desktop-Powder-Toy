@@ -2324,47 +2324,51 @@ void SimulationImpl::UpdateParticles(int start, int end)
 	}
 }
 
-// The sim in 64-pixel blocks, run in four passes (a checkerboard of 2x2), so blocks running together are a whole block
-// apart. A plain particle (no update function or ChangeType of its own, not energy, not in a wall cell, slow enough)
-// can't reach further than 64 pixels in a tick: its move (velocity up to 20) plus a liquid's sideways search (30)
-// plus heat and air (a cell). Those run in their blocks on all cores, in index order within a block; everything
-// else runs after, one at a time, in index order, as before.
+// The sim in 32-pixel blocks, run in nine passes (every third block across and down), so blocks running together are
+// two blocks (64 pixels) apart. A plain particle (no update function or ChangeType of its own, not energy, not in a wall
+// cell, slow enough) can't reach further than that in a tick: its move (velocity up to 20) plus a liquid's sideways
+// search (30) plus heat and air (a cell). Those run in their blocks on all cores, in index order within a block;
+// everything else runs after, one at a time, in index order, as before.
 void SimulationImpl::UpdateParticlesParallel()
 {
 	auto &sd = SimulationData::CRef();
 	auto &elements = sd.elements;
-	constexpr int B = 64, reach = 20;
-	int bw = (XRES + B - 1) / B, bh = (YRES + B - 1) / B;
+	constexpr int B = 32, reach = 20, chunk = 4096;
+	int bw = (XRES + B - 1) / B, bh = (YRES + B - 1) / B, active = parts.active;
+	// the block each particle runs in (-1: after, one at a time), worked out on all cores
+	static std::vector<int> block;
+	block.assign(active, -1);
+	OverlayParallel((active + chunk - 1) / chunk, [&](int c) {
+		for (int i = c * chunk; i < std::min(active, (c + 1) * chunk); i++)
+		{
+			auto &p = parts[i];
+			int t = p.type;
+			if (!t || elements[t].Update || elements[t].ChangeType || (elements[t].Properties & TYPE_ENERGY)) continue;
+			int x = int(p.x + 0.5f), y = int(p.y + 0.5f);
+			if (x < CELL || y < CELL || x >= XRES - CELL || y >= YRES - CELL || bmap[y / CELL][x / CELL]) continue;
+			float gx = 0, gy = 0;
+			if (!(elements[t].Properties & TYPE_SOLID) && (elements[t].Gravity || elements[t].NewtonianGravity))
+				GetGravityField(x, y, elements[t].Gravity, elements[t].NewtonianGravity, gx, gy);
+			float a = elements[t].Advection, d = elements[t].Diffusion;
+			if (std::abs(p.vx) + a * std::abs(vx[y / CELL][x / CELL]) + d + std::abs(gx) > reach ||
+			    std::abs(p.vy) + a * std::abs(vy[y / CELL][x / CELL]) + d + std::abs(gy) > reach)
+				continue;
+			block[i] = (y / B) * bw + x / B;
+		}
+	});
 	static std::vector<std::vector<int>> blocks;
-	static std::vector<uint8_t> done;
 	blocks.resize(size_t(bw) * bh);
 	for (auto &b : blocks) b.clear();
-	done.assign(NPART, 0);
-	for (int i = 0; i < parts.active; i++)
-	{
-		auto &p = parts[i];
-		int t = p.type;
-		if (!t || elements[t].Update || elements[t].ChangeType || (elements[t].Properties & TYPE_ENERGY)) continue;
-		int x = int(p.x + 0.5f), y = int(p.y + 0.5f);
-		if (x < CELL || y < CELL || x >= XRES - CELL || y >= YRES - CELL || bmap[y / CELL][x / CELL]) continue;
-		float gx = 0, gy = 0;
-		if (!(elements[t].Properties & TYPE_SOLID) && (elements[t].Gravity || elements[t].NewtonianGravity))
-			GetGravityField(x, y, elements[t].Gravity, elements[t].NewtonianGravity, gx, gy);
-		float a = elements[t].Advection, d = elements[t].Diffusion;
-		if (std::abs(p.vx) + a * std::abs(vx[y / CELL][x / CELL]) + d + std::abs(gx) > reach ||
-		    std::abs(p.vy) + a * std::abs(vy[y / CELL][x / CELL]) + d + std::abs(gy) > reach)
-			continue;
-		blocks[size_t(y / B) * bw + x / B].push_back(i);
-		done[i] = 1;
-	}
+	for (int i = 0; i < active; i++)
+		if (block[i] >= 0) blocks[block[i]].push_back(i);
 	std::vector<unsigned int> seeds(blocks.size());
 	for (auto &s : seeds) s = rng.gen();
 	parallelPhase = true;
-	for (int pass = 0; pass < 4; pass++)
+	for (int pass = 0; pass < 9; pass++)
 	{
 		std::vector<int> run;
-		for (int by = pass / 2; by < bh; by += 2)
-			for (int bx = pass % 2; bx < bw; bx += 2)
+		for (int by = pass / 3; by < bh; by += 3)
+			for (int bx = pass % 3; bx < bw; bx += 3)
 				if (!blocks[size_t(by) * bw + bx].empty()) run.push_back(by * bw + bx);
 		OverlayParallel(int(run.size()), [&](int k) {
 			RNG own;
@@ -2377,7 +2381,7 @@ void SimulationImpl::UpdateParticlesParallel()
 	}
 	parallelPhase = false;
 	for (int i = 0; i < parts.active; i++)
-		if (!done[i]) UpdateParticle(i, false);
+		if (i >= active || block[i] < 0) UpdateParticle(i, false);
 }
 
 void SimulationImpl::UpdateParticle(int i, bool parallel)
