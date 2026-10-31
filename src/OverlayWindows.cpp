@@ -3148,7 +3148,7 @@ namespace
 				Toggle(x + S(12), top + i * S(24), layers[i], int(OverlayGetLayer()) == i, true, [i] { OverlaySetLayer(OverlayLayer(i)); });
 			}
 			y += S(92);
-			top = Group(x, y, w, S(68), L"Window");
+			top = Group(x, y, w, S(92), L"Window");
 			Toggle(x + S(12), top, L"Show TPT's own menus too", showTPTMenus, false, [] {
 				showTPTMenus = !showTPTMenus;
 				GlobalPrefs::Ref().Set("Overlay.ShowTPTMenus", showTPTMenus);
@@ -3158,7 +3158,23 @@ namespace
 				overlayAutoPass = !overlayAutoPass;
 				GlobalPrefs::Ref().Set("Overlay.AutoPassThrough", overlayAutoPass);
 			});
-			y += S(76);
+			// Start with Windows: a value under the user's Run key, pointing at this exe
+			static const wchar_t *runKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", *runName = L"The Desktop Powder Toy";
+			bool startup = RegGetValueW(HKEY_CURRENT_USER, runKey, runName, RRF_RT_REG_SZ, nullptr, nullptr, nullptr) == ERROR_SUCCESS;
+			Toggle(x + S(12), top + S(48), L"Start with Windows", startup, false, [startup] {
+				HKEY k;
+				if (RegOpenKeyExW(HKEY_CURRENT_USER, runKey, 0, KEY_SET_VALUE, &k) != ERROR_SUCCESS) return;
+				if (startup) RegDeleteValueW(k, runName);
+				else
+				{
+					wchar_t exe[MAX_PATH];
+					GetModuleFileNameW(nullptr, exe, MAX_PATH);
+					std::wstring line = L"\"" + std::wstring(exe) + L"\"";
+					RegSetValueExW(k, runName, 0, REG_SZ, (const BYTE *)line.c_str(), DWORD((line.size() + 1) * sizeof(wchar_t)));
+				}
+				RegCloseKey(k);
+			}, L"Opens on the desktop when you sign in");
+			y += S(100);
 			// Apps that always get the clicks while they're in front (Overlay.PassApps: exe names, ';'-separated)
 			auto apps = PassApps();
 			int ah = S(50) + int(apps.size()) * S(26);
@@ -5134,6 +5150,33 @@ static void TickWindowWalls()
 				if (ix >= 0 && ix < n && (*w.icon->shape)[size_t(iy) * n + ix]) mask[size_t(y) * XRES + x] = 1;
 			}
 		}
+	// What rests on a window rides along when it moves (friction): each column's stack of particles on its old top
+	// edge goes the same way. Big jumps (snapping, maximising) leave it behind.
+	for (auto &w : wins)
+	{
+		int mx = w.mx, my = w.my;
+		if (w.icon || (!mx && !my) || std::abs(mx) > 40 || std::abs(my) > 40) continue;
+		int top = w.y0 - my - 1; // the row just above the old top edge
+		if (top < 0 || top >= YRES) continue;
+		struct Rider { int r, x, y; };
+		std::vector<Rider> riders;
+		for (int x = std::max(0, w.x0 - mx); x < std::min(XRES, w.x1 - mx); x++)
+			for (int y = top; y >= 0 && sim->pmap[y][x]; y--) riders.push_back({ sim->pmap[y][x], x, y });
+		// front ones first: a rider's old spot is then never taken by one moved before it, so a blocked one stays put
+		std::sort(riders.begin(), riders.end(), [mx, my](const Rider &a, const Rider &b) { return a.x * mx + a.y * my > b.x * mx + b.y * my; });
+		for (auto &p : riders) sim->pmap[p.y][p.x] = 0;
+		for (auto &p : riders)
+		{
+			int tx = p.x + mx, ty = p.y + my;
+			bool free = tx >= 0 && ty >= 0 && tx < XRES && ty < YRES && !sim->pmap[ty][tx] && !mask[size_t(ty) * XRES + tx] &&
+			            !sim->IsWallBlocking(tx, ty, TYP(p.r));
+			if (!free) tx = p.x, ty = p.y; // blocked (another window, a wall): scraped off
+			auto &part = sim->parts[ID(p.r)];
+			part.x = float(tx);
+			part.y = float(ty);
+			sim->pmap[ty][tx] = p.r;
+		}
+	}
 	for (auto &w : wins)
 	{
 		int mx = w.mx, my = w.my;

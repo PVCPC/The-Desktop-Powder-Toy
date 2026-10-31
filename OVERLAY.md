@@ -3,7 +3,7 @@
 The to-do list and ideas for the overlay live here. Keep it current.
 
 `powder.exe overlay:window` is TPT's normal window with the side windows and tray (Overlay tab -> Size -> Runs as
-switches between the two, restarting with the scene). `powder.exe overlay:on` runs TPT as a borderless, always-on-top window over the desktop. Empty (black) pixels
+switches between the two, restarting with the scene). `powder.exe` (or `overlay:on`) runs TPT as a borderless, always-on-top window over the desktop. Empty (black) pixels
 are see-through. TPT presents its own frame with per-pixel alpha (`UpdateLayeredWindow`, `src/Overlay.cpp`), so
 clicks on see-through pixels reach the desktop and windows behind. Windows only for now.
 

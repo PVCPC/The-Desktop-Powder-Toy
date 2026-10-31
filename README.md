@@ -6,6 +6,9 @@ Windows desktop**: sand piles up on your open windows and desktop icons, water p
 everything you don't draw stays see-through and clickable. All of the original game is still here; the original
 README follows below.
 
+**[Download for Windows 10/11](https://github.com/PVCPC/The-Desktop-Powder-Toy/releases/latest)**: unzip and run
+`The Desktop Powder Toy.exe`, nothing to install.
+
 Our work is on the [`overlay`](https://github.com/PVCPC/The-Desktop-Powder-Toy/tree/overlay) branch. Details, design notes and the to-do list are in
 [OVERLAY.md](https://github.com/PVCPC/The-Desktop-Powder-Toy/blob/overlay/OVERLAY.md).
 
@@ -16,10 +19,10 @@ Our work is on the [`overlay`](https://github.com/PVCPC/The-Desktop-Powder-Toy/t
 What's new
 ----------
 
-- **Desktop overlay** (`powder.exe overlay:on`): a borderless window over the whole screen. Empty pixels are
+- **Desktop overlay** (the default; `overlay:off` gives the normal window): a borderless window over the whole screen. Empty pixels are
   see-through, and clicks on them go to whatever is behind.
 - **Windows and icons are walls.** Every open window is solid to particles, pixel-exact, and moving one shoves
-  the sand around: lift a window and its pile rides up with it. Desktop icons are walls in their real shapes, so
+  the sand around: drag a window and its pile rides along with it. Desktop icons are walls in their real shapes, so
   sand drapes over them.
 - **Three layers**: over everything, under app windows (over the wallpaper), or behind the desktop icons like a
   live wallpaper.
@@ -42,7 +45,7 @@ What's new
 |---|---|
 | ![Simulation window](https://raw.githubusercontent.com/PVCPC/The-Desktop-Powder-Toy/overlay/docs/overlay/simulation-window.png) | ![Display window](https://raw.githubusercontent.com/PVCPC/The-Desktop-Powder-Toy/overlay/docs/overlay/display-window.png) |
 
-Windows only for now. Build as below, then run `powder.exe overlay:on`.
+Windows only for now. Download it above, or build as below and run `powder.exe`.
 
 ---
 
