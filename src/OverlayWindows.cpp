@@ -2377,15 +2377,23 @@ void OverlayWindows::ApplySimMasks(uint32_t *argb, int w)
 	{
 		return;
 	}
-	// ponytail: assumes the sim is drawn 1:1 at the top-left; the zoom window's magnified area is not mapped.
-	auto *sim = GameController::Ref().GetModel()->GetSimulation();
+	// ponytail: assumes the sim is drawn 1:1 at the top-left
+	auto *model = GameController::Ref().GetModel();
+	auto *sim = model->GetSimulation();
 	auto area = sim->PlayRect();
 	bool full = sim->playArea == CELLS.OriginRect();
+	// The zoom window is a magnifier: opaque, its frame included, black particles and all.
+	auto zoom = RectSized(model->GetZoomWindowPosition() - Vec2{ 2, 2 }, Vec2{ 1, 1 } * (model->GetZoomSize() * model->GetZoomFactor() + 4));
+	bool zoomOn = model->GetZoomEnabled();
 	for (int y = 0; y < YRES; y++)
 		for (int x = 0; x < XRES; x++)
 		{
 			auto &p = argb[y * w + x];
-			if (!area.Contains({ x, y }))
+			if (zoomOn && zoom.Contains({ x, y }))
+			{
+				p |= 0xFF000000;
+			}
+			else if (!area.Contains({ x, y }))
 			{
 				p = 0;
 			}

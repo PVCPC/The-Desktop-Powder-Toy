@@ -170,7 +170,8 @@ Assessment, in the order I'd do it (effort: S = an hour or two, M = a session, L
    Overlay tab checkbox, Overlay.AutoPassThrough.
 6. [ ] **More OS themes** (M each): XP, 7, 10/11, classic Mac OS, macOS, Linux. Start by turning the `vista::`
    drawing into a theme interface when the second theme starts. Theme choice in Overlay settings.
-7. [ ] Black particles inside the zoom window (S); menus fade when unused (S).
+7. [x] Black particles inside the zoom window (S); menus fade when unused (S). Done 2026-10-30: the zoom box is opaque
+   (a magnifier); TPT's own menus, when shown, fade out after 3 s without the mouse over them.
 8. [ ] Other platforms: X11 / Wayland input regions, macOS (L; only if someone needs them).
 
 Dropped: a Kingsway-style taskbar and start button. The tray icon plus the side window cover launching. Vista

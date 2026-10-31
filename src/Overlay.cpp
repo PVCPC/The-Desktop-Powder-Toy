@@ -5,6 +5,7 @@
 #include "gui/interface/Engine.h"
 #include "gui/interface/Window.h"
 #include <vector>
+#include <algorithm>
 #ifdef _WIN32
 # include <SDL_syswm.h>
 # define WIN32_LEAN_AND_MEAN
@@ -227,12 +228,39 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 	{
 		OverlayWindows::ApplySimMasks(argb.data(), w);
 		auto *top = ui::Engine::Ref().GetWindow();
+		// TPT's menus: the side bar (x >= XRES), the tool strip under the sim and the bottom button row (which would
+		// sit on the taskbar).
+		static uint32_t lastUse = 0;
+		static bool wasShown = false;
+		bool shown = !(OverlayWindows::HideTPTMenus() && !(top && top->InPlace));
+		if (shown && !wasShown) lastUse = SDL_GetTicks(); // just turned on: start visible
+		wasShown = shown;
+		float fade = 1;
 		if (OverlayWindows::HideTPTMenus() && !(top && top->InPlace))
 		{
-			// The side bar (x >= XRES), the tool strip under the sim and the bottom button row (which would sit on the
-			// taskbar): all of them are in the side window.
+			fade = 0; // all of them are in the side window
+		}
+		else if (!(top && top->InPlace))
+		{
+			// Shown: they fade out after a few seconds without the mouse over them, and come back on hover.
+			POINT cur;
+			RECT wr;
+			GetCursorPos(&cur);
+			GetWindowRect(hwnd, &wr);
+			int cx = wr.right > wr.left ? (cur.x - wr.left) * w / (wr.right - wr.left) : 0;
+			int cy = wr.bottom > wr.top ? (cur.y - wr.top) * h / (wr.bottom - wr.top) : 0;
+			if (cx >= 0 && cy >= 0 && cx < w && cy < h && (cx >= XRES || cy >= YRES)) lastUse = SDL_GetTicks();
+			fade = std::clamp(1 - (int(SDL_GetTicks() - lastUse) - 3000) / 1000.f, 0.f, 1.f);
+		}
+		if (fade < 1)
+		{
+			uint32_t k = uint32_t(fade * 256);
 			for (int y = 0; y < WINDOWH; y++)
-				for (int x = y < YRES ? XRES : 0; x < w; x++) argb[y * w + x] = 0;
+				for (int x = y < YRES ? XRES : 0; x < w; x++)
+				{
+					auto &p = argb[y * w + x];
+					p = k ? ((((p & 0xFF00FF) * k) >> 8) & 0xFF00FF) | ((((p & 0xFF00) * k) >> 8) & 0xFF00) | ((((p >> 24) * k) >> 8) << 24) : 0;
+				}
 		}
 	}
 	OverlayWindows::ClearUnderWindows(argb.data(), w, h, ww, wh);
