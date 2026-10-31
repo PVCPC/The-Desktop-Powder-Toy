@@ -150,7 +150,7 @@ Assessment, in the order I'd do it (effort: S = an hour or two, M = a session, L
    - [x] Overlay settings: input mode, TPT's menus, shortcut list
    - [x] Hotkey recording and UI scale in the Overlay tab
    - [ ] Tear tabs off into their own windows; dock the window to a screen edge
-   - [ ] Play area: drag its edges on the desktop instead of +/- buttons; loop edges wrap at the area edge
+   - [ ] Play area: drag its edges on the desktop instead of +/- buttons (loop wrap: done, see below)
    - [x] Bottom button row hidden with the rest (2026-10-30); its save name, vote and tags have no side-window
      home yet; the Saves tab's Online group has browse, upload, vote, tags and sign in
    - [x] Welcome tab (2026-10-30): TPT's startup text, rewritten as a Vista start page (headers, keycaps, tip
@@ -167,7 +167,7 @@ Assessment, in the order I'd do it (effort: S = an hour or two, M = a session, L
    - [ ] **Sim scale slider** (M, needs the item above): how big one sim pixel is on screen (1x, 2x, 3x...). A
      smaller scale gives a bigger sim with finer pixels; a larger one, a smaller sim with chunkier pixels. The sim
      is rebuilt at the new size and the current scene carried over (clipped if it no longer fits).
-   - [ ] Loop edges wrap at the play-area edge.
+   - [x] Loop edges wrap at the play-area edge (2026-10-30, Simulation::LoopWrap; tested: 2107 sand kept, all inside).
 4. [x] **Particles collide with open windows** (M, needs 3): the visible windows' rectangles as walls, refreshed a
    few times a second. Then react to the active window (e.g. it shakes off sand when moved). Desktop icons (S-M,
    read from Explorer's icon list view). Files: undecided, needs a concrete idea first.

@@ -41,6 +41,26 @@ namespace
 	};
 }
 
+static float remainder_p(float x, float y);
+
+bool Simulation::LoopWrap(float &x, float &y) const
+{
+	auto a = PlayRect();
+	float x0 = a.pos.X + CELL, w = a.size.X - CELL * 2.0f, y0 = a.pos.Y + CELL, h = a.size.Y - CELL * 2.0f;
+	bool wrapped = false;
+	if (!(x >= x0 - .5f && x < x0 + w - .5f))
+	{
+		x = remainder_p(x - x0 + .5f, w) + x0 - .5f;
+		wrapped = true;
+	}
+	if (!(y >= y0 - .5f && y < y0 + h - .5f))
+	{
+		y = remainder_p(y - y0 + .5f, h) + y0 - .5f;
+		wrapped = true;
+	}
+	return wrapped;
+}
+
 static float remainder_p(float x, float y)
 {
 	return std::fmod(x, y) + (x>=0 ? 0 : y);
@@ -1508,12 +1528,7 @@ int Simulation::do_move(int i, int x, int y, float nxf, float nyf)
 	int nx = (int)(nxf+0.5f), ny = (int)(nyf+0.5f), result;
 	if (edgeMode == EDGE_LOOP)
 	{
-		bool x_ok = (nx >= CELL && nx < XRES-CELL);
-		bool y_ok = (ny >= CELL && ny < YRES-CELL);
-		if (!x_ok)
-			nxf = remainder_p(nxf-CELL+.5f, XRES-CELL*2.0f)+CELL-.5f;
-		if (!y_ok)
-			nyf = remainder_p(nyf-CELL+.5f, YRES-CELL*2.0f)+CELL-.5f;
+		LoopWrap(nxf, nyf);
 		nx = (int)(nxf+0.5f);
 		ny = (int)(nyf+0.5f);
 
@@ -2190,12 +2205,7 @@ Simulation::PlanMoveResult Simulation::PlanMove(Sim &sim, int i, int x, int y)
 			fin_y = (int)(fin_yf+0.5f);
 			if (edgeMode == EDGE_LOOP)
 			{
-				bool x_ok = (fin_xf >= CELL-.5f && fin_xf < XRES-CELL-.5f);
-				bool y_ok = (fin_yf >= CELL-.5f && fin_yf < YRES-CELL-.5f);
-				if (!x_ok)
-					fin_xf = remainder_p(fin_xf-CELL+.5f, XRES-CELL*2.0f)+CELL-.5f;
-				if (!y_ok)
-					fin_yf = remainder_p(fin_yf-CELL+.5f, YRES-CELL*2.0f)+CELL-.5f;
+				sim.LoopWrap(fin_xf, fin_yf);
 				fin_x = (int)(fin_xf+0.5f);
 				fin_y = (int)(fin_yf+0.5f);
 			}
@@ -2206,12 +2216,7 @@ Simulation::PlanMoveResult Simulation::PlanMove(Sim &sim, int i, int x, int y)
 				fin_yf = parts[i].y + vy;
 				if (edgeMode == EDGE_LOOP)
 				{
-					bool x_ok = (fin_xf >= CELL-.5f && fin_xf < XRES-CELL-.5f);
-					bool y_ok = (fin_yf >= CELL-.5f && fin_yf < YRES-CELL-.5f);
-					if (!x_ok)
-						fin_xf = remainder_p(fin_xf-CELL+.5f, XRES-CELL*2.0f)+CELL-.5f;
-					if (!y_ok)
-						fin_yf = remainder_p(fin_yf-CELL+.5f, YRES-CELL*2.0f)+CELL-.5f;
+					sim.LoopWrap(fin_xf, fin_yf);
 				}
 				fin_x = (int)(fin_xf+0.5f);
 				fin_y = (int)(fin_yf+0.5f);
@@ -2900,21 +2905,12 @@ void SimulationImpl::MovementPhase(int i, Neighbourhood neighbourhood)
 		int ny = (int)((float)parts[i].y+0.5f);
 		if (edgeMode == EDGE_LOOP)
 		{
-			bool x_ok = (nx >= CELL && nx < XRES-CELL);
-			bool y_ok = (ny >= CELL && ny < YRES-CELL);
 			int oldnx = nx, oldny = ny;
-			if (!x_ok)
-			{
-				parts[i].x = remainder_p(parts[i].x-CELL+.5f, XRES-CELL*2.0f)+CELL-.5f;
-				nx = (int)((float)parts[i].x+0.5f);
-			}
-			if (!y_ok)
-			{
-				parts[i].y = remainder_p(parts[i].y-CELL+.5f, YRES-CELL*2.0f)+CELL-.5f;
-				ny = (int)((float)parts[i].y+0.5f);
-			}
+			bool wrapped = LoopWrap(parts[i].x, parts[i].y);
+			nx = (int)((float)parts[i].x+0.5f);
+			ny = (int)((float)parts[i].y+0.5f);
 
-			if (!x_ok || !y_ok) //when moving from left to right stickmen might be able to fall through solid things, fix with "eval_move(t, nx+diffx, ny+diffy, NULL)" but then they die instead
+			if (wrapped) //when moving from left to right stickmen might be able to fall through solid things, fix with "eval_move(t, nx+diffx, ny+diffy, NULL)" but then they die instead
 			{
 				//adjust stickmen legs
 				playerst* stickman = nullptr;
@@ -3725,7 +3721,7 @@ void Simulation::UpdateGravityMask()
 
 //updates pmap, gol, and some other simulation stuff (but not particles)
 // Re-applied every frame, so tools, clears and loads can't break it.
-// ponytail: loop edges act solid outside a smaller area; wrap at the area's edges needs the move code's bounds.
+// Loop edges wrap inside the area (LoopWrap); the walls outside it only matter for solid edges.
 void Simulation::ApplyPlayArea()
 {
 	if (playArea == CELLS.OriginRect())

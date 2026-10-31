@@ -160,6 +160,9 @@ public:
 	{
 		return RectSized(playArea.pos * CELL, playArea.size * CELL);
 	}
+	// Loop edges: wraps a position into the play area, less its outer ring of cells (as stock TPT does at the
+	// screen edge). True if it wrapped.
+	bool LoopWrap(float &x, float &y) const;
 	int gravityMode = GRAV_VERTICAL;
 	float customGravityX = 0;
 	float customGravityY = 0;
