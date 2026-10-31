@@ -57,6 +57,8 @@
 #include <shellapi.h>
 #include <dwmapi.h>
 #pragma comment(lib, "dwmapi.lib")
+#include <commdlg.h>
+#pragma comment(lib, "comdlg32.lib")
 #include <d3d11.h>
 #include <dxgi1_2.h>
 #pragma comment(lib, "d3d11.lib")
@@ -2560,9 +2562,12 @@ namespace
 			Toggle(x + S(12), top, L"Show decorations", model->GetDecoration(), false, [] { GameController::Ref().SetDecoration(); }, L"Ctrl+B");
 			auto col = model->GetColourSelectorColour();
 			uint32_t rgb = (col.Red << 16) | (col.Green << 8) | col.Blue;
-			cv.RoundRect(x + S(12), top + S(28), S(40), S(22), S(3), rgb, rgb, 255);
-			cv.RoundFrame(x + S(12), top + S(28), S(40), S(22), S(3), 0x707070, 255);
-			PushButton(x + S(60), top + S(26), S(140), L"Pick colour\u2026", [] { GameController::Ref().OpenColourPicker(); }, L"The colour the deco tools paint with");
+			RECT swatch{ x + S(12), top + S(28), x + S(52), top + S(50) };
+			cv.RoundRect(swatch.left, swatch.top, S(40), S(22), S(3), rgb, rgb, 255);
+			cv.RoundFrame(swatch.left, swatch.top, S(40), S(22), S(3), Hovered(swatch) ? 0x3C7FB1 : 0x707070, 255);
+			Add(swatch, [] { GameController::Ref().OpenColourPicker(); }, L"TPT's colour picker, with transparency");
+			PushButton(x + S(60), top + S(26), S(140), L"Pick colour\u2026", [this] { later = [this] { PickDecoColour(); }; },
+			           L"The colour the deco tools paint with (click the swatch for transparency)");
 		}
 
 		void PaintSaves()
@@ -3099,6 +3104,19 @@ namespace
 			}
 		}
 
+		// Windows' own colour dialog; the alpha stays as it was.
+		void PickDecoColour()
+		{
+			static COLORREF custom[16] = {}; // the dialog's custom colours, for this run
+			auto &gc = GameController::Ref();
+			auto col = gc.GetModel()->GetColourSelectorColour();
+			CHOOSECOLORW cc{ sizeof(cc) };
+			cc.hwndOwner = hwnd, cc.rgbResult = RGB(col.Red, col.Green, col.Blue), cc.lpCustColors = custom;
+			cc.Flags = CC_FULLOPEN | CC_RGBINIT | CC_ANYCOLOR;
+			if (ChooseColorW(&cc)) gc.SetColour(ui::Colour(GetRValue(cc.rgbResult), GetGValue(cc.rgbResult), GetBValue(cc.rgbResult), col.Alpha));
+			dirty = true;
+		}
+
 		void PickTheme(const std::vector<int> &ids, RECT rc)
 		{
 			HMENU m = CreatePopupMenu();
@@ -3253,6 +3271,8 @@ namespace
 			auto mix = [&](uint64_t v) { state = (state ^ v) * 1099511628211ULL; };
 			mix(uint64_t(uintptr_t(gc.GetActiveTool(0))));
 			mix(uint64_t(uintptr_t(gc.GetActiveTool(1))));
+			auto deco = model->GetColourSelectorColour(); // TPT's picker or Lua changed the deco colour
+			mix(uint64_t(deco.Red) << 24 | uint64_t(deco.Green) << 16 | uint64_t(deco.Blue) << 8 | deco.Alpha);
 			for (uint64_t v : { uint64_t(count), uint64_t(gc.GetPaused()), uint64_t(gc.GetEdgeMode()), uint64_t(sim->gravityMode),
 			                    uint64_t(sim->air->airMode), uint64_t(model->GetNewtonianGrvity()), uint64_t(gc.GetAHeatEnable()),
 			                    uint64_t(gc.GetHudEnable()), uint64_t(model->GetDecoration()), uint64_t(model->GetGravityGrid()),
