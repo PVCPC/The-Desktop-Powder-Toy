@@ -495,6 +495,9 @@ On/off things are Fun toggles; things with an amount are More fun sliders.
   heat 15%, element updates 13%, UpdateParticle 10%, movement 9%, Recalc 6%. Inlining is no lever (LTO gave nothing).
   9950X3D: the sim thread on the V-Cache die ran 12.3 -> 14.5 ticks/s (exact checksum), so Windows.cpp SetupCrt pins
   the main thread to the cores with the biggest L3 when L3 sizes differ (no-op elsewhere). Multicore 33 -> 35.6.
+- [x] 0.8.4 Scorched wallpaper (toggle in Desktop physics, pref Overlay.Feel.Wallpaper, off): particles >= 300 C
+  soot and acid pits on the desktop where no wall is, as windowMarks[0] (id 0 = no window), drawn under particles;
+  only while overlayWallpaperSeen (window walls on, or layer behind windows). Scorch/Acid sliders set the rate.
 - [ ] Next for ~5x, all elements kept: (A) per-block particle slots so create/kill needs no lock; (B) RecalcFreeParticles
   on all cores (~5 ms); (C) review the rest one by one (PLNT, VINE, SPRK...); (D) sleeping regions, as a toggle.
 

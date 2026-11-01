@@ -30,6 +30,7 @@ struct OverlayFeel
 	bool shardTint = true;     // shards take the colour of what broke
 	bool shardParticles = false; // shards are sim particles (broken glass) instead of drawn chunks
 	bool holeBorder = true;      // where a hole reaches a window's edge, cover the thin border Windows draws round it
+	bool wallpaper = false;      // fire and acid mark the desktop background too (Simulation::windowMarks[0])
 };
 extern OverlayFeel overlayFeel;
 
@@ -46,6 +47,9 @@ bool OverlayDebrisFlying();
 
 // How hard the last tick's blasts hit each wall (by OverlayWall::id), for shaking real windows; filled while shake > 0.
 extern std::map<uintptr_t, float> overlayKicks;
+
+// The overlay knows where the desktop shows (window walls on, or drawn behind the windows): wallpaper marks only then.
+extern bool overlayWallpaperSeen;
 
 // Draws the marks on windows (Simulation::windowMarks) on the frame where the window walls are (occupied & wallBit).
 // Holes show backdrop (XRES x YRES, 0x00RRGGBB: what is really behind each window there) when given.

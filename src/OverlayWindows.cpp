@@ -2625,7 +2625,7 @@ namespace
 				{ L"Explosion shake", L"How hard explosions shake the REAL windows they hit; they go back where they were (off by default)", &overlayFeel.shake, 3, "Shake" },
 				{ L"Blasts and burning", L"How hard explosions, bombs, DEST, singularities and anything 2000 C or hotter break windows and icons (with Destructible on)", &overlayFeel.blast, 3, "Blast" },
 			};
-			top = Group(x, y, w, S(26) * int(std::size(feel)) + S(112), L"Desktop physics");
+			top = Group(x, y, w, S(26) * int(std::size(feel)) + S(138), L"Desktop physics");
 			Toggle(x + S(12), top, L"Destructible windows and icons", overlayFeel.destructible, false, [] {
 				overlayFeel.destructible = !overlayFeel.destructible;
 				GlobalPrefs::Ref().Set("Overlay.Feel.Destructible", overlayFeel.destructible);
@@ -2642,7 +2642,11 @@ namespace
 				overlayFeel.holeBorder = !overlayFeel.holeBorder;
 				GlobalPrefs::Ref().Set("Overlay.Feel.HoleBorder", overlayFeel.holeBorder);
 			}, L"On: where a hole breaks through a window's edge, the thin dark border Windows draws round the real window is covered too. Off: it stays, showing where the real window is");
-			top += S(104);
+			Toggle(x + S(12), top + S(104), L"Fire and acid mark the wallpaper", overlayFeel.wallpaper, false, [] {
+				overlayFeel.wallpaper = !overlayFeel.wallpaper;
+				GlobalPrefs::Ref().Set("Overlay.Feel.Wallpaper", overlayFeel.wallpaper);
+			}, L"Anything 300 C or hotter blackens the desktop background behind it and acid pits it, like the windows (Scorch and Acid etching set how fast). Only drawn by the overlay: your real wallpaper is never changed, and clearing the sim wipes it");
+			top += S(130);
 			for (int i = 0; i < int(std::size(feel)); i++)
 			{
 				auto &f = feel[i];
@@ -4826,6 +4830,7 @@ void OverlayWindows::Init(void *mainHwnd)
 	overlayFeel.shardTint = prefs.Get("Overlay.Feel.ShardTint", true);
 	overlayFeel.shardParticles = prefs.Get("Overlay.Feel.ShardParticles", false);
 	overlayFeel.holeBorder = prefs.Get("Overlay.Feel.HoleBorder", true);
+	overlayFeel.wallpaper = prefs.Get("Overlay.Feel.Wallpaper", false);
 	for (auto [v, name] : { std::pair{ &overlayFeel.grip, "Grip" }, { &overlayFeel.fling, "Fling" }, { &overlayFeel.push, "Push" }, { &overlayFeel.wind, "Wind" }, { &overlayFeel.scorch, "Scorch" }, { &overlayFeel.frost, "Frost" }, { &overlayFeel.acid, "Acid" }, { &overlayFeel.water, "Water" }, { &overlayFeel.acidEat, "AcidEat" }, { &overlayFeel.blast, "Blast" }, { &overlayFeel.holeOpacity, "HoleSolid" }, { &overlayFeel.shards, "Shards" }, { &overlayFeel.shardSize, "ShardSize" }, { &overlayFeel.blackHole, "BlackHole" }, { &overlayFeel.shake, "Shake" } })
 		*v = prefs.Get(ByteString("Overlay.Feel.") + name, *v);
 	for (auto [v, name] : { std::pair{ &fun.pets, "Pets" }, { &fun.weather, "Weather" }, { &fun.music, "Music" }, { &fun.weatherIdle, "WeatherIdle" }, { &fun.weatherLast, "WeatherLast" }, { &fun.hot, "Hot" }, { &fun.hourglass, "Hourglass" } })
@@ -6165,6 +6170,7 @@ static void TickWindowWalls()
 	}
 	TickFun(sim);
 	bool doWindows = windowWalls && OverlayGetLayer() == OverlayLayer::OnTop;
+	overlayWallpaperSeen = doWindows || OverlayGetLayer() != OverlayLayer::OnTop;
 	bool doIcons = iconWalls && OverlayGetLayer() != OverlayLayer::BehindIcons;
 	// Mouse is a broom: a small solid block at the pointer where clicks go to the desktop, moving like a window
 	POINT at;

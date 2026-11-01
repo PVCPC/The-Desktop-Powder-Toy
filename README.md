@@ -45,6 +45,9 @@ What's new
   **Hide window borders at holes** (on by default) paints over the thin dark line Windows draws round a window where
   a hole cuts its edge; switch it off to keep that line showing where the real window is. A dragged window, with its
   holes and the sand on top, moves at your screen's refresh rate, not the sim's.
+- **Scorched wallpaper** (a switch, off by default): fire, lava and anything 300 C or hotter blackens the desktop
+  background behind it and acid pits it. Only the overlay draws it: your real wallpaper is never changed, and clearing
+  the sim wipes it.
 - **Fun switches** (Simulation window, all off by default): stick figure pets that wander your windows and
   taskbar; snow, rain with lightning, leaves by the season, hail or low fog, drifting in the wind; pets run from fire, come over to a slow mouse pointer, scatter from a fast one and hop to greet you when
   you come back; the Recycle Bin eats sand that lands on it; sand hops to the beat

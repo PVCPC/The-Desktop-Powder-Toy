@@ -24,6 +24,7 @@ static std::vector<Debris> debris;
 bool OverlayDebrisFlying() { return !debris.empty(); }
 bool (*overlayGrabScreen)(int, int, int, int, uint32_t *) = nullptr;
 std::map<uintptr_t, float> overlayKicks;
+bool overlayWallpaperSeen = false;
 
 // The marks of a window (or icon) where it is now and at its size now: resized, what still fits is kept, from the top-left.
 static Simulation::WindowMarks &Marks(Simulation *sim, const OverlayWall &w)
@@ -590,6 +591,32 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 			if (int k = kindAt(w.x1, y); k >= 0) mark(k, w.x1 - 1, y);
 		}
 	}
+	// Scorched wallpaper (off unless switched on): where no window or icon is, the desktop itself is blackened by
+	// anything 300 C or hotter and pitted by acid, as marks under id 0 (no window's). They stay until the sim is cleared.
+	if (overlayFeel.wallpaper && overlayWallpaperSeen && (rate[M::MarkSoot] > 0 || rate[M::MarkAcid] > 0))
+	{
+		auto &m = sim->windowMarks[0];
+		m.x = 0, m.y = 0, m.w = XRES, m.h = YRES;
+		auto add = [&](int kind, int x, int y, float v) {
+			if (x < 0 || y < 0 || x >= XRES || y >= YRES || owner[size_t(y) * XRES + x]) return;
+			auto &p = Kind(m, kind)[size_t(y) * XRES + x];
+			p = uint8_t(std::min(255.f, p + v * rate[kind]));
+			m.any[kind] = true;
+		};
+		for (int i = 0; i < sim->parts.active; i++)
+		{
+			auto &part = sim->parts[i];
+			if (!part.type) continue;
+			int x = int(part.x + 0.5f), y = int(part.y + 0.5f);
+			if (part.type == PT_ACID)
+			{
+				if (rate[M::MarkAcid] > 0 && sim->rng.uniform01() < 0.03f)
+					add(M::MarkAcid, x, y, 50), add(M::MarkAcid, x - 1, y, 15), add(M::MarkAcid, x + 1, y, 15), add(M::MarkAcid, x, y - 1, 15), add(M::MarkAcid, x, y + 1, 15);
+			}
+			else if (part.temp >= 573.15f && rate[M::MarkSoot] > 0)
+				add(M::MarkSoot, x, y, 2), add(M::MarkSoot, x - 1, y, 1), add(M::MarkSoot, x + 1, y, 1), add(M::MarkSoot, x, y - 1, 1), add(M::MarkSoot, x, y + 1, 1);
+		}
+	}
 	// frost melts and water dries (about 20 s and 10 s from full at 60 fps)
 	for (auto &[id, m] : sim->windowMarks)
 		for (int kind : { int(M::MarkFrost), int(M::MarkWater) })
@@ -609,7 +636,7 @@ void OverlayDrawMarks(const Simulation *sim, uint32_t *argb, int stride, const u
 	constexpr int opacity[] = { 110, 170, 190, 224, 235 };
 	for (auto &[id, m] : sim->windowMarks)
 	{
-		if (std::none_of(m.any.begin(), m.any.end(), [](bool b) { return b; })) continue;
+		if (std::none_of(m.any.begin(), m.any.end(), [](bool b) { return b; }) || (!id && !overlayFeel.wallpaper)) continue;
 		// each pixel is one window's (OwnerAt), so rows of a big window go on all cores
 		auto rows = [&](int j0, int j1) {
 		for (int j = j0; j < j1; j++)
@@ -618,7 +645,8 @@ void OverlayDrawMarks(const Simulation *sim, uint32_t *argb, int stride, const u
 				int x = m.x + i, y = m.y + j;
 				if (x < 0 || y < 0 || x >= XRES || y >= YRES) continue;
 				if (m.any[Simulation::MarkHole] && m.a[Simulation::MarkHole][size_t(j) * m.w + i]) continue; // below
-				if (!(occupied[size_t(y) * XRES + x] & wallBit) || OwnerAt(x, y) != id) continue; // hidden behind another window
+				bool wall = occupied[size_t(y) * XRES + x] & wallBit;
+				if (id ? !wall || OwnerAt(x, y) != id : wall) continue; // hidden behind another window; the wallpaper's (id 0) where none is
 				uint32_t r = 0, g = 0, b = 0, a = 0; // premultiplied, painted over each other in order
 				for (int kind = 0; kind < Simulation::MarkHole; kind++)
 				{
@@ -631,7 +659,14 @@ void OverlayDrawMarks(const Simulation *sim, uint32_t *argb, int stride, const u
 					b = (c & 0xFF) * sa / 255 + b * (255 - sa) / 255;
 					a = sa + a * (255 - sa) / 255;
 				}
-				if (a) // over what is there (premultiplied)
+				if (a && !id) // the wallpaper's: under what is drawn there (premultiplied)
+				{
+					auto &p = argb[size_t(y) * stride + x];
+					uint32_t f = 255 - (p >> 24);
+					auto under = [&](uint32_t s, int sh) { return std::min(255u, ((p >> sh) & 0xFF) + s * f / 255) << sh; };
+					p = under(a, 24) | under(r, 16) | under(g, 8) | under(b, 0);
+				}
+				else if (a) // over what is there (premultiplied)
 				{
 					auto &p = argb[size_t(y) * stride + x];
 					auto over = [&](uint32_t s, int sh) { return std::min(255u, s + ((p >> sh) & 0xFF) * (255 - a) / 255) << sh; };
