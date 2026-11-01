@@ -95,7 +95,38 @@ static std::vector<ByteString> RunningApps();
 #pragma comment(lib, "dxgi.lib")
 #undef small       // rpcndr.h, via dwmapi.h
 #undef GetUserName // SaveInfo::GetUserName
+#elif defined(__APPLE__)
+#include "Overlay.h"
+#include "gui/game/GameController.h"
+#include "gui/game/GameModel.h"
+#include "gui/game/GameView.h"
+#include "gui/game/Notification.h"
+#include "gui/interface/Engine.h"
+#include "client/GameSave.h"
+#include "client/http/Request.h"
+#include "simulation/Simulation.h"
+#include "simulation/ElementClasses.h"
+#include "simulation/SimulationData.h"
+#include "SimulationConfig.h"
+#include "prefs/GlobalPrefs.h"
+#include "common/platform/Platform.h"
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <codecvt>
+#include <cstring>
+#include <deque>
+#include <locale>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <SDL.h>
+#include <tuple>
+#include <vector>
+#include "OverlayMacCompat.h"
+#endif
 
+#if defined(_WIN32) || defined(__APPLE__)
 namespace
 {
 	float uiScale = 1;
@@ -167,6 +198,14 @@ namespace
 	std::function<void()> later; // run on the next tick, outside any window's message handling
 	bool rebuildPalette = false;  // the UI scale changed: remake the side window (not from inside its own click)
 	int reopenTab = -1;
+#ifdef __APPLE__
+	struct TaskButton { std::wstring name; RECT r; };
+	std::mutex taskMutex;
+	std::vector<TaskButton> taskButtons;
+	std::vector<RECT> taskPopped;
+	void StartTaskButtons() {} // Tick reads the Dock
+}
+#else
 	int S(float v)
 	{
 		return int(std::lround(v * uiScale));
@@ -4015,16 +4054,30 @@ namespace
 
 	bool sceneSaved = false; // a restart saved it already, and the new TPT is loading it
 
+	// In cells. A save bigger than the sim is refused outright, and the sim shrinks when the pixel size goes up.
+	constexpr int sceneTile = 24;
+
 	void SaveSceneTiles()
 	{
 		if (sceneSaved) return;
 		sceneSaved = true;
 		auto *model = GameController::Ref().GetModel();
 		auto *sim = model->GetSimulation();
-		for (int y = 0; y < YCELLS; y += 255)
-			for (int x = 0; x < XCELLS; x += 255)
+		std::vector<bool> used(size_t(XCELLS) * YCELLS);
+		for (int i = 0; i < sim->parts.active; i++)
+			if (sim->parts[i].type)
 			{
-				auto tile = RectSized(Vec2(x, y), Vec2(std::min(255, XCELLS - x), std::min(255, YCELLS - y)));
+				int x = int(sim->parts[i].x + 0.5f) / CELL, y = int(sim->parts[i].y + 0.5f) / CELL;
+				if (x >= 0 && y >= 0 && x < XCELLS && y < YCELLS) used[size_t(y) * XCELLS + x] = true;
+			}
+		for (int y = 0; y < YCELLS; y += sceneTile)
+			for (int x = 0; x < XCELLS; x += sceneTile)
+			{
+				auto tile = RectSized(Vec2(x, y), Vec2(std::min(sceneTile, XCELLS - x), std::min(sceneTile, YCELLS - y)));
+				bool any = false; // most of a desktop is empty
+				for (int cy = y; cy < y + tile.size.Y; cy++)
+					for (int cx = x; cx < x + tile.size.X; cx++) any = any || used[size_t(cy) * XCELLS + cx] || sim->bmap[cy][cx];
+				if (!any) continue;
 				auto save = sim->Save(true, RectSized(tile.pos * CELL, tile.size * CELL));
 				if (!save) continue;
 				save->paused = model->GetPaused();
@@ -4039,8 +4092,8 @@ namespace
 		auto *model = GameController::Ref().GetModel();
 		auto *sim = model->GetSimulation();
 		GameController::Ref().GetView()->PauseRendererThread();
-		for (int y = 0; y < YCELLS; y += 255)
-			for (int x = 0; x < XCELLS; x += 255)
+		for (int y = 0; y < YCELLS; y += sceneTile)
+			for (int x = 0; x < XCELLS; x += sceneTile)
 			{
 				auto file = Platform::WinNarrow(SceneTile(x, y));
 				std::vector<char> data;
@@ -4053,6 +4106,9 @@ namespace
 				catch (std::exception &) {} // a bad tile: that part of the scene is lost
 				DeleteFileW(SceneTile(x, y).c_str());
 			}
+		// tiles past the edge of a smaller sim: gone, or a later run at a bigger size would bring old sand back
+		for (auto &file : Platform::DirectorySearch(".", "overlay-scene-", { ".cps" }))
+			Platform::RemoveFile(file);
 	}
 
 	// Saves the scene, sets the new pixel size and starts a fresh TPT, which loads the scene; this one quits.
@@ -5245,9 +5301,11 @@ static const std::vector<uint32_t> &HoleBackdrop(RECT sr, int sw, int sh)
 	return backdrop;
 }
 
+#endif // the Windows side's windows and menus
 static std::map<HWND, RECT> wallRects, frameRects; // the wall windows when the sim last read them / at the frame drawn
 static std::mutex frameLock; // frameRects: WindowShifts is also asked from the GPU drawing thread
 
+#ifdef _WIN32
 // What is really behind holed windows: the windows under each one, captured with PrintWindow a few times a second on
 // a worker thread (scaled to sim pixels), over the wallpaper.
 namespace
@@ -5389,6 +5447,47 @@ static const uint32_t *HoleBehind(const Simulation *sim, RECT sr)
 	shotWanted = std::move(want);
 	return behind.data();
 }
+#else
+// What is really behind holed windows: a capture of everything under each one, a few times a second (OverlayMac's worker
+// thread), over the wallpaper. Without Screen Recording, just the wallpaper.
+static const uint32_t *HoleBehind(const Simulation *sim, RECT sr)
+{
+	static std::vector<uint32_t> wallpaper, behind;
+	static ULONGLONG built = 0;
+	int sw = sr.right - sr.left;
+	if (wallpaper.empty() || GetTickCount64() - built > 30000)
+	{
+		built = GetTickCount64();
+		wallpaper.resize(size_t(XRES) * YRES);
+		// the sim is the window's top-left corner: the wallpaper is read for the window, then cut down to it
+		std::vector<uint32_t> whole(size_t(WINDOWW) * WINDOWH);
+		OverlayMac::Wallpaper(WINDOWW, WINDOWH, whole.data());
+		for (int y = 0; y < YRES; y++) std::copy_n(whole.begin() + size_t(y) * WINDOWW, XRES, wallpaper.begin() + size_t(y) * XRES);
+	}
+	behind = wallpaper;
+	std::vector<uint32_t> want;
+	auto px = [](long v, int n, int nw) { return int(std::floor(double(v) * n / nw)); }; // screen -> sim pixels
+	for (auto &[id, m] : sim->windowMarks)
+	{
+		auto it = wallRects.find(HWND(id));
+		if (!m.any[Simulation::MarkHole] || it == wallRects.end()) continue; // icons: just the wallpaper
+		want.push_back(uint32_t(id));
+		auto shot = OverlayMac::TakeShot(uint32_t(id));
+		if (!shot) continue;
+		int x0 = px(it->second.left - sr.left, WINDOWW, sw), y0 = px(it->second.top - sr.top, WINDOWH, sr.bottom - sr.top);
+		auto &hole = m.a[Simulation::MarkHole];
+		for (int j = 0; j < m.h; j++)
+			for (int i = 0; i < m.w; i++)
+			{
+				int x = m.x + i, y = m.y + j, sx = x - x0, sy = y - y0;
+				if (!hole[size_t(j) * m.w + i] || x < 0 || y < 0 || x >= XRES || y >= YRES || sx < 0 || sy < 0 || sx >= shot->w || sy >= shot->h) continue;
+				behind[size_t(y) * XRES + x] = shot->px[size_t(sy) * shot->w + sx];
+			}
+	}
+	OverlayMac::WantShots(want, double(WINDOWW) / sw);
+	return behind.data();
+}
+#endif
 
 void OverlayWindows::ApplySimMasks(uint32_t *argb, int w, const uint8_t *occupied)
 {
@@ -5459,6 +5558,7 @@ void OverlayWindows::ApplySimMasks(uint32_t *argb, int w, const uint8_t *occupie
 	}
 }
 
+#ifdef _WIN32
 // The desktop icons: where each sits on screen (grid or free placement) and its shape (the icon's own picture from the
 // shell, opaque pixels solid), through the desktop's IFolderView. Positions are re-read every few frames, so dragged
 // icons push sand live; shapes are cached per file and size. Empty when Explorer isn't there or icons are hidden. All
@@ -5625,6 +5725,33 @@ static std::vector<DeskIcon> DesktopIcons()
 	return latest;
 }
 
+#else
+// The desktop icons and the Trash, as OverlayMac's Accessibility thread last read them (none without the permission)
+struct DeskIcon
+{
+	RECT r;
+	std::shared_ptr<const std::vector<uint8_t>> shape; // (r.right - r.left) squared, 1 = solid; null = the whole box
+	uintptr_t id;
+	bool bin = false; // the Trash
+};
+
+static std::vector<DeskIcon> DesktopIcons()
+{
+	std::vector<DeskIcon> out;
+	for (auto &i : OverlayMac::Icons())
+		out.push_back({ { long(i.l), long(i.t), long(i.r), long(i.b) }, i.shape, uintptr_t(i.id), false });
+	if (fun.bin)
+	{
+		// The Dock is under the sim: the Trash is a low block on the floor above it, as wide as its icon
+		RECT floor;
+		GetWindowRect(macDock, &floor);
+		for (auto &d : OverlayMac::DockItems())
+			if (d.trash) out.push_back({ { long(d.l), floor.top - 6, long(d.r), floor.top }, nullptr, 3, true });
+	}
+	return out;
+}
+#endif
+
 // Every frame: every visible window's rectangle, in sim pixels, blocks particles (Simulation::pixelWalls), so they
 // pile on title bars and flow around windows. A window moving onto particles shoves each one along its move to the
 // first free pixel past it, at the window's speed; one that appeared or grew lifts them out over its top. One with
@@ -5651,10 +5778,20 @@ std::vector<OverlayWindows::WindowShift> OverlayWindows::WindowShifts()
 	if (sw <= 0 || sh <= 0) return out;
 	auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); }; // as TickWindowWalls
 	std::lock_guard lock(frameLock);
+#ifdef __APPLE__
+	if (frameRects.empty()) return out;
+	auto live = OverlayMac::OtherWindows(); // one read for them all, at every screen refresh
+#endif
 	for (auto &[hwnd, at] : frameRects)
 	{
 		RECT r;
+#ifdef _WIN32
 		if (DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &r, sizeof(r)) != S_OK) GetWindowRect(hwnd, &r);
+#else
+		auto it = std::find_if(live.begin(), live.end(), [hwnd = hwnd](auto &w) { return w.id == uint32_t(uintptr_t(hwnd)); });
+		if (it == live.end()) continue;
+		r = MacRect(*it);
+#endif
 		if (r.left == at.left && r.top == at.top) continue;
 		out.push_back({ px(at.left - sr.left, WINDOWW, sw), px(at.top - sr.top, WINDOWH, sh), px(at.right - sr.left, WINDOWW, sw),
 		                px(at.bottom - sr.top, WINDOWH, sh), float(double(r.left - at.left) * WINDOWW / sw),
@@ -5663,6 +5800,7 @@ std::vector<OverlayWindows::WindowShift> OverlayWindows::WindowShifts()
 	return out;
 }
 
+#ifdef _WIN32
 // The exe name (lower case) of the app owning a window
 static ByteString ExeName(HWND hwnd)
 {
@@ -5730,6 +5868,7 @@ ByteString OverlayWindows::PassApp(void *hwnd)
 
 // Throws what sits in the band above a sim rectangle into the air: up hard when the window under it closes, a
 // lighter bump when one opens below it.
+#endif
 static void TossAbove(Simulation *sim, int x0, int y0, int x1, bool close)
 {
 	auto &elements = SimulationData::CRef().elements;
@@ -5962,6 +6101,7 @@ static void TickFun(Simulation *sim)
 	// that makes resting sand and liquid hop and fire flare
 	if (fun.music > 0)
 	{
+#ifdef _WIN32
 		static IAudioMeterInformation *meter = nullptr;
 		static int retry = 0;
 		if (!meter && --retry <= 0)
@@ -5984,6 +6124,9 @@ static void TickFun(Simulation *sim)
 			meter->Release(); // the speakers changed: find the new ones
 			meter = nullptr;
 		}
+#else
+		float peak = OverlayMac::AudioPeak();
+#endif
 		static float level = 0;
 		static int since = 0;
 		bool beat = ++since > 6 && peak > 0.03f && peak > level * 1.15f;
@@ -6221,6 +6364,12 @@ static void TickWindowWalls()
 	int sw = sr.right - sr.left, sh = sr.bottom - sr.top;
 	static RECT grabRect;
 	grabRect = sr;
+#ifdef __APPLE__
+	overlayGrabScreen = [](int x0, int y0, int w, int h, uint32_t *out) {
+		double sw = grabRect.right - grabRect.left, sh = grabRect.bottom - grabRect.top;
+		return sw > 0 && sh > 0 && OverlayMac::Grab(grabRect.left + x0 * sw / WINDOWW, grabRect.top + y0 * sh / WINDOWH, w * sw / WINDOWW, h * sh / WINDOWH, w, h, out);
+	};
+#else
 	// shards take the colour under them: GDI's copy of the screen leaves out layered windows, so not the overlay
 	overlayGrabScreen = [](int x0, int y0, int w, int h, uint32_t *out) {
 		int sw = grabRect.right - grabRect.left, sh = grabRect.bottom - grabRect.top;
@@ -6246,6 +6395,7 @@ static void TickWindowWalls()
 		ReleaseDC(nullptr, screen);
 		return ok;
 	};
+#endif
 	// windows are walls only when the sim is over them; icons whenever it's over the icons
 	// the mouse over the desktop (where the overlay lets clicks through) stirs the air
 	static POINT lastCursor{ -1, -1 };
@@ -6268,6 +6418,18 @@ static void TickWindowWalls()
 	// Mouse is a broom: a small solid block at the pointer where clicks go to the desktop, moving like a window
 	POINT at;
 	bool broom = fun.broom && !overlayWindowed && GetCursorPos(&at) && GetAncestor(WindowFromPoint(at), GA_ROOT) != mainWindow;
+#ifdef __APPLE__
+	// It covers one screen, so no gaps; but the Dock is below the sim where Windows' taskbar is a window inside it, and
+	// without a floor everything would drain out of the void edge
+	static std::vector<RECT> gaps;
+	gaps.clear();
+	if (windowWalls)
+	{
+		RECT floor;
+		GetWindowRect(macDock, &floor);
+		gaps.push_back({ sr.left, floor.top, sr.right, sr.bottom });
+	}
+#else
 	// The overlay spans every monitor; where none is (beside a shorter one) is solid, so sand stops at its edge
 	static std::vector<RECT> gaps = [] {
 		std::vector<RECT> mons, out;
@@ -6297,6 +6459,7 @@ static void TickWindowWalls()
 		}
 		return out;
 	}();
+#endif
 	if (overlayWindowed || (!doWindows && !doIcons && gaps.empty() && !broom) || sw <= 0 || sh <= 0)
 	{
 		sim->pixelWalls.clear();
@@ -6304,6 +6467,28 @@ static void TickWindowWalls()
 		return;
 	}
 	std::map<HWND, RECT> now;
+#ifdef __APPLE__
+	static std::map<HWND, int> pids; // whose window it is
+	if (doWindows)
+		for (auto &o : OverlayMac::OtherWindows())
+		{
+			HWND hwnd = HWND(uintptr_t(o.id));
+			RECT r = MacRect(o);
+			auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); }; // screen -> sim pixels
+			OverlayWall w{ std::max(0, px(r.left - sr.left, WINDOWW, sw)), std::max(0, px(r.top - sr.top, WINDOWH, sh)),
+			               std::min(XRES, px(r.right - sr.left, WINDOWW, sw)), std::min(YRES, px(r.bottom - sr.top, WINDOWH, sh)), 0, 0, {} };
+			now[hwnd] = r;
+			pids[hwnd] = o.pid;
+			if (w.x1 <= w.x0 || w.y1 <= w.y0) continue;
+			if (auto it = wallRects.find(hwnd); it != wallRects.end())
+			{
+				w.mx = px(r.left - it->second.left, WINDOWW, sw);
+				w.my = px(r.top - it->second.top, WINDOWH, sh);
+			}
+			w.id = uintptr_t(hwnd);
+			wins.push_back(w);
+		}
+#else
 	struct Ctx { std::vector<OverlayWall> *wins; std::map<HWND, RECT> *now; RECT sr; int sw, sh; } ctx{ &wins, &now, sr, sw, sh };
 	if (doWindows) EnumWindows([](HWND hwnd, LPARAM lp) -> BOOL {
 		auto &c = *(Ctx *)lp;
@@ -6336,6 +6521,7 @@ static void TickWindowWalls()
 		c.wins->push_back(w);
 		return TRUE;
 	}, LPARAM(&ctx));
+#endif
 	if (!wallRects.empty() && (fun.closeToss || fun.openShake))
 	{
 		auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); };
@@ -6375,6 +6561,22 @@ static void TickWindowWalls()
 	{
 		if (sim->currentTick % 30 == 0)
 		{
+#ifdef __APPLE__
+			static std::map<int, std::pair<double, double>> was; // pid: CPU time, when (seconds)
+			std::map<int, std::pair<double, double>> is;
+			double when = OverlayMac::Now();
+			busy.clear();
+			for (auto &[hwnd, r] : wallRects)
+			{
+				int pid = pids[hwnd];
+				if (!is.count(pid))
+					if (double cpu = OverlayMac::ProcessCpuSeconds(pid); cpu >= 0) is[pid] = { cpu, when };
+				auto a = is.find(pid), b = was.find(pid);
+				if (a != is.end() && b != was.end() && a->second.second > b->second.second)
+					busy[hwnd] = float((a->second.first - b->second.first) / (a->second.second - b->second.second));
+			}
+			was = std::move(is);
+#else
 			static std::map<DWORD, std::pair<ULONGLONG, ULONGLONG>> was; // pid: CPU time, when (100 ns)
 			std::map<DWORD, std::pair<ULONGLONG, ULONGLONG>> is;
 			auto u64 = [](FILETIME f) { return ULARGE_INTEGER{ { f.dwLowDateTime, f.dwHighDateTime } }.QuadPart; };
@@ -6397,6 +6599,7 @@ static void TickWindowWalls()
 					busy[hwnd] = float(a->second.first - b->second.first) / float(a->second.second - b->second.second);
 			}
 			was = std::move(is);
+#endif
 		}
 		auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); };
 		for (auto &[hwnd, cores] : busy)
@@ -6561,6 +6764,22 @@ static void TickWindowWalls()
 	// up from the text cursor, or from the top of the window being typed in where the app has no standard one
 	if (fun.typing)
 	{
+#ifdef __APPLE__
+		static double lastKey = 0; // when the last key went down
+		double keyAt = OverlayMac::Now() - OverlayMac::IdleSeconds(true);
+		bool typed = keyAt > lastKey + 0.005;
+		lastKey = keyAt;
+		POINT at{ -1, -1 };
+		if (typed && sim->rng.uniform01() < 0.4f)
+		{
+			double cx, cy;
+			// from the window's top: a caret is inside the window, and sparks can't start inside a wall
+			if (auto it = wallRects.find(GetForegroundWindow()); it != wallRects.end())
+				at = { OverlayMac::Caret(cx, cy) ? std::clamp(long(cx), it->second.left, it->second.right) : it->second.left + long(sim->rng.uniform01() * (it->second.right - it->second.left)), it->second.top };
+			else if (OverlayMac::Caret(cx, cy))
+				at = { long(cx), long(cy) };
+		}
+#else
 		static DWORD lastInput = 0;
 		static POINT lastPoint;
 		LASTINPUTINFO li{ sizeof(li) };
@@ -6578,6 +6797,7 @@ static void TickWindowWalls()
 			else if (auto it = wallRects.find(GetForegroundWindow()); it != wallRects.end())
 				at = { it->second.left + long(sim->rng.uniform01() * (it->second.right - it->second.left)), it->second.top };
 		}
+#endif
 		if (at.x >= 0)
 		{
 			auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); };
@@ -6588,6 +6808,9 @@ static void TickWindowWalls()
 	// The volcano: a stone cone on the taskbar left of the hourglass; it smokes while the PC's total CPU use is past the
 	// slider, and throws lava while it is 20% past it. Rebuilt where broken, like the hourglass
 	static float cpu = 0;
+#ifdef __APPLE__
+	if (fun.volcano > 0 && sim->currentTick % 30 == 0) cpu = OverlayMac::CpuLoad();
+#else
 	static ULONGLONG lastIdle = 0, lastTotal = 0;
 	if (fun.volcano > 0 && sim->currentTick % 30 == 0)
 	{
@@ -6600,6 +6823,7 @@ static void TickWindowWalls()
 			lastIdle = idleT, lastTotal = total;
 		}
 	}
+#endif
 	if (fun.volcano > 0)
 	{
 		RECT tr;
@@ -6719,7 +6943,12 @@ static void TickWindowWalls()
 	{
 		auto &s = it->second;
 		RECT r;
+#ifdef __APPLE__
+		// the window server reports a move a beat late, so where it is says nothing: a held button says it's you
+		if (!IsWindow(it->first) || !GetWindowRect(it->first, &r) || GetAsyncKeyState(VK_LBUTTON) < 0)
+#else
 		if (!IsWindow(it->first) || !GetWindowRect(it->first, &r) || r.left != s.set.x || r.top != s.set.y)
+#endif
 		{
 			it = shaking.erase(it); // closed, or moved by someone else (you): leave it be
 			continue;
@@ -6863,6 +7092,7 @@ void OverlayWindows::DrawExtras(uint32_t *argb, int w, int h)
 	}
 }
 
+#ifdef _WIN32
 void OverlayWindows::ClearUnderWindows(uint32_t *argb, int w, int h, int ww, int wh)
 {
 	// ponytail: also clears where another app's window covers ours; walk the z-order if that ever matters.
@@ -6895,6 +7125,7 @@ void OverlayWindows::ClearUnderWindows(uint32_t *argb, int w, int h, int ww, int
 	}
 }
 
+#endif
 // Which play-area edges are under the mouse: 1 left, 2 right, 4 top, 8 bottom (4 px outside to 1 inside).
 static int AreaEdges(Simulation *sim, int x, int y)
 {
@@ -6976,6 +7207,7 @@ void OverlayWindows::SetPlayArea(int x, int y, int w, int h)
 }
 
 
+#ifdef _WIN32
 int OverlayWindows::Form(const String &title, const String &prompt, const std::vector<String> &options, int &choice, String &text,
                          const std::vector<String> &extras, std::function<bool(int, const String &)> valid, int limit)
 {
@@ -7227,59 +7459,616 @@ void OverlayWindows::HideConsole()
 {
 	if (console.wnd) ShowWindow(console.wnd, SW_HIDE);
 }
-#else
-void OverlayWindows::Init(void *) {}
+#endif
 #ifdef __APPLE__
-#include "Overlay.h"
-#include "OverlayMac.h"
-#include "gui/game/GameController.h"
-#include "gui/game/GameModel.h"
-#include "simulation/Simulation.h"
-#include "SimulationConfig.h"
-#include "prefs/GlobalPrefs.h"
-#include <SDL.h>
-#include <cmath>
-#include <map>
+// The Mac's own half: what on Windows is the side window, tray and shell hooks. Sim-side code above is shared.
+namespace
+{
+	std::string Narrow(const wchar_t *s)
+	{
+		return std::wstring_convert<std::codecvt_utf8<wchar_t>>().to_bytes(s);
+	}
 
-// Other apps' windows are walls, as on Windows (TickWindowWalls there)
+	// The shared tables talk about Windows' shell
+	std::string ForMac(std::string s)
+	{
+		for (auto [from, to] : { std::pair{ "the PC's", "the Mac's" }, { "the PC", "the Mac" }, { "taskbar", "Dock" } })
+			for (size_t at; (at = s.find(from)) != s.npos;)
+				s.replace(at, strlen(from), to);
+		return s;
+	}
+
+	std::string SceneTile(int x, int y)
+	{
+		return "overlay-scene-" + std::to_string(x) + "-" + std::to_string(y) + ".cps";
+	}
+
+	bool sceneSaved = false; // a restart saved it already, and the new TPT is loading it
+
+	// In cells. A save bigger than the sim is refused outright, and the sim shrinks when the pixel size goes up: this fits
+	// even at the largest pixel size on a laptop screen.
+	constexpr int sceneTile = 24;
+
+	void SaveSceneTiles()
+	{
+		if (sceneSaved) return;
+		sceneSaved = true;
+		auto *model = GameController::Ref().GetModel();
+		auto *sim = model->GetSimulation();
+		std::vector<bool> used(size_t(XCELLS) * YCELLS);
+		for (int i = 0; i < sim->parts.active; i++)
+			if (sim->parts[i].type)
+			{
+				int x = int(sim->parts[i].x + 0.5f) / CELL, y = int(sim->parts[i].y + 0.5f) / CELL;
+				if (x >= 0 && y >= 0 && x < XCELLS && y < YCELLS) used[size_t(y) * XCELLS + x] = true;
+			}
+		for (int y = 0; y < YCELLS; y += sceneTile)
+			for (int x = 0; x < XCELLS; x += sceneTile)
+			{
+				auto tile = RectSized(Vec2(x, y), Vec2(std::min(sceneTile, XCELLS - x), std::min(sceneTile, YCELLS - y)));
+				bool any = false; // there are hundreds of tiles and most of a desktop is empty
+				for (int cy = y; cy < y + tile.size.Y; cy++)
+					for (int cx = x; cx < x + tile.size.X; cx++) any = any || used[size_t(cy) * XCELLS + cx] || sim->bmap[cy][cx];
+				if (!any) continue;
+				auto save = sim->Save(true, RectSized(tile.pos * CELL, tile.size * CELL));
+				if (!save) continue;
+				save->paused = model->GetPaused();
+				auto data = save->Serialise().second;
+				if (!data.empty()) Platform::WriteFile(data, SceneTile(x, y));
+			}
+		GlobalPrefs::Ref().Set("Overlay.PendingScene", true);
+	}
+
+	void LoadSceneTiles()
+	{
+		auto *model = GameController::Ref().GetModel();
+		auto *sim = model->GetSimulation();
+		GameController::Ref().GetView()->PauseRendererThread();
+		for (int y = 0; y < YCELLS; y += sceneTile)
+			for (int x = 0; x < XCELLS; x += sceneTile)
+			{
+				auto file = SceneTile(x, y);
+				std::vector<char> data;
+				if (!Platform::FileExists(file) || !Platform::ReadFile(data, file)) continue;
+				try
+				{
+					GameSave save(data);
+					sim->Load(&save, true, Vec2(x, y));
+				}
+				catch (std::exception &) {} // a bad tile: that part of the scene is lost
+				Platform::RemoveFile(file);
+			}
+		// tiles past the edge of a smaller sim: gone, or a later run at a bigger size would bring old sand back
+		for (auto &file : Platform::DirectorySearch(".", "overlay-scene-", { ".cps" }))
+			Platform::RemoveFile(file);
+	}
+
+	// The scene goes along in tiles; the new TPT loads it, this one quits.
+	void Restart(int scale, bool windowed)
+	{
+		SaveSceneTiles();
+		GlobalPrefs::Ref().Set("Scale", scale);
+		GlobalPrefs::Ref().Set("Overlay.Windowed", windowed);
+		if (OverlayMac::Relaunch(nullptr))
+		{
+			SDL_Event quit{};
+			quit.type = SDL_QUIT;
+			SDL_PushEvent(&quit);
+		}
+	}
+
+	std::vector<OverlayMac::Shift> Shifts()
+	{
+		std::vector<OverlayMac::Shift> out;
+		for (auto &s : OverlayWindows::WindowShifts())
+			out.push_back({ s.x0, s.y0, s.x1, s.y1, s.dx, s.dy, uint32_t(uintptr_t(s.id)) });
+		return out;
+	}
+
+	using Row = OverlayMac::Row;
+
+	Row Header(std::string name)
+	{
+		Row r;
+		r.kind = Row::Header, r.label = std::move(name);
+		return r;
+	}
+
+	Row Note(std::string text, std::function<std::string()> live = nullptr)
+	{
+		Row r;
+		r.kind = Row::Note, r.label = std::move(text), r.getText = std::move(live);
+		return r;
+	}
+
+	Row Toggle(std::string name, std::string tip, std::function<bool()> get, std::function<void(bool)> set)
+	{
+		Row r;
+		r.kind = Row::Toggle, r.label = std::move(name), r.tip = std::move(tip);
+		r.get = [get] { return get() ? 1.f : 0.f; };
+		r.set = [set](float v) { set(v != 0); };
+		return r;
+	}
+
+	Row FlagRow(std::string name, std::string tip, bool *v, ByteString pref)
+	{
+		return Toggle(std::move(name), std::move(tip), [v] { return *v; }, [v, pref](bool on) {
+			*v = on;
+			GlobalPrefs::Ref().Set(pref, on);
+		});
+	}
+
+	Row Button(std::string name, std::string tip, std::function<void()> press)
+	{
+		Row r;
+		r.kind = Row::Button, r.label = std::move(name), r.tip = std::move(tip), r.press = std::move(press);
+		return r;
+	}
+
+	Row Choice(std::string name, std::string tip, std::vector<std::string> options, std::function<int()> get, std::function<void(int)> set)
+	{
+		Row r;
+		r.kind = Row::Choice, r.label = std::move(name), r.tip = std::move(tip), r.options = std::move(options);
+		r.get = [get] { return float(get()); };
+		r.set = [set](float v) { set(int(v)); };
+		return r;
+	}
+
+	// As the side window's rows: unit as in FunSlider (-1: % of 1, in 5% steps, off at 0)
+	std::string Value(float v, int unit)
+	{
+		char s[32];
+		if (unit == 1) snprintf(s, sizeof(s), v >= 1 ? "%d" : "off", int(v));
+		else if (unit == 2) snprintf(s, sizeof(s), v >= 1 ? "%d min" : "off", int(v));
+		else if (unit == 3) snprintf(s, sizeof(s), "%d s", int(v));
+		else if (unit == 4) snprintf(s, sizeof(s), v >= 1 ? "%d:00" : "off", int(v) % 24);
+		else if (unit == 5) snprintf(s, sizeof(s), v >= 1 ? "%d px" : "off", int(v));
+		else if (unit == 6) snprintf(s, sizeof(s), v >= 1 ? "%d s" : "off", int(v));
+		else if (unit == 7) snprintf(s, sizeof(s), v >= 1 ? "%d / h" : "off", int(v));
+		else snprintf(s, sizeof(s), v > 0 ? "%d%%" : "off", int(std::lround(v * 100)));
+		return s;
+	}
+
+	Row SliderRow(std::string name, std::string tip, float *v, float lo, float hi, ByteString pref, int unit)
+	{
+		Row r;
+		r.kind = Row::Slider, r.label = std::move(name), r.tip = std::move(tip), r.lo = lo, r.hi = hi;
+		r.get = [v] { return *v; };
+		r.set = [v, unit, pref](float value) {
+			*v = unit == 3 ? std::round(value / 10) * 10 : unit > 0 ? std::round(value) : std::round(value * 20) / 20;
+			GlobalPrefs::Ref().Set(pref, *v);
+		};
+		r.format = [unit](float value) { return Value(value, unit); };
+		return r;
+	}
+
+	std::vector<OverlayMac::Tab> SettingsTabs()
+	{
+		using Tab = OverlayMac::Tab;
+		Tab welcome{ "Welcome", {} }, simulation{ "Simulation", {} }, physics{ "Desktop physics", {} }, funTab{ "Fun", {} }, more{ "More fun", {} }, overlay{ "Overlay", {} };
+
+		welcome.rows = {
+			Header("The Desktop Powder Toy " + Narrow(DESKTOP_VERSION)),
+			Note("The Powder Toy on your desktop. Sand piles on your windows; everything you haven't drawn on stays see-through and clickable."),
+			Header("Getting around"),
+			Note("TPT's elements are along the right edge and its tools along the bottom. They fade when you aren't using them and come back when the pointer goes near. Its keyboard shortcuts work while TPT is in front."),
+			Note("While TPT is the app in front it takes every click, so you can draw anywhere. Click another app (Dock, menu bar or ⌘Tab) and clicks go to your desktop again, except on drawn particles. The hourglass in the menu bar changes that, pauses, clears and quits."),
+			Header("Hotkeys"),
+			Note("Ctrl+Option+O cycles where clicks go, P passes all of them through, L locks them to TPT, E opens this window, C clears the sim. Change them on the Overlay tab."),
+			Header("Permissions"),
+			Note("All of these are optional; what needs one simply stays off without it."),
+			Note("", [] {
+				return std::string("Accessibility: ") + (OverlayMac::AccessibilityGranted() ? "on" : "off") + ". Desktop icons as walls, Dock toys, the Trash, notifications, typing sparks at the text cursor, and Explosion shake.";
+			}),
+			Button("Allow Accessibility…", "Opens System Settings", [] { OverlayMac::AskAccessibility(); }),
+			Note("", [] {
+				return std::string("Screen Recording: ") + (OverlayMac::ScreenCaptureGranted() ? "on" : "off") + ". Only so holes in windows show what is really behind them, and shards take a window's colour. Without it holes show your wallpaper.";
+			}),
+			Button("Allow Screen Recording…", "Opens System Settings", [] { OverlayMac::AskScreenCapture(); }),
+			Note("Music bounce (macOS 14.2 or later) asks to record system audio the first time it's on; only the level is read."),
+		};
+
+		auto &gc = GameController::Ref();
+		auto *model = gc.GetModel();
+		simulation.rows = {
+			Header("Running"),
+			Button("Pause or resume", "", [] { auto &c = GameController::Ref(); c.SetPaused(!c.GetPaused()); }),
+			Button("Clear the sim", "", [] { OverlayWindows::ClearSim(); }),
+			Toggle("Multicore physics", "Plain powders and liquids update on all cores: much faster on big scenes, the same behaviour but not the exact same grains (off: exact one-core results)",
+			       [model] { return model->GetSimulation()->parallelUpdate; },
+			       [model](bool on) {
+				       model->GetSimulation()->parallelUpdate = on;
+				       GlobalPrefs::Ref().Set("Simulation.Multicore", on);
+			       }),
+			Header("World"),
+			Choice("Edges", "Void: particles and air leave at the edges. Solid: the edges are walls. Loop: particles wrap around", { "Void", "Solid", "Loop" },
+			       [] { return GameController::Ref().GetEdgeMode(); }, [](int i) { GameController::Ref().SetEdgeMode(i); }),
+			Choice("Gravity", "", { "Vertical", "Off", "Radial", "Custom" }, [model] { return model->GetSimulation()->gravityMode; },
+			       [model](int i) { model->GetSimulation()->gravityMode = i; }),
+			Toggle("Newtonian gravity", "Heavy particles pull on each other (N)", [model] { return model->GetNewtonianGrvity(); }, [model](bool on) { model->SetNewtonianGravity(on); }),
+			Header("Play area"),
+			Note("Drag the edge of the play area with the mouse to resize it (its faint blue frame, once it's smaller than the screen)."),
+			Button("Whole screen", "", [] { OverlayWindows::SetPlayArea(0, 0, CELLS.X, CELLS.Y); }),
+			Header("Walls"),
+			FlagRow("Open windows are walls (sand piles on title bars)", "Only while the sim is on top of every window", &windowWalls, "Overlay.WindowWalls"),
+			FlagRow("Desktop icons are walls (sand piles on them, in their shapes)", "Needs Accessibility. Not when the sim is behind them", &iconWalls, "Overlay.IconWalls"),
+		};
+
+		struct FeelRow { const char *name, *tip; float *v; float hi; const char *pref; };
+		FeelRow feel[] = {
+			{ "Window grip", "How well sand rides a window you drag (0: it slides off)", &overlayFeel.grip, 1, "Grip" },
+			{ "Fling", "How hard sand flies off a window that stops short or turns back", &overlayFeel.fling, 3, "Fling" },
+			{ "Window push", "How hard a moving window shoves the sand in its way", &overlayFeel.push, 3, "Push" },
+			{ "Mouse breeze", "How much your mouse blows the sand where clicks go to the desktop", &overlayFeel.wind, 3, "Wind" },
+			{ "Scorch", "How fast fire and lava blacken the windows they touch (cleared with the sim)", &overlayFeel.scorch, 3, "Scorch" },
+			{ "Frost", "How fast ice, LN2 and cryo frost the windows they touch (it melts)", &overlayFeel.frost, 3, "Frost" },
+			{ "Acid etching", "How fast acid pits the windows it touches (cleared with the sim)", &overlayFeel.acid, 3, "Acid" },
+			{ "Water streaks", "How much water streaks the windows it runs over (they dry)", &overlayFeel.water, 3, "Water" },
+			{ "Acid eats windows", "How fast acid eats holes in windows and icons (with Destructible on)", &overlayFeel.acidEat, 3, "AcidEat" },
+			{ "Hole opacity", "0: holes are fully see-through to whatever is really behind the window. Up: the broken part of the window fades back in", &overlayFeel.holeOpacity, 1, "HoleSolid" },
+			{ "Shards", "How many bits chip off and fly when something breaks a window (off: none)", &overlayFeel.shards, 3, "Shards" },
+			{ "Shard size", "How big each chip is, in sim pixels", &overlayFeel.shardSize, 6, "ShardSize" },
+			{ "Black holes", "How far and hard black holes (NBHL) tear at windows and icons near them (with Destructible on)", &overlayFeel.blackHole, 3, "BlackHole" },
+			{ "Explosion shake", "How hard explosions shake the REAL windows they hit; they go back where they were (needs Accessibility)", &overlayFeel.shake, 3, "Shake" },
+			{ "Blasts and burning", "How hard explosions, bombs, DEST, singularities and anything 2000 C or hotter break windows and icons (with Destructible on)", &overlayFeel.blast, 3, "Blast" },
+		};
+		physics.rows = {
+			Header("Breaking things"),
+			FlagRow("Destructible windows and icons", "Acid, blasts, bombs and great heat eat holes in them (drawn on the overlay: your real windows are fine)", &overlayFeel.destructible, "Overlay.Feel.Destructible"),
+			FlagRow("Shards take the window's colour", "Needs Screen Recording", &overlayFeel.shardTint, "Overlay.Feel.ShardTint"),
+			FlagRow("Shards are glass particles", "Broken bits are sim particles instead of drawn chunks", &overlayFeel.shardParticles, "Overlay.Feel.ShardParticles"),
+			FlagRow("Windows crack first", "With Destructible on, a hit on whole glass only cracks it; another hit on the cracks breaks it out", &overlayFeel.crack, "Overlay.Fun.Crack"),
+			FlagRow("Scorched wallpaper", "Fire and acid mark the desktop background too", &overlayFeel.wallpaper, "Overlay.Feel.Wallpaper"),
+			Header("How the desktop pushes the sim around"),
+		};
+		for (auto &f : feel) physics.rows.push_back(SliderRow(f.name, f.tip, f.v, 0, f.hi, ByteString("Overlay.Feel.") + f.pref, -1));
+
+		struct FunToggle { const char *name, *tip; bool *v; const char *pref; };
+		FunToggle funToggles[] = {
+			{ "The Trash eats sand", "Sand that lands above the Trash in the Dock disappears into it (needs Accessibility)", &fun.bin, "Bin" },
+			{ "Mouse is a broom", "Where clicks go to the desktop, the mouse pointer is a solid paddle that shoves and scoops sand", &fun.broom, "Broom" },
+			{ "Closing a window throws its sand", "Close or minimise a window and the pile on it is tossed off", &fun.closeToss, "CloseToss" },
+			{ "New windows shake sand loose", "A window that opens bumps the sand above it into the air", &fun.openShake, "OpenShake" },
+			{ "Holidays", "Pumpkins roll about on Halloween, jelly hearts fall on Valentine's Day, fireworks go up after midnight on New Year's", &fun.holidays, "Holidays" },
+			{ "Notifications drop a ball", "When an app's Dock badge goes up (a new message in Mail, Messages, Discord and the like), a ball drops onto its window (needs Accessibility)", &fun.notify, "Notify" },
+			{ "Day and night", "By the clock: fireflies come out and fallen leaves go dark in the evening, birds fly over in the morning", &fun.dayNight, "DayNight" },
+			{ "Sparkle trail", "The mouse pointer leaves a short trail of cold sparks over the desktop", &fun.trail, "Trail" },
+			{ "Confetti", "Wiggle the mouse pointer quickly from side to side to throw a burst of confetti", &fun.confetti, "Confetti" },
+			{ "Pets build sandcastles", "A pet next to a big enough sand pile now and then builds a little castle from it; it crumbles back into sand after 5 minutes", &fun.castles, "Castles" },
+			{ "Birds land and rest", "The morning birds (Day and night) now and then land on a window, icon or pile and rest a few seconds", &fun.perch, "Perch" },
+			{ "Shooting stars land", "Now and then a shooting star comes all the way down and hits a window or a pile with a burst of sparks", &fun.starsLand, "StarsLand" },
+			{ "Pets explore holes", "Pets drop through holes broken in windows instead of turning back, and stop to look out of a hole they stand in", &fun.petHoles, "PetHoles" },
+			{ "Meteor showers", "On the real shower nights shooting stars come ten times as often, at least 60 an hour", &fun.showers, "Showers" },
+			{ "Apps pop out of the Dock", "When an app starts, a stone block pops up out of the Dock (needs Accessibility)", &fun.taskPop, "TaskPop" },
+			{ "Gravity leans to your window", "Gravity tilts toward the side of the screen the window you are using is on (only while Gravity is the normal down)", &fun.tilt, "Tilt" },
+			{ "Weekday weather", "With Weather on and set to the season: Monday rain, Tuesday fog, Wednesday hail, Thursday snow, Friday leaves; weekends by the season", &fun.weekday, "Weekday" },
+			{ "Typing sparks", "Typing now and then puffs a few cold sparks up from the text cursor (needs Accessibility), or the top of the window you type in", &fun.typing, "Typing" },
+		};
+		funTab.rows.push_back(Header("Switches"));
+		for (auto &f : funToggles) funTab.rows.push_back(FlagRow(f.name, f.tip, f.v, ByteString("Overlay.Fun.") + f.pref));
+		funTab.rows.push_back(Header("Amounts"));
+		FunSlider funSliders[] = {
+			{ L"Pets", L"Stick figures that wander your windows (how many). Fire and long falls can kill them; new ones drop in", &fun.pets, 0, 10, "Pets", 1 },
+			{ L"Weather", L"Snow, rain (with lightning) or leaves falling from the top of the screen (how heavy). It melts or fades after a while", &fun.weather, 0, 3, "Weather", 0 },
+			{ L"Weather waits", L"Weather only starts once you have left the Mac alone this many minutes, and stops when you come back (off: always)", &fun.weatherIdle, 0, 30, "WeatherIdle", 2 },
+			{ L"Weather lasts", L"How long each flake, leaf or drop stays before it melts or fades; they thin out one by one", &fun.weatherLast, 10, 600, "WeatherLast", 3 },
+			{ L"Music bounce", L"Sand hops and fire flares to the beat of whatever your Mac is playing (only the sound level is read; macOS 14.2 or later)", &fun.music, 0, 3, "Music", 0 },
+			{ L"Busy apps run hot", L"A window warms whatever sits on it by how hard its app is working", &fun.hot, 0, 3, "Hot", 0 },
+			{ L"Hourglass", L"A glass hourglass at the bottom of the screen whose sand runs out in this many minutes, counted from when you set it", &fun.hourglass, 0, 120, "Hourglass", 2 },
+		};
+		for (auto &f : funSliders) funTab.rows.push_back(SliderRow(Narrow(f.name), Narrow(f.tip), f.v, f.lo, f.hi, ByteString("Overlay.Fun.") + f.pref, f.unit));
+		funTab.rows.push_back(Choice("Weather is", "", { "By season", "Snow", "Rain", "Leaves", "Hail", "Fog" }, [] { return fun.weatherKind; }, [](int i) {
+			fun.weatherKind = i;
+			GlobalPrefs::Ref().Set("Overlay.Fun.WeatherKind", i);
+		}));
+		more.rows.push_back(Header("More fun"));
+		for (auto &f : moreFun) more.rows.push_back(SliderRow(ForMac(Narrow(f.name)), ForMac(Narrow(f.tip)), f.v, f.lo, f.hi, ByteString("Overlay.Fun.") + f.pref, f.unit));
+
+		auto hotkey = [](const char *name, const char *pref, const char *fallback) {
+			Row r;
+			r.kind = Row::Text, r.label = name, r.tip = "Ctrl, Alt (Option), Shift, Cmd, then a letter, digit or F1-F20, like Ctrl+Alt+O";
+			r.getText = [pref, fallback] { return std::string(GlobalPrefs::Ref().Get(pref, ByteString(fallback))); };
+			r.setText = [pref](std::string text) {
+				GlobalPrefs::Ref().Set(pref, ByteString(text));
+				OverlayLoadKeys();
+			};
+			return r;
+		};
+		Row passApps;
+		passApps.kind = Row::Text, passApps.label = "Pass-through apps";
+		passApps.tip = "App names (as in the Dock), separated by ;. While one of them is in front, every click goes to it";
+		passApps.getText = [] { return std::string(GlobalPrefs::Ref().Get("Overlay.PassApps", ByteString(""))); };
+		passApps.setText = [](std::string text) { GlobalPrefs::Ref().Set("Overlay.PassApps", ByteString(text)); };
+		overlay.rows = {
+			Header("Where clicks go"),
+			Choice("Clicks", "Auto: TPT while it's the app in front, the desktop once another app is. Pass-through: always the desktop. Locked: always TPT", { "Auto", "Pass-through", "Locked to TPT" },
+			       [] { return int(OverlayGetInput()); }, [](int i) { OverlaySetInput(OverlayInput(i)); }),
+			Toggle("Pass clicks through while a full-screen app is in front", "", [] { return overlayAutoPass; }, [](bool on) {
+				overlayAutoPass = on;
+				GlobalPrefs::Ref().Set("Overlay.AutoPassThrough", on);
+			}),
+			passApps,
+			Header("Sim layer"),
+			Choice("Screen", "Which display the sim lives on. Changing it restarts TPT and the scene comes along", OverlayMac::ScreenNames(),
+			       [] { return GlobalPrefs::Ref().Get("Overlay.Screen", 0); }, [](int i) {
+				       if (i != GlobalPrefs::Ref().Get("Overlay.Screen", 0))
+					       later = [i] {
+						       GlobalPrefs::Ref().Set("Overlay.Screen", i);
+						       Restart(ui::Engine::Ref().windowFrameOps.scale, overlayWindowed);
+					       };
+			       }),
+			Choice("Sits", "On top of everything; or over the desktop and its icons, under app windows; or behind the icons like a wallpaper (clicks go to the desktop; Locked comes up to draw)",
+			       { "On top of everything", "Under app windows", "Behind the desktop icons" }, [] { return int(OverlayGetLayer()); }, [](int i) { OverlaySetLayer(OverlayLayer(i)); }),
+			Header("Sim pixel size"),
+			Choice("One sim pixel is", "Bigger: chunkier pixels and a smaller, faster sim. Changing it restarts TPT and the scene comes along", { "1 point", "2 points", "3 points", "4 points", "5 points", "6 points" },
+			       [] { return ui::Engine::Ref().windowFrameOps.scale - 1; }, [](int i) {
+				       if (i + 1 != ui::Engine::Ref().windowFrameOps.scale) later = [i] { Restart(i + 1, overlayWindowed); };
+			       }),
+			Header("Runs as"),
+			Choice("TPT runs", "On the desktop, or in a normal window of its own with the same Fun settings. Changing it restarts TPT and the scene comes along", { "On the desktop", "In a window" },
+			       [] { return overlayWindowed ? 1 : 0; }, [](int i) {
+				       if ((i == 1) != overlayWindowed) later = [i] { Restart(ui::Engine::Ref().windowFrameOps.scale, i == 1); };
+			       }),
+			Choice("Window size", "The sim's size when TPT runs in a window; saves open in any size", { "Stock TPT, 612 x 384", "Large, 920 x 600", "Extra large, 1240 x 800", "As big as fits" },
+			       [] {
+				       int w = GlobalPrefs::Ref().Get("Overlay.WindowedView.W", 612);
+				       return w == 0 ? 3 : w >= 1240 ? 2 : w >= 920 ? 1 : 0;
+			       }, [](int i) {
+				       static const int sizes[][2] = { { 612, 384 }, { 920, 600 }, { 1240, 800 }, { 0, 0 } };
+				       GlobalPrefs::Ref().Set("Overlay.WindowedView.W", sizes[i][0]);
+				       GlobalPrefs::Ref().Set("Overlay.WindowedView.H", sizes[i][1]);
+				       if (overlayWindowed) later = [] { Restart(ui::Engine::Ref().windowFrameOps.scale, true); };
+			       }),
+			Header("Hotkeys"),
+			hotkey("Cycle where clicks go", "Overlay.Keys.CycleInput", "Ctrl+Alt+O"),
+			hotkey("Pass-through", "Overlay.Keys.PassThrough", "Ctrl+Alt+P"),
+			hotkey("Locked", "Overlay.Keys.Locked", "Ctrl+Alt+L"),
+			hotkey("Open this window", "Overlay.Keys.Palette", "Ctrl+Alt+E"),
+			hotkey("Clear the sim", "Overlay.Keys.Clear", "Ctrl+Alt+C"),
+		};
+		return { welcome, simulation, physics, funTab, more, overlay };
+	}
+}
+
+bool GetWindowRect(HWND hwnd, RECT *out)
+{
+	if (hwnd == macOverlay)
+	{
+		*out = MacRect(OverlayMac::Window());
+		return true;
+	}
+	if (hwnd == macDock)
+	{
+		// The hourglass and the volcano stand on the sim's own floor, its last rows before the outer cell, at the right end
+		auto me = OverlayMac::Window();
+		double sw = me.r - me.l, sh = me.b - me.t;
+		long top = long(std::lround(me.t + double(YRES - CELL) * sh / WINDOWH));
+		*out = { long(me.l), top, long(me.l + double(XRES - CELL) * sw / WINDOWW), top + 1 };
+		return true;
+	}
+	for (auto &r : OverlayMac::OtherWindows())
+		if (r.id == uint32_t(uintptr_t(hwnd)))
+		{
+			*out = MacRect(r);
+			return true;
+		}
+	return false;
+}
+
+void OverlayWindows::Init(void *)
+{
+	mainWindow = macOverlay;
+	auto &prefs = GlobalPrefs::Ref();
+	windowWalls = prefs.Get("Overlay.WindowWalls", true);
+	iconWalls = prefs.Get("Overlay.IconWalls", true);
+	overlayFeel.destructible = prefs.Get("Overlay.Feel.Destructible", false);
+	overlayFeel.shardTint = prefs.Get("Overlay.Feel.ShardTint", true);
+	overlayFeel.shardParticles = prefs.Get("Overlay.Feel.ShardParticles", false);
+	overlayFeel.wallpaper = prefs.Get("Overlay.Feel.Wallpaper", false);
+	overlayFeel.holeBorder = false; // that's for the dark line DWM draws round a window
+	for (auto [v, name] : { std::pair{ &overlayFeel.grip, "Grip" }, { &overlayFeel.fling, "Fling" }, { &overlayFeel.push, "Push" }, { &overlayFeel.wind, "Wind" }, { &overlayFeel.scorch, "Scorch" }, { &overlayFeel.frost, "Frost" }, { &overlayFeel.acid, "Acid" }, { &overlayFeel.water, "Water" }, { &overlayFeel.acidEat, "AcidEat" }, { &overlayFeel.blast, "Blast" }, { &overlayFeel.holeOpacity, "HoleSolid" }, { &overlayFeel.shards, "Shards" }, { &overlayFeel.shardSize, "ShardSize" }, { &overlayFeel.blackHole, "BlackHole" }, { &overlayFeel.shake, "Shake" } })
+		*v = prefs.Get(ByteString("Overlay.Feel.") + name, *v);
+	for (auto [v, name] : { std::pair{ &fun.pets, "Pets" }, { &fun.weather, "Weather" }, { &fun.music, "Music" }, { &fun.weatherIdle, "WeatherIdle" }, { &fun.weatherLast, "WeatherLast" }, { &fun.hot, "Hot" }, { &fun.hourglass, "Hourglass" } })
+		*v = prefs.Get(ByteString("Overlay.Fun.") + name, *v);
+	for (auto [v, name] : { std::pair{ &fun.bin, "Bin" }, { &fun.broom, "Broom" }, { &fun.closeToss, "CloseToss" }, { &fun.openShake, "OpenShake" }, { &fun.holidays, "Holidays" }, { &fun.notify, "Notify" }, { &fun.dayNight, "DayNight" }, { &fun.trail, "Trail" }, { &fun.confetti, "Confetti" }, { &fun.castles, "Castles" }, { &fun.perch, "Perch" }, { &fun.starsLand, "StarsLand" }, { &overlayFeel.crack, "Crack" }, { &fun.petHoles, "PetHoles" }, { &fun.showers, "Showers" }, { &fun.taskPop, "TaskPop" }, { &fun.tilt, "Tilt" }, { &fun.weekday, "Weekday" }, { &fun.typing, "Typing" } })
+		*v = prefs.Get(ByteString("Overlay.Fun.") + name, *v);
+	// ponytail: Ctrl-dragging a Dock icon (Windows' "throw from the taskbar") opens its menu or drags it out of the Dock
+	// for good, so on the Mac fun.taskThrow stays off and has no switch
+	fun.weatherKind = prefs.Get("Overlay.Fun.WeatherKind", 0);
+	for (auto &f : moreFun)
+		*f.v = prefs.Get(ByteString("Overlay.Fun.") + f.pref, *f.v);
+	OverlayMac::SetShiftSource(Shifts);
+}
+
+// TickWindowWalls, then what the Windows side's Tick does for the tray, toasts and first frame
+// SDL can miss a button's release when our window goes back to ignoring the mouse mid-press, or another app takes it; TPT
+// would keep drawing. The system knows what's really held.
+static void ReleaseStuckButtons()
+{
+	static uint32_t sent = 0;
+	int x, y;
+	uint32_t held = SDL_GetMouseState(&x, &y);
+	sent &= held;
+	for (auto [button, index] : { std::pair{ SDL_BUTTON_LEFT, 0 }, { SDL_BUTTON_RIGHT, 1 } })
+	{
+		uint32_t mask = SDL_BUTTON(button);
+		if (!(held & mask) || (sent & mask) || OverlayMac::ButtonDown(index)) continue;
+		sent |= mask;
+		SDL_Event up{};
+		up.type = SDL_MOUSEBUTTONUP;
+		up.button.button = uint8_t(button), up.button.state = SDL_RELEASED, up.button.clicks = 1, up.button.x = x, up.button.y = y;
+		SDL_PushEvent(&up);
+	}
+}
+
 void OverlayWindows::Tick()
 {
-	if (!&GameController::Ref()) return;
-	auto *sim = GameController::Ref().GetModel()->GetSimulation();
-	static int lastTick = -1, skipped = 0;
-	if (sim->currentTick == lastTick && ++skipped < 2) return;
-	lastTick = sim->currentTick, skipped = 0;
-	static std::map<uint32_t, OverlayMac::Rect> last; // where each window was on the last tick
-	std::map<uint32_t, OverlayMac::Rect> now;
-	std::vector<OverlayWall> walls;
-	auto me = OverlayMac::Window();
-	double sw = me.r - me.l, sh = me.b - me.t;
-	if (sw > 0 && sh > 0 && GlobalPrefs::Ref().Get("Overlay.WindowWalls", true))
-		for (auto &r : OverlayMac::OtherWindows())
+	if (!mainWindow || !&GameController::Ref()) return;
+	ReleaseStuckButtons();
+	OverlayMac::WantDesktop(!overlayWindowed && iconWalls && OverlayGetLayer() != OverlayLayer::BehindIcons, !overlayWindowed && (fun.bin || fun.notify || fun.taskPop), !overlayWindowed && fun.typing);
+	TickWindowWalls();
+	// a pointer that's never destroyed: at exit a static one outlives the request manager, and quitting before the answer
+	// came crashed (and macOS then held up the next launch asking about it)
+	static auto &release = *new std::unique_ptr<http::Request>();
+	static bool checked = false;
+	if (!checked)
+	{
+		checked = true;
+		release = std::make_unique<http::Request>("https://api.github.com/repos/PVCPC/The-Desktop-Powder-Toy/releases/latest");
+		release->Start();
+	}
+	if (release && release->CheckDone())
+	{
+		ByteString tag;
+		try
 		{
-			auto px = [](double v, int n, double nw) { return int(std::lround(v * n / nw)); }; // screen -> sim pixels
-			OverlayWall w{ std::max(0, px(r.l - me.l, WINDOWW, sw)), std::max(0, px(r.t - me.t, WINDOWH, sh)),
-			               std::min(XRES, px(r.r - me.l, WINDOWW, sw)), std::min(YRES, px(r.b - me.t, WINDOWH, sh)), 0, 0, {} };
-			now[r.id] = r;
-			if (w.x1 <= w.x0 || w.y1 <= w.y0) continue;
-			if (auto it = last.find(r.id); it != last.end())
+			auto [status, data] = release->Finish();
+			auto at = data.find("\"tag_name\"");
+			if (status == 200 && at != data.npos)
 			{
-				w.mx = px(r.l - it->second.l, WINDOWW, sw);
-				w.my = px(r.t - it->second.t, WINDOWH, sh);
+				auto q = data.find('"', data.find(':', at) + 1) + 1;
+				tag = data.substr(q, data.find('"', q) - q);
 			}
-			w.id = r.id;
-			walls.push_back(w);
 		}
-	last = std::move(now);
-	OverlayApplyWalls(sim, walls);
+		catch (const http::RequestError &) {}
+		release.reset();
+		auto version = [](const std::string &v) { // "v1.2.3" or "1.2.3" -> {1, 2, 3}
+			std::array<int, 3> n{};
+			sscanf(v.c_str() + (v.size() && v[0] == 'v'), "%d.%d.%d", &n[0], &n[1], &n[2]);
+			return n;
+		};
+		auto &prefs = GlobalPrefs::Ref();
+		if (tag.size() && version(std::string(tag)) > version(Narrow(DESKTOP_VERSION)) && tag != prefs.Get("Overlay.ToldVersion", ByteString()))
+		{
+			prefs.Set("Overlay.ToldVersion", tag);
+			OverlayMac::Toast("The Desktop Powder Toy " + std::string(tag) + " is out");
+		}
+	}
+	static std::vector<Notification *> seen;
+	auto notes = GameController::Ref().GetModel()->GetNotifications();
+	if (notes != seen)
+	{
+		for (auto *n : notes)
+			if (std::find(seen.begin(), seen.end(), n) == seen.end()) Notify(n->Message.ToUtf8().c_str());
+		seen = notes;
+	}
+	static bool started = false;
+	if (!started)
+	{
+		started = true;
+		auto &prefs = GlobalPrefs::Ref();
+		int w = prefs.Get("Overlay.PlayArea.W", 0), h = prefs.Get("Overlay.PlayArea.H", 0); // 0: the whole sim, whatever its size
+		if (!overlayWindowed) SetPlayArea(prefs.Get("Overlay.PlayArea.X", 0), prefs.Get("Overlay.PlayArea.Y", 0), w > 0 ? w : CELLS.X, h > 0 ? h : CELLS.Y);
+		if (prefs.Get("Overlay.PendingScene", false))
+		{
+			prefs.Set("Overlay.PendingScene", false);
+			LoadSceneTiles(); // from the last run, or a restart at another pixel size
+		}
+		GameController::Ref().GetView()->SkipIntroText(); // it's in the settings window's Welcome tab
+		if (!prefs.Get("Overlay.Welcomed", false))
+		{
+			prefs.Set("Overlay.Welcomed", true);
+			TogglePalette();
+		}
+	}
+
+	// The Dock stands in for the taskbar: a badge that went up is the Mac's "flashed its button", an app that started pops
+	// a block. Twice a second is as often as the Dock is read.
+	auto *sim = GameController::Ref().GetModel()->GetSimulation();
+	static std::map<std::string, std::pair<int, bool>> dock; // badge, running
+	if ((fun.notify || fun.taskPop) && sim->currentTick % 30 == 0)
+	{
+		auto windows = OverlayMac::OtherWindows();
+		std::map<std::string, std::pair<int, bool>> now;
+		RECT floor;
+		GetWindowRect(macDock, &floor);
+		for (auto &item : OverlayMac::DockItems())
+		{
+			now[item.name] = { item.badge, item.running };
+			auto was = dock.find(item.name);
+			if (was == dock.end()) continue; // the first look: nothing has changed yet
+			if (fun.notify && item.badge > was->second.first)
+				for (auto &w : windows) // front to back: its top window
+					if (w.owner == item.name)
+					{
+						fun.flashed.push_back(HWND(uintptr_t(w.id)));
+						break;
+					}
+			if (fun.taskPop && item.running && !was->second.second)
+			{
+				std::lock_guard lock(taskMutex);
+				taskPopped.push_back({ long(item.l), std::min(long(item.t), floor.top), long(item.r), long(item.b) });
+			}
+		}
+		dock = std::move(now);
+	}
+	else if (!fun.notify && !fun.taskPop)
+	{
+		dock.clear();
+	}
+	if (later)
+	{
+		auto run = std::move(later);
+		later = nullptr;
+		run();
+	}
 }
+
+void OverlayWindows::SaveScene()
+{
+	SaveSceneTiles();
+}
+
+void OverlayWindows::ClearSim()
+{
+	GameController::Ref().ClearSim();
+}
+
+void OverlayWindows::TogglePalette()
+{
+	OverlayMac::ToggleSettings(SettingsTabs());
+}
+
+void OverlayWindows::SetPassThrough(bool) {}
+
+void OverlayWindows::Notify(const char *message)
+{
+	OverlayMac::Toast(message);
+}
+
+bool OverlayWindows::HideTPTMenus()
+{
+	return false; // no native element picker here: they're how you choose what to draw
+}
+
+void OverlayWindows::ClearUnderWindows(uint32_t *, int, int, int, int) {} // the settings window sits above the sim layer
+
+bool OverlayWindows::RecordingKey()
+{
+	return false;
+}
+
+ByteString OverlayWindows::PassApp(void *)
+{
+	auto front = OverlayMac::FrontName();
+	for (auto &s : GlobalPrefs::Ref().Get("Overlay.PassApps", ByteString("")).ToLower().PartitionBy(';'))
+		if (s.size() && std::string(s) == front) return s;
+	return {};
+}
+
+// TPT's own property and sign windows and console: they stay in the overlay, where the sim keeps running under them
+int OverlayWindows::Form(const String &, const String &, const std::vector<String> &, int &, String &, const std::vector<String> &,
+                         std::function<bool(int, const String &)>, int) { return -1; }
+bool OverlayWindows::ShowConsole() { return false; }
+void OverlayWindows::HideConsole() {}
 
 void OverlayMacMenu(int item)
 {
 	auto &gc = GameController::Ref();
 	if (item < int(OverlayInput::Count)) OverlaySetInput(OverlayInput(item));
 	if (item == 10) gc.SetPaused(!gc.GetPaused());
-	if (item == 11) gc.ClearSim();
+	if (item == 11) OverlayWindows::ClearSim();
+	if (item == 12 && !OverlayMac::SettingsOpen()) OverlayWindows::TogglePalette();
 	if (item == 99)
 	{
 		SDL_Event quit{};
@@ -7292,9 +8081,10 @@ bool OverlayMacChecked(int item)
 {
 	return item < int(OverlayInput::Count) ? int(OverlayGetInput()) == item : item == 10 && GameController::Ref().GetPaused();
 }
-#else
-void OverlayWindows::Tick() {}
 #endif
+#else
+void OverlayWindows::Init(void *) {}
+void OverlayWindows::Tick() {}
 void OverlayWindows::TogglePalette() {}
 void OverlayWindows::SetPassThrough(bool) {}
 void OverlayWindows::Notify(const char *) {}

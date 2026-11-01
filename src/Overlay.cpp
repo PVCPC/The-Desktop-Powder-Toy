@@ -39,10 +39,50 @@
 # endif
 #elif defined(__APPLE__)
 # include "OverlayMac.h"
+# include "FpsLimit.h"
+# include "gui/game/GameView.h"
 namespace
 {
 	OverlayInput input = OverlayInput::Auto;
+	OverlayLayer layer = OverlayLayer::OnTop;
+	bool fullScreenApp = false; // an app filling the screen is in front: clicks pass through whatever the mode
 	std::vector<uint32_t> argb;
+	// Behind the icons takes no clicks, so Locked there is drawing mode, as on Windows
+	OverlayLayer Shown()
+	{
+		return layer == OverlayLayer::BehindIcons && input == OverlayInput::Locked ? OverlayLayer::UnderWindows : layer;
+	}
+	void ApplyLayer()
+	{
+		OverlayMac::SetLayer(int(Shown()));
+	}
+	double Now()
+	{
+		return OverlayMac::Now();
+	}
+	// As the Windows side's: what moved between the last two sim frames, carried on by the drawing thread
+	struct Moving
+	{
+		float x, y, vx, vy;
+	};
+	std::vector<Moving> moving;
+	enum : uint8_t { OnParticle = 1, OnWall = 2, Moves = 4 };
+	std::vector<uint8_t> frameOccupied;
+	double framePeriod = 1 / 60.0, frameAt = 0;
+
+	void TickFullScreen()
+	{
+		static int frames = 0;
+		if (++frames % 30) return;
+		static ByteString app;
+		auto was = app;
+		app = OverlayWindows::PassApp(nullptr);
+		bool now = app.size() || (overlayAutoPass && OverlayMac::FrontFillsScreen());
+		if (now == fullScreenApp) return;
+		fullScreenApp = now;
+		if (app.size()) OverlayWindows::Notify((app + " in front: clicks pass through").c_str());
+		else OverlayWindows::Notify(now ? "Full-screen app: clicks pass through" : was.size() ? (was + " left: clicks back to normal").c_str() : "Full-screen app closed: clicks back to normal");
+	}
 }
 #endif
 
@@ -733,12 +773,16 @@ void OverlaySetLayer(OverlayLayer newLayer)
 	layer = newLayer;
 	GlobalPrefs::Ref().Set("Overlay.Layer", int(layer));
 	ApplyLayer();
+#elif defined(__APPLE__)
+	layer = newLayer;
+	GlobalPrefs::Ref().Set("Overlay.Layer", int(layer));
+	ApplyLayer();
 #endif
 }
 
 OverlayLayer OverlayGetLayer()
 {
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
 	return layer;
 #else
 	return OverlayLayer::OnTop;
@@ -752,6 +796,9 @@ void OverlaySetInput(OverlayInput newInput)
 #elif defined(__APPLE__)
 	input = newInput;
 	GlobalPrefs::Ref().Set("Overlay.Input", int(input));
+	if (layer == OverlayLayer::BehindIcons) ApplyLayer(); // in or out of drawing mode
+	static const char *names[] = { "Input: Auto", "Input: Pass-through", "Input: Locked to TPT" };
+	OverlayWindows::Notify(names[int(input)]);
 #else
 	(void)newInput;
 #endif
@@ -766,6 +813,11 @@ void OverlayLoadKeys()
 	lockedKey = Hotkey::Parse(prefs.Get("Overlay.Keys.Locked", ByteString("Ctrl+Alt+L")));
 	paletteKey = Hotkey::Parse(prefs.Get("Overlay.Keys.Palette", ByteString("Ctrl+Alt+E")));
 	clearKey = Hotkey::Parse(prefs.Get("Overlay.Keys.Clear", ByteString("Ctrl+Alt+C")));
+#elif defined(__APPLE__)
+	auto &prefs = GlobalPrefs::Ref();
+	OverlayMac::SetHotkeys({ prefs.Get("Overlay.Keys.CycleInput", ByteString("Ctrl+Alt+O")), prefs.Get("Overlay.Keys.PassThrough", ByteString("Ctrl+Alt+P")),
+	                         prefs.Get("Overlay.Keys.Locked", ByteString("Ctrl+Alt+L")), prefs.Get("Overlay.Keys.Palette", ByteString("Ctrl+Alt+E")),
+	                         prefs.Get("Overlay.Keys.Clear", ByteString("Ctrl+Alt+C")) });
 #endif
 }
 
@@ -785,6 +837,8 @@ int OverlayDefaultScale()
 	float dpiScale = GetDeviceCaps(screen, LOGPIXELSY) / 96.f;
 	ReleaseDC(nullptr, screen);
 	return std::max(1, int(std::lround(2 * std::max(dpiScale, GetSystemMetrics(SM_CYSCREEN) / 1080.f))));
+#elif defined(__APPLE__)
+	return 1; // a sim pixel is a point: two pixels on Retina, the size Windows picks for a 1080p screen
 #else
 	return 1;
 #endif
@@ -806,8 +860,19 @@ std::pair<Vec2<int>, int> OverlaySimSize(int scale)
 	}
 #elif defined(__APPLE__)
 	// TPT's own menus stay (no side window here), inside the usable area: the bottom row sits just above the Dock
+	auto &prefs = GlobalPrefs::Ref();
+	OverlayMac::SetScreen(prefs.Get("Overlay.Screen", 0));
 	int sw, sh;
 	OverlayMac::ScreenSize(sw, sh);
+	if (overlayWindowed)
+	{
+		// A normal window, menus and title bar included; 0: as big as fits
+		scale = std::max(scale, 1);
+		sh -= 32; // the title bar
+		int w = prefs.Get("Overlay.WindowedView.W", 612), h = prefs.Get("Overlay.WindowedView.H", 384);
+		auto most = (Vec2(sw, sh) / scale - Vec2(BARSIZE, MENUSIZE)) / CELL;
+		return { Vec2(std::clamp(w > 0 ? w / CELL : most.X, 32, most.X), std::clamp(h > 0 ? h / CELL : most.Y, 32, most.Y)), scale };
+	}
 	for (scale = std::max(scale, 1); ; scale++)
 	{
 		auto cells = (Vec2(sw, sh) / scale - Vec2(BARSIZE, MENUSIZE)) / CELL;
@@ -849,9 +914,15 @@ void ApplyOverlay(SDL_Window *window)
 	layer = prefs.Get("Overlay.Layer", OverlayLayer::Count, OverlayLayer::OnTop);
 	if (layer != OverlayLayer::OnTop) ApplyLayer();
 #elif defined(__APPLE__)
-	if (overlayWindowed) return; // ponytail: no side windows on the Mac, so overlay:window is plain TPT there
-	OverlayMac::Init(window);
-	input = GlobalPrefs::Ref().Get("Overlay.Input", OverlayInput::Count, OverlayInput::Auto);
+	if (overlayWindowed) OverlayMac::InitMenu();
+	else OverlayMac::Init(window);
+	auto &prefs = GlobalPrefs::Ref();
+	OverlayLoadKeys();
+	OverlayWindows::Init(nullptr);
+	overlayAutoPass = prefs.Get("Overlay.AutoPassThrough", true);
+	input = prefs.Get("Overlay.Input", OverlayInput::Count, OverlayInput::Auto);
+	layer = prefs.Get("Overlay.Layer", OverlayLayer::Count, OverlayLayer::OnTop);
+	if (Shown() != OverlayLayer::OnTop) ApplyLayer();
 #else
 	(void)window; // ponytail: Windows and macOS only; X11/Wayland each need their own shape/input-region code
 #endif
@@ -886,13 +957,21 @@ void OverlayTickUI()
 	}
 	OverlayWindows::Tick();
 #elif defined(__APPLE__)
+	for (int key; (key = OverlayMac::TakeHotkey()) >= 0;)
+	{
+		if (key == 0) OverlaySetInput(OverlayInput((int(input) + 1) % int(OverlayInput::Count)));
+		if (key == 1) OverlaySetInput(input == OverlayInput::PassThrough ? OverlayInput::Auto : OverlayInput::PassThrough);
+		if (key == 2) OverlaySetInput(input == OverlayInput::Locked ? OverlayInput::Auto : OverlayInput::Locked);
+		if (key == 3) OverlayWindows::TogglePalette();
+		if (key == 4) OverlayWindows::ClearSim();
+	}
 	OverlayWindows::Tick();
 #endif
 }
 
 void OverlayFrameParts(const RenderableSimulation &sim, bool zoom)
 {
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
 	static std::vector<float> lastX, lastY;
 	static std::vector<int> lastType;
 	double now = Now();
@@ -1077,7 +1156,8 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 	}
 #elif defined(__APPLE__)
 	(void)window;
-	OverlayWindows::Tick();
+	TickFullScreen();
+	OverlayTickUI();
 	argb.resize(size_t(w) * h);
 	OverlayBands(h, [&](int y0, int y1) {
 		for (int i = y0 * w; i < y1 * w; i++)
@@ -1086,8 +1166,77 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 			argb[i] = c ? c | 0xFF000000 : 0; // black is see-through
 		}
 	});
-	OverlayMac::Present(argb.data(), w, h, input == OverlayInput::Locked || (input == OverlayInput::Auto && OverlayMac::Active()),
-	                    input == OverlayInput::PassThrough);
+	float fade = 1; // TPT's menus
+	bool catchAll = (input == OverlayInput::Locked || (input == OverlayInput::Auto && OverlayMac::Active())) && !fullScreenApp;
+	if (w == WINDOWW && h == WINDOWH)
+	{
+		if (frameOccupied.size() < size_t(XRES) * YRES) frameOccupied.assign(size_t(XRES) * YRES, 0);
+		OverlayWindows::ApplySimMasks(argb.data(), w, frameOccupied.data());
+		auto *top = ui::Engine::Ref().GetWindow();
+		static uint32_t lastUse = SDL_GetTicks();
+		// They fade out after a few seconds without the mouse over them, and come back on hover; not while a dialog is up
+		// or TPT has the clicks anyway, when a tool strip that keeps vanishing would only get in the way.
+		if (!(top && top->InPlace))
+		{
+			auto me = OverlayMac::Window();
+			double mx, my;
+			OverlayMac::MouseFrom(mx, my);
+			int cx = me.r > me.l ? int((mx - me.l) * w / (me.r - me.l)) : 0, cy = me.b > me.t ? int((my - me.t) * h / (me.b - me.t)) : 0;
+			if (catchAll || top != GameController::Ref().GetView() || (cx >= 0 && cy >= 0 && cx < w && cy < h && (cx >= XRES || cy >= YRES))) lastUse = SDL_GetTicks();
+			fade = std::clamp(1 - (int(SDL_GetTicks() - lastUse) - 3000) / 1000.f, 0.f, 1.f);
+		}
+		if (fade < 1)
+		{
+			uint32_t k = uint32_t(fade * 256);
+			for (int y = 0; y < WINDOWH; y++)
+				for (int x = y < YRES ? XRES : 0; x < w; x++)
+				{
+					auto &p = argb[y * w + x];
+					p = k ? ((((p & 0xFF00FF) * k) >> 8) & 0xFF00FF) | ((((p & 0xFF00) * k) >> 8) & 0xFF00) | ((((p >> 24) * k) >> 8) << 24) : 0;
+				}
+		}
+		OverlayWindows::DrawExtras(argb.data(), w, h);
+	}
+	bool overDrawn = OverlayMac::UpdateClicks(argb.data(), w, h, catchAll, input == OverlayInput::PassThrough || Shown() == OverlayLayer::BehindIcons || (fullScreenApp && !catchAll));
+	// Drawing at the screen's rate only pays while something moves: particles, a window, the menus fading, or TPT in
+	// use. Idle, a few frames a second keep up with slow changes and spot the next move, for a fraction of the CPU.
+	static double busyUntil = 0;
+	auto shifts = OverlayWindows::WindowShifts();
+	if (!moving.empty() || overDrawn || (fade > 0 && fade < 1) || !shifts.empty() || OverlayDebrisFlying())
+		busyUntil = Now() + 1;
+	overlayIdle = Now() >= busyUntil;
+	ui::Engine::Ref().SetDrawingFrequencyLimit(overlayIdle ? DrawLimit(DrawLimitExplicit{ 15 }) : DrawLimit(DrawLimitDisplay{}));
+
+	// out of the frame, into squares: first the sand on top of a window that rose since the sim last read it (it would
+	// sink into the window by up to a tick), then the moving particles, carried on at their speed (one tick at most);
+	// not into a still particle or a wall, where the sim will stop them. As GpuPresent on Windows.
+	std::vector<OverlayMac::Mover> movers;
+	for (auto &s : shifts)
+		for (int x = std::max(s.x0, 0); s.dy < 0 && x < std::min(s.x1, w); x++)
+			for (int y = std::min(s.y0, h) - 1; y >= 0; y--)
+			{
+				auto &px = argb[size_t(y) * w + x];
+				if (px >> 24 < 2) break; // the top of the pile
+				movers.push_back({ float(x), float(y), 0, 0, px, uint32_t(uintptr_t(s.id)) });
+				px = 0;
+			}
+	for (auto &m : moving)
+	{
+		int x = int(m.x), y = int(m.y);
+		if (x < 0 || y < 0 || x >= w || y >= h) continue;
+		auto &px = argb[size_t(y) * w + x];
+		if (px >> 24 < 2) continue; // under a window or a panel, or already taken
+		int nx = int(std::lround(m.x + m.vx)), ny = int(std::lround(m.y + m.vy));
+		bool open = nx >= 0 && ny >= 0 && nx < XRES && ny < YRES && size_t(ny) * XRES + nx < frameOccupied.size();
+		if (open)
+		{
+			auto o = frameOccupied[size_t(ny) * XRES + nx];
+			open = !(o & OnWall) && (!(o & OnParticle) || (o & Moves));
+		}
+		movers.push_back({ m.x, m.y, open ? m.vx : 0, open ? m.vy : 0, px, 0 });
+		px = 0;
+	}
+	OverlayMac::Present(argb, w, h, std::move(movers), frameAt, framePeriod);
 #else
 	(void)window, (void)vid, (void)w, (void)h;
 #endif

@@ -66,5 +66,7 @@
 		<string>@MANIFEST_MACOS_MIN_VER@</string>
 		<key>NSPrincipalClass</key>
 		<string>NSApplication</string>
+		<key>NSAudioCaptureUsageDescription</key>
+		<string>Music bounce makes sand hop to what your Mac is playing. Only the sound level is read.</string>
 	</dict>
 </plist>
