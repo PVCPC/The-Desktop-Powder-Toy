@@ -118,6 +118,8 @@ namespace
 		float fetch = 0, kick = 1;               // pets fetch balls this far away (px, 0: no), kick strength
 		float volcano = 0, volcanoForce = 1;     // CPU use (0-1) that wakes the taskbar volcano (0: none), lava force
 		bool bin = false, broom = false, closeToss = false, openShake = false, holidays = false, notify = false, dayNight = false, trail = false, confetti = false;
+		bool castles = false, perch = false;     // pets build sandcastles; morning birds land and rest
+		float stars = 0, puddles = 0, wind = 0;  // shooting stars an hour at night; s rain lies as puddles; mouse wind
 		std::vector<HWND> flashed; // windows that flashed their taskbar button (a new message) since the last tick
 	} fun;
 	// A Fun slider row; unit: 0 %, 1 count, 2 minutes, 3 seconds (10 s steps), 4 clock hour, 5 px, 6 seconds
@@ -140,11 +142,15 @@ namespace
 		{ L"Fetch kick", L"How hard the pets kick the ball back", &fun.kick, 0.25f, 3, "Kick", 0 },
 		{ L"Volcano wakes at", L"A little volcano by the clock smokes once the PC's total CPU use passes this, and erupts lava at 20% more", &fun.volcano, 0, 1, "Volcano", 0 },
 		{ L"Volcano force", L"How high the volcano throws its lava", &fun.volcanoForce, 0.25f, 3, "VolcanoForce", 0 },
+		{ L"Shooting stars", L"At night (8 pm to 5 am), about this many shooting stars an hour streak across the empty desktop", &fun.stars, 0, 30, "Stars", 7 },
+		{ L"Puddles last", L"Rain that lands on something lies there as a puddle this many seconds more before it dries up", &fun.puddles, 0, 120, "Puddles", 6 },
+		{ L"Mouse wind", L"Swipe the mouse pointer fast across the desktop and it blows the sand, snow and smoke near it (how hard)", &fun.wind, 0, 3, "Wind", 0 },
 	};
 	// paper planes in flight or landed (sim pixels; landed: ticks since), and when the rainbow goes (GetTickCount64)
 	struct PaperPlane { float x, y, vx, vy; int landed; };
 	std::vector<PaperPlane> paperPlanes;
 	ULONGLONG rainbowUntil = 0;
+	int funHour = 12; // the local hour, for drawing
 	bool rainbowTwice = false; // this one is a double rainbow
 	HWND mainWindow = nullptr;    // TPT's own window
 	std::string recording;        // Overlay.Keys.<name> being recorded in the Overlay tab, or empty
@@ -2636,7 +2642,7 @@ namespace
 			}
 			y += S(26) * int(std::size(feel)) + S(94);
 
-			top = Group(x, y, w, S(26) * 17 + S(8), L"Fun");
+			top = Group(x, y, w, S(26) * 19 + S(8), L"Fun");
 			struct FunToggle { const wchar_t *name, *tip; bool *v; const char *pref; };
 			FunToggle funToggles[] = {
 				{ L"Recycle Bin eats sand", L"Sand that lands on the Recycle Bin icon disappears into it (with icons as walls)", &fun.bin, "Bin" },
@@ -2648,6 +2654,8 @@ namespace
 				{ L"Day and night", L"By the clock: fireflies come out and fallen leaves go dark in the evening, birds fly over in the morning", &fun.dayNight, "DayNight" },
 				{ L"Sparkle trail", L"The mouse pointer leaves a short trail of cold sparks over the desktop", &fun.trail, "Trail" },
 				{ L"Confetti", L"Wiggle the mouse pointer quickly from side to side to throw a burst of confetti", &fun.confetti, "Confetti" },
+				{ L"Pets build sandcastles", L"A pet next to a big enough sand pile now and then builds a little castle from it; it crumbles back into sand after 5 minutes", &fun.castles, "Castles" },
+				{ L"Birds land and rest", L"The morning birds (Day and night) now and then land on a window, icon or pile and rest a few seconds", &fun.perch, "Perch" },
 			};
 			for (int i = 0; i < int(std::size(funToggles)); i++)
 			{
@@ -2676,6 +2684,7 @@ namespace
 				else if (f.unit == 4) swprintf(val, 16, *f.v >= 1 ? L"%d:00" : L"off", int(*f.v) % 24);
 				else if (f.unit == 5) swprintf(val, 16, *f.v >= 1 ? L"%d px" : L"off", int(*f.v));
 				else if (f.unit == 6) swprintf(val, 16, *f.v >= 1 ? L"%d s" : L"off", int(*f.v));
+				else if (f.unit == 7) swprintf(val, 16, *f.v >= 1 ? L"%d / h" : L"off", int(*f.v));
 				else swprintf(val, 16, *f.v > 0 ? L"%d%%" : L"off", int(std::lround(*f.v * 100)));
 				Caption(x + w - S(60), ry, val);
 				Slider(x + S(160), ry, w - S(232), *f.v, f.lo, f.hi, [f](float v) {
@@ -2698,7 +2707,7 @@ namespace
 					GlobalPrefs::Ref().Set("Overlay.Fun.WeatherKind", i);
 				}) + S(18);
 			}
-			y += S(26) * 17 + S(16);
+			y += S(26) * 19 + S(16);
 
 			top = Group(x, y, w, S(26) * int(std::size(moreFun)) + S(8), L"More fun");
 			for (int i = 0; i < int(std::size(moreFun)); i++)
@@ -4799,7 +4808,7 @@ void OverlayWindows::Init(void *mainHwnd)
 		*v = prefs.Get(ByteString("Overlay.Feel.") + name, *v);
 	for (auto [v, name] : { std::pair{ &fun.pets, "Pets" }, { &fun.weather, "Weather" }, { &fun.music, "Music" }, { &fun.weatherIdle, "WeatherIdle" }, { &fun.weatherLast, "WeatherLast" }, { &fun.hot, "Hot" }, { &fun.hourglass, "Hourglass" } })
 		*v = prefs.Get(ByteString("Overlay.Fun.") + name, *v);
-	for (auto [v, name] : { std::pair{ &fun.bin, "Bin" }, { &fun.broom, "Broom" }, { &fun.closeToss, "CloseToss" }, { &fun.openShake, "OpenShake" }, { &fun.holidays, "Holidays" }, { &fun.notify, "Notify" }, { &fun.dayNight, "DayNight" }, { &fun.trail, "Trail" }, { &fun.confetti, "Confetti" } })
+	for (auto [v, name] : { std::pair{ &fun.bin, "Bin" }, { &fun.broom, "Broom" }, { &fun.closeToss, "CloseToss" }, { &fun.openShake, "OpenShake" }, { &fun.holidays, "Holidays" }, { &fun.notify, "Notify" }, { &fun.dayNight, "DayNight" }, { &fun.trail, "Trail" }, { &fun.confetti, "Confetti" }, { &fun.castles, "Castles" }, { &fun.perch, "Perch" } })
 		*v = prefs.Get(ByteString("Overlay.Fun.") + name, *v);
 	fun.weatherKind = prefs.Get("Overlay.Fun.WeatherKind", 0);
 	for (auto &f : moreFun)
@@ -5703,11 +5712,28 @@ static void TickFun(Simulation *sim)
 		if (kind == 2 && sim->rng.uniform01() < fun.weather / 1200) // a storm: now and then a bolt from the top
 			sim->create_part(-1, sim->rng.between(XRES / 20, XRES * 19 / 20), CELL, PT_LIGH, 20);
 	}
-	while (!fallen.empty() && std::get<2>(fallen.front()) <= sim->currentTick)
+	for (size_t k = 0, n = fallen.size(); k < n; k++) // all of them: their times aren't in order
 	{
 		auto [i, type, until] = fallen.front();
 		fallen.pop_front();
-		int t = sim->parts[i].type;
+		if (until > sim->currentTick)
+		{
+			fallen.push_back({ i, type, until });
+			continue;
+		}
+		int t = sim->parts[i].type, x = int(sim->parts[i].x + 0.5f), y = int(sim->parts[i].y + 0.5f);
+		if (type == PT_BRCK && t == PT_BRCK) // a sandcastle crumbles back into sand
+		{
+			sim->part_change_type(i, x, y, PT_SAND);
+			continue;
+		}
+		if (type == PT_WATR && t == PT_WATR && fun.puddles >= 1 && y + 1 < YRES && (sim->pmap[y + 1][x] || sim->PixelWall(x, y + 1)))
+		{
+			// rain lying on something: a puddle, for a while longer (marked so it isn't kept twice)
+			fallen.push_back({ i, PT_WATR | 0x10000, sim->currentTick + int(fun.puddles * 60 * (0.5f + sim->rng.uniform01())) });
+			continue;
+		}
+		type &= 0xFFFF;
 		if (t == type || (type == PT_SNOW && t == PT_WATR)) sim->kill_part(i);
 	}
 	// Holidays, by the date: pumpkins (balls) on Halloween, jelly hearts (JOIN) on Valentine's Day, fireworks in the
@@ -5938,6 +5964,88 @@ static void TickFun(Simulation *sim)
 		else pl.x += pl.vx, pl.y += pl.vy;
 	}
 	std::erase_if(paperPlanes, [](auto &pl) { return pl.landed >= 600; });
+	funHour = hour;
+	// Birds land and rest: a morning bird with something below it now and then glides down onto it (BIRD lands it)
+	if (fun.perch)
+		for (auto &[i, until] : visitors)
+			if (auto &p = sim->parts[i]; until >= 0 && p.tmp2 == 0 && sim->rng.chance(1, 900))
+			{
+				int x = int(p.x + 0.5f), y = int(p.y + 0.5f);
+				for (int yy = y + 1; yy < std::min(YRES - CELL, y + 80); yy++)
+					if (sim->pmap[yy][x] || sim->PixelWall(x, yy))
+					{
+						p.tmp2 = -1;
+						break;
+					}
+			}
+	// Mouse wind: a fast pointer blows the loose stuff near it along (not while a button is held: drawing or grabbing)
+	static int windX = -1, windY = -1;
+	if (auto &m = sim->petPointer; fun.wind > 0 && m.x >= 0 && windX >= 0 && !(GetAsyncKeyState(VK_LBUTTON) & 0x8000))
+	{
+		float dx = float(m.x - windX), dy = float(m.y - windY);
+		if (dx * dx + dy * dy > 9)
+		{
+			auto &els = SimulationData::CRef().elements;
+			for (int y = std::max(0, m.y - 24); y < std::min(YRES, m.y + 25); y++)
+				for (int x = std::max(0, m.x - 24); x < std::min(XRES, m.x + 25); x++)
+					if (int r = sim->pmap[y][x]; r && (els[TYP(r)].Properties & (TYPE_PART | TYPE_LIQUID | TYPE_GAS)) && (x - m.x) * (x - m.x) + (y - m.y) * (y - m.y) < 576)
+					{
+						auto &p = sim->parts[ID(r)];
+						p.vx = std::clamp(p.vx + dx * 0.12f * fun.wind, -10.f, 10.f);
+						p.vy = std::clamp(p.vy + dy * 0.12f * fun.wind, -10.f, 10.f);
+					}
+		}
+	}
+	windX = sim->petPointer.x, windY = sim->petPointer.y;
+	// Sandcastles: now and then a pet beside a sand pile builds a little castle (sand-coloured brick) from its sand
+	static int castles = 0, castleCheck = 0;
+	if (fun.castles && ++castleCheck >= 600)
+	{
+		castleCheck = 0;
+		for (int f = 0; f < MAX_FIGHTERS && castles < 3; f++)
+		{
+			auto &fg = sim->fighters[f];
+			if (!fg.spwn) continue;
+			int fx = int(fg.legs[4] + fg.legs[12]) / 2, fy = int(fg.legs[5]);
+			std::vector<int> sand;
+			for (int y = std::max(0, fy - 24); y < std::min(YRES, fy + 6); y++)
+				for (int x = std::max(0, fx - 30); x < std::min(XRES, fx + 31); x++)
+					if (int r = sim->pmap[y][x]; r && TYP(r) == PT_SAND) sand.push_back(ID(r));
+			// the castle: 11 wide, 8 tall; a door in the base, two towers with battlements
+			static const char *shape[] = { // top row first
+				"#.#.....#.#",
+				"###.....###",
+				"###.#.#.###",
+				"###########",
+				"###########",
+				"###########",
+				"####...####",
+				"####...####",
+			};
+			int cw = 11, ch = int(std::size(shape)), need = 0;
+			for (auto row : shape) for (int k = 0; k < cw; k++) need += row[k] == '#';
+			if (int(sand.size()) < need + 30) continue;
+			int cx = fx + (sim->rng.chance(1, 2) ? 18 : -18) - cw / 2, base = -1;
+			for (int y = std::max(CELL, fy - 30); y < std::min(YRES - CELL, fy + 10) && base < 0; y++)
+				if (sim->pmap[y][cx + cw / 2] || sim->PixelWall(cx + cw / 2, y)) base = y - 1; // just above the ground
+			if (base < 0 || cx < CELL || cx + cw >= XRES - CELL || base - ch < CELL) continue;
+			bool room = true;
+			for (int r = 0; r < ch && room; r++)
+				for (int k = 0; k < cw && room; k++) room = !sim->pmap[base - ch + 1 + r][cx + k] && !sim->PixelWall(cx + k, base - ch + 1 + r);
+			if (!room) continue;
+			for (int k = 0; k < need; k++) sim->kill_part(sand[k]); // the pile pays for it
+			for (int r = 0; r < ch; r++)
+				for (int k = 0; k < cw; k++)
+					if (shape[r][k] == '#')
+						if (int i = sim->create_part(-1, cx + k, base - ch + 1 + r, PT_BRCK); i >= 0)
+						{
+							sim->parts[i].dcolour = 0xFFD9B86A;
+							fallen.push_back({ i, PT_BRCK, sim->currentTick + 18000 });
+						}
+			castles++;
+		}
+	}
+	if (castles && sim->currentTick % 18000 == 0) castles = 0; // ponytail: a rough count; they crumble after 5 min anyway
 }
 
 static void TickWindowWalls()
@@ -6404,6 +6512,36 @@ void OverlayWindows::DrawExtras(uint32_t *argb, int w, int h)
 		int outer = cy - play.pos.Y - ph / 4;
 		arc(outer, rows, false, a);
 		if (rainbowTwice) arc(outer + rows * 2, rows * 13 / 10, true, a * 0.4f); // the double: wider, fainter, colours reversed
+	}
+	// shooting stars: at night, now and then a bright head with a fading tail streaks down across the open desktop
+	{
+		struct Star { float x, y, dx, dy; ULONGLONG born; };
+		static std::vector<Star> stars;
+		static ULONGLONG nextStar = 0;
+		auto now = GetTickCount64();
+		bool night = funHour >= 20 || funHour < 5;
+		if (fun.stars < 1 || !night) nextStar = 0;
+		else if (!nextStar) nextStar = now + ULONGLONG(3600000.0 / fun.stars * (0.3 + 1.4 * sim->rng.uniform01()));
+		else if (now >= nextStar)
+		{
+			nextStar = 0;
+			auto play = sim->PlayRect();
+			float dir = sim->rng.chance(1, 2) ? 1.f : -1.f, len = play.size.X * (0.15f + 0.15f * sim->rng.uniform01());
+			stars.push_back({ play.pos.X + play.size.X * (0.15f + 0.7f * sim->rng.uniform01()), play.pos.Y + play.size.Y * 0.4f * sim->rng.uniform01(), dir * len, len * 0.35f, now });
+		}
+		for (auto &st : stars)
+		{
+			float t = (now - st.born) / 900.f, fade = t > 0.7f ? (1 - t) / 0.3f : 1;
+			float len = std::hypot(st.dx, st.dy), ux = st.dx / len, uy = st.dy / len;
+			float hx = st.x + st.dx * t, hy = st.y + st.dy * t, tail = std::min(len * t, 90.f);
+			for (int k = 0; k < int(tail); k++) // head first, the tail falls behind and fades
+			{
+				int x = int(hx - ux * k), y = int(hy - uy * k);
+				if (x >= 0 && y >= 0 && x < std::min(w, XRES) && y < std::min(h, YRES) && !(argb[y * w + x] >> 24) && !sim->PixelWall(x, y))
+					put(x, y, k < 3 ? 0xFFFFFF : 0xCFE0FF, fade * (1 - k / 90.f));
+			}
+		}
+		std::erase_if(stars, [now](auto &st) { return now - st.born >= 900; });
 	}
 	// paper planes: a white dart with a grey fold, nose first; landed ones fade over their last 2 s
 	for (auto &pl : paperPlanes)

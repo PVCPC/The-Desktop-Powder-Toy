@@ -415,13 +415,31 @@ The "More fun" group under Fun, one table (moreFun[]) for the rows and their pre
 - [x] Rainbow like a real one (user 11-01: "faint and see through", "a little wider", "double rainbow chance"):
   blended colours, soft edges, fading feet, at most 27% strong at default brightness; ph/14 rows wide; "Double rainbow chance" slider (default 25%) adds a wider, fainter arc outside with the colours reversed. v0.7.5.
 
+## Fun to-do 4 (user 2026-11-01: "sliders or toggles? Whichever makes more sense")
+
+On/off things are Fun toggles; things with an amount are More fun sliders.
+
+- [x] Pets build sandcastles (toggle, pref Castles): every 10 s, a pet with a sand pile of 97+ grains within 30 px
+  turns 67 of them into a brick castle 18 px to its side, if there's room. The castle crumbles back to sand after
+  5 min; at most 3 every 5 min. Tested: 67 bricks built, 67 sand gone.
+- [x] Birds land and rest (toggle, pref Perch): a morning bird (Day and night) over something solid now and then
+  glides down onto it and sits 5-15 s before flying on (BIRD tmp2: <0 landing, >0 resting). Tested: 3 resting
+  with it on, none with it off.
+- [x] Shooting stars (slider 0-30 an hour, pref Stars): from 8 pm to 5 am, a white streak with a fading tail
+  crosses the open desktop (drawn, not over windows). Checked on a frame dump.
+- [x] Puddles last (slider 0-120 s, pref Puddles): rain that lands on something stays that long (+-50%) before it
+  dries. Tested: 114 water drops lying around with 60 s against 43 with it off.
+- [x] Mouse wind (slider 0-3, pref Wind): a fast mouse swipe (not dragging) blows powder, liquid and gas within
+  24 px along with it. Tested: sand pile shifted 3.5 px over 8 s of swipes; none with it off.
+- [x] Release v0.7.6 (2026-11-01).
+
 ## Ideas
 
 - **Menu inspiration: Kingsway** (2017), whose whole UI is a fake retro desktop. Every TPT panel would be its own
   draggable window: element palette, tools, render modes, settings, save browser, stamps. Windows can stack and
   close, a start-button style launcher and taskbar reopen them, and items can be dragged between windows (e.g. an
   element from the palette onto a quick-bar window). Combine with the Vista theme first, then other OS themes.
-- Smart menu behaviour: menus fade when unused, then come back on hover or a hotkey.
+- [x] Smart menu behaviour (done 2026-10-30, see item 7): menus fade when unused, then come back on hover or a hotkey.
 - [x] Per-app rules (2026-10-31): Overlay tab list "Pass clicks through while these apps are in front"
   (Overlay.PassApps, exe names; Add a running app picks from open windows). Tested: python.exe in front ->
   pass-through notice, closed -> back to normal.

@@ -48,6 +48,18 @@ void Element::Element_BIRD()
 
 static int update(UPDATE_FUNC_ARGS)
 {
+	// the overlay's morning birds landing (tmp2 -1: glide down until something is underfoot) and resting (tmp2 > 0 ticks)
+	if (parts[i].tmp2 < 0)
+	{
+		parts[i].vx *= 0.9f, parts[i].vy = 1;
+		if (!sim->eval_move(PT_BIRD, x, y + 1, nullptr)) parts[i].tmp2 = sim->rng.between(300, 900);
+		return 0;
+	}
+	if (parts[i].tmp2 > 0)
+	{
+		parts[i].tmp2--, parts[i].vx = parts[i].vy = 0;
+		return 0;
+	}
 	bool firefly = parts[i].tmp == 1; // the overlay's evening fireflies: slow loners
 	Flock(sim, parts[i], i, x, y, firefly ? 0.3f : 1.5f, firefly ? 0 : 1, [sim](int fx, int fy) {
 		unsigned r = 0;

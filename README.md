@@ -44,11 +44,13 @@ What's new
   fireworks after midnight on New Year's; an hourglass on the taskbar that runs out in the minutes you set; a ball dropped on any app that flashes for
   your attention; fireflies in the evening (the pets chase them) and birds in the morning; a sparkle trail behind the
   mouse pointer; confetti when you wiggle it; busy apps warm what sits on their windows, so snow melts on a working game but stays on an idle
-  app; new windows shake sand loose. The **More fun** group has a slider for each of these (far left is off): pets
+  app; new windows shake sand loose; pets build sandcastles from big sand piles; morning birds land and rest. The **More fun** group has a slider for each of these (far left is off): pets
   nap in the hours you pick (little z's float up), gather in the middle when you're away and hop for as long as you
   like when you come back; snowmen on deep snow (how many, how deep); dragging a window up fast throws what sits on
   it (how hard); paper planes (how often, how fast); a faint, see-through rainbow after the rain, sometimes a double one (how long, how bright, how often double); pets fetch a
-  ball and kick it back toward the mouse pointer (how far they'll run, how hard they kick); and a volcano by the
+  ball and kick it back toward the mouse pointer (how far they'll run, how hard they kick); shooting stars at night
+  (how many an hour); rain that lies as puddles (how long); a fast mouse swipe that blows sand and smoke (how hard);
+  and a volcano by the
   clock that smokes when your PC is busy and erupts lava when it's busier (the CPU level that wakes it, how high
   it throws).
 - **New elements** (Special menu): BIRD flies in flocks; FISH swim in schools in any liquid; BALL makes one round
