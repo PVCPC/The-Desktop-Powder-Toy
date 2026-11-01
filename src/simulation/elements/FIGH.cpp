@@ -61,7 +61,7 @@ void Element::Element_FIGH()
 // back at a drop (now and then it jumps off anyway).
 static int PetComm(Simulation *sim, playerst *figh, int f)
 {
-	static int dir[MAX_FIGHTERS], left[MAX_FIGHTERS], flee[MAX_FIGHTERS];
+	static int dir[MAX_FIGHTERS], left[MAX_FIGHTERS], flee[MAX_FIGHTERS], shy[MAX_FIGHTERS];
 	if (--left[f] <= 0)
 	{
 		dir[f] = sim->rng.chance(1, 3) ? 0 : (sim->rng.chance(1, 2) ? 1 : 2);
@@ -81,6 +81,19 @@ static int PetComm(Simulation *sim, playerst *figh, int f)
 			left[f] = flee[f] = 60;
 			break;
 		}
+	}
+	// the mouse pointer: a quick one close by startles them away, a slow one they walk over to, under a still one they
+	// stop; and they hop when the user comes back
+	auto &m = sim->petPointer;
+	if (--shy[f] <= 0 && flee[f] <= 0 && m.x >= 0 && std::abs(m.x - cx) < 80 && m.y > cy - 60 && m.y < cy + 20)
+	{
+		left[f] = 30;
+		if (m.speed > 6) dir[f] = m.x < cx ? 2 : 1, left[f] = shy[f] = 90;
+		else dir[f] = std::abs(m.x - cx) < 10 ? 0 : (m.x < cx ? 1 : 2);
+	}
+	if (sim->petGreet > sim->currentTick)
+	{
+		return (sim->currentTick + f * 7) % 30 < 4 ? 0x04 : 0;
 	}
 	if (!dir[f])
 	{

@@ -5547,6 +5547,14 @@ static void TickFun(Simulation *sim)
 	// Weather from the top edge; each flake, drop or leaf goes after a while (snow even once melted)
 	static std::deque<std::tuple<int, int, int>> fallen; // particle, type, the tick it goes
 	LASTINPUTINFO input{ sizeof(input) };
+	// back after a minute or more away: the pets hop to greet you
+	static bool away = false;
+	if (GetLastInputInfo(&input))
+	{
+		DWORD idleMs = GetTickCount() - input.dwTime;
+		if (idleMs >= 60000) away = true;
+		else if (away && idleMs < 1000) away = false, sim->petGreet = sim->currentTick + 120;
+	}
 	bool idle = fun.weatherIdle < 1 || (GetLastInputInfo(&input) && GetTickCount() - input.dwTime >= DWORD(fun.weatherIdle * 60000));
 	if (fun.weather > 0 && idle)
 	{
@@ -5699,6 +5707,7 @@ static void TickWindowWalls()
 	{
 		auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); };
 		int x = px(cursor.x - sr.left, WINDOWW, sw), y = px(cursor.y - sr.top, WINDOWH, sh);
+		sim->petPointer = { x, y, lastCursor.x >= 0 ? float(std::hypot(px(cursor.x - lastCursor.x, WINDOWW, sw), px(cursor.y - lastCursor.y, WINDOWH, sh))) : 0.f };
 		if (lastCursor.x >= 0 && x >= 0 && y >= 0 && x < XRES && y < YRES && GetAncestor(WindowFromPoint(cursor), GA_ROOT) != mainWindow)
 		{
 			OverlayCursorWind(sim, x, y, px(cursor.x - lastCursor.x, WINDOWW, sw), px(cursor.y - lastCursor.y, WINDOWH, sh));

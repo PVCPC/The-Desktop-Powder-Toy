@@ -356,7 +356,9 @@ tray menu: the tray menu stays native on purpose.
   px/tick sideways while falling 0.55), snow at 40%, rain not.
 - [x] Jelly sinking through a 1 px JOIN rope (2026-10-31): no diagonal squeezing between corner pixels, and the cells
   along each body's springs block other bodies (a stretched rope's gaps); tested: jelly on a sagging bridge stays put for 1500 ticks.
-- [ ] Pets notice you: follow or flee the pointer, sit when it's still, wave when you're back from idle.
+- [x] Pets notice you (2026-10-31): a slow pointer near a pet draws it over and it stops under it, a fast one
+  startles it away for 1.5 s; back after a minute away, pets hop to greet you. Tested with a scripted pointer
+  (overlay:window): walked 40 -> 98 to a pointer at 90, ran 70 px from a fast one. Greeting untested (needs real idle).
 - [ ] Holidays by date: New Year fireworks at midnight, Halloween pumpkins rolling on the taskbar, February hearts.
 - [ ] Taskbar hourglass: sand runs out with the hour or a set timer.
 - [ ] Notifications drop something (a ball or leaf) onto that app's window.

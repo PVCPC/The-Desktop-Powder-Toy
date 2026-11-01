@@ -142,6 +142,8 @@ public:
 	// Plain particles (no update function of their own) update on every core, in blocks far enough apart not to
 	// touch; the rest after them, one at a time. Off: TPT's original single-threaded order.
 	bool petWander = false; // fighters with no stickman to chase stroll about (the overlay's desktop pets)
+	struct { int x = -1, y = -1; float speed = 0; } petPointer; // the mouse pointer the pets notice (sim pixels, per tick)
+	int petGreet = 0; // pets hop until this tick: the user is back
 	struct { bool on = false; int type = 0, body = 0; float x = 0, y = 0; } grab; // a BALL or JOIN body held by the mouse
 	bool parallelUpdate = true;
 	bool parallelPhase = false; // the blocks are running: creating, killing and changing particles take parallelLock
