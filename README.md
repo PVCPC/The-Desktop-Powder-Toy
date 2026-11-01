@@ -41,6 +41,10 @@ What's new
   taskbar; snow, rain with lightning, or leaves by the season; pets run from fire; the Recycle Bin eats sand that lands on it; sand hops to the beat
   of whatever your PC plays; the mouse pointer as a broom; closing a window throws its pile off; new windows
   shake sand loose.
+- **New elements** (Special menu): BIRD flies in flocks; FISH swim in schools in any liquid; BALL makes one round
+  ball per brush click, the brush's size, that bounces, rolls and knocks other balls; JOIN holds what you paint in
+  one stroke together, so a line from a metal post hangs like a rope, a line between two posts sags like a bridge
+  and a blob wobbles like jelly.
 - **Your sand stays**: the scene is saved when you quit and comes back next time.
 - **Light on the CPU**: when nothing moves it drops to a few frames a second (about a quarter of one core).
 - **Uses every core**: plain particles (sand, water and the like) update and are drawn across all CPU cores, and so
