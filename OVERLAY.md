@@ -352,7 +352,8 @@ tray menu: the tray menu stays native on purpose.
 - [x] Pets play with balls (2026-10-31): a stick figure (FIGH, STKM) next to a slow ball kicks it away from itself (tested: 200 -> 281 px).
 - [x] Balls sink into powders and liquids (2026-10-31): they push what they move into up out of the way, slowed by it
   and buoyed by the level beside them; tested: floats half sunk in water, settles a third deep in sand, nothing lost.
-- [ ] Wind pushes leaves (sideways drift, swirls).
+- [x] Wind (2026-10-31): a gust that turns every 4 s; falling leaves flutter and drift with it (tested: mean -0.6 to +0.35
+  px/tick sideways while falling 0.55), snow at 40%, rain not.
 - [ ] Jelly sinking through a 1 px JOIN rope.
 - [ ] Pets notice you: follow or flee the pointer, sit when it's still, wave when you're back from idle.
 - [ ] Holidays by date: New Year fireworks at midnight, Halloween pumpkins rolling on the taskbar, February hearts.

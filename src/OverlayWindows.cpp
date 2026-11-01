@@ -5585,6 +5585,20 @@ static void TickFun(Simulation *sim)
 		int t = sim->parts[i].type;
 		if (t == type || (type == PT_SNOW && t == PT_WATR)) sim->kill_part(i);
 	}
+	// Wind: a gust that turns every few seconds; falling leaves flutter and drift with it, snow a little, rain not
+	static float gust = 0, gustTo = 0;
+	if (sim->currentTick % 240 == 0) gustTo = (sim->rng.uniform01() * 2 - 1) * 1.5f;
+	gust += (gustTo - gust) * 0.01f;
+	for (auto &[i, type, until] : fallen)
+	{
+		auto &p = sim->parts[i];
+		int x = int(p.x + 0.5f), y = int(p.y + 0.5f);
+		if (p.type != type || type == PT_WATR || x < 0 || x >= XRES || y < 0 || y + 1 >= YRES || sim->pmap[y + 1][x] || sim->PixelWall(x, y + 1))
+			continue; // gone, rain, or resting
+		float k = type == PT_SAWD ? 1 : 0.4f;
+		p.vx += (k * (gust + 0.6f * std::sin(sim->currentTick * 0.07f + i)) - p.vx) * 0.08f;
+		if (type == PT_SAWD) p.vy = std::min(p.vy, 0.8f + 0.5f * std::sin(sim->currentTick * 0.11f + i * 1.7f)); // flutter
+	}
 
 	// Music: the speakers' peak level (Windows' own meter, nothing recorded); a jump over the recent level is a beat
 	// that makes resting sand and liquid hop and fire flare
