@@ -141,11 +141,33 @@ static void Step(Simulation *sim, int id, Ball &b)
 		b.vy = std::clamp((g.y - b.cy) * 0.35f, -12.f, 12.f);
 	}
 
+	// powders and liquids aren't walls: the ball pushes them aside (Place), slowed by them and buoyed up by how deep it
+	// sits (the level beside it): it floats half sunk in a liquid and settles a third deep in a powder
+	auto &elements = SimulationData::CRef().elements;
+	auto soft = [&](int r) { return r && TYP(r) != PT_BALL && TYP(r) != PT_JOIN && (elements[TYP(r)].Properties & (TYPE_PART | TYPE_LIQUID)); };
+	{
+		int rad = int(std::ceil(b.radius)), cx = int(b.cx), deep = 0, wet = 0;
+		for (int y = int(b.cy) - rad; y <= int(b.cy) + rad; y++)
+			for (int x : { cx - rad - 1, cx + rad + 1 })
+				if (x >= 0 && y >= 0 && x < XRES && y < YRES && soft(sim->pmap[y][x]))
+				{
+					deep++;
+					wet += bool(elements[TYP(sim->pmap[y][x])].Properties & TYPE_LIQUID);
+					break;
+				}
+		if (deep)
+		{
+			float f = deep / (2.f * rad + 1);
+			b.vy -= 0.12f * f * (wet * 2 > deep ? 2 : 3);
+			b.vx *= 1 - 0.1f * f, b.vy *= 1 - 0.1f * f;
+		}
+	}
 	int other = 0; // another ball in the way, if that's what it hit
+	int pushing = 0; // powder or liquid cells where it would go
 	auto blocked = [&](int X, int Y, float &nx, float &ny) {
 		int n = 0;
 		nx = ny = 0;
-		other = 0;
+		other = pushing = 0;
 		for (auto &[j, o] : b.members)
 		{
 			int x = X + o.first, y = Y + o.second;
@@ -153,7 +175,8 @@ static void Step(Simulation *sim, int id, Ball &b)
 			if (!hit)
 				if (int r = sim->pmap[y][x]; r && !Mine(sim, r, id))
 				{
-					hit = !(SimulationData::CRef().elements[TYP(r)].Properties & TYPE_GAS);
+					if (soft(r)) pushing++;
+					else hit = !(elements[TYP(r)].Properties & TYPE_GAS);
 					if (TYP(r) == PT_BALL) other = sim->parts[ID(r)].tmp;
 				}
 			if (hit) nx -= o.first, ny -= o.second, n++;
@@ -180,6 +203,8 @@ static void Step(Simulation *sim, int id, Ball &b)
 			if (!blocked(int(std::lround(tx)), int(std::lround(ty)), nx, ny))
 			{
 				b.cx = tx, b.cy = ty;
+				float drag = 1 - 0.5f * pushing / b.members.size(); // ploughing in
+				b.vx *= drag, b.vy *= drag;
 				continue;
 			}
 			// another ball: knock it, both bounce by their sizes (pixel counts as mass)
@@ -232,7 +257,18 @@ static void Step(Simulation *sim, int id, Ball &b)
 		int x = X + o.first, y = Y + o.second;
 		auto &p = sim->parts[j];
 		if (x < 0 || y < 0 || x >= XRES || y >= YRES) continue;
-		if (int r = sim->pmap[y][x]; r && !Mine(sim, r, id)) sim->kill_part(ID(r)); // a gas in the way
+		if (int r = sim->pmap[y][x]; r && !Mine(sim, r, id)) // pushed up out of the way, to the first free cell above
+		{
+			int k = ID(r), up = y - 1;
+			while (up >= 0 && up > y - 4 * b.radius - 4 && (sim->pmap[up][x] || sim->PixelWall(x, up) || sim->IsWallBlocking(x, up, TYP(r)))) up--;
+			if (up >= 0 && up > y - 4 * b.radius - 4 && !sim->pmap[up][x] && !sim->PixelWall(x, up) && !sim->IsWallBlocking(x, up, TYP(r)))
+			{
+				sim->parts[k].x = float(x), sim->parts[k].y = float(up);
+				sim->pmap[up][x] = r;
+			}
+			else
+				sim->kill_part(k);
+		}
 		p.x = float(x), p.y = float(y), p.vx = p.vy = 0;
 		sim->pmap[y][x] = PMAP(j, PT_BALL);
 		bool light = o.first * c + o.second * s > 0;

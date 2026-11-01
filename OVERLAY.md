@@ -350,7 +350,8 @@ tray menu: the tray menu stays native on purpose.
   core its app keeps busy (CPU sampled every 30 ticks); tested: snow on a busy window melted in 2 s, on an idle one stayed (covers "snow
   melts on hot windows").
 - [x] Pets play with balls (2026-10-31): a stick figure (FIGH, STKM) next to a slow ball kicks it away from itself (tested: 200 -> 281 px).
-- [ ] Balls sink into powders and liquids instead of resting on top.
+- [x] Balls sink into powders and liquids (2026-10-31): they push what they move into up out of the way, slowed by it
+  and buoyed by the level beside them; tested: floats half sunk in water, settles a third deep in sand, nothing lost.
 - [ ] Wind pushes leaves (sideways drift, swirls).
 - [ ] Jelly sinking through a 1 px JOIN rope.
 - [ ] Pets notice you: follow or flee the pointer, sit when it's still, wave when you're back from idle.
