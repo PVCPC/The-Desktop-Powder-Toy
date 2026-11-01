@@ -382,8 +382,10 @@ tray menu: the tray menu stays native on purpose.
   sawdust floor under them never caught.
 - [x] Pets chase fireflies: a firefly within 80 px (scanned every 20 ticks) draws the pet under it, where it jumps at
   it. Tested: the pet ran 29 -> 150 after one and followed it back.
-- [ ] Confetti: wiggle the pointer fast to throw a burst of confetti that flutters down and fades.
-- [ ] Release v0.7.3.
+- [x] Confetti (Fun toggle "Confetti"): 4 side-to-side turns of the pointer within 40 ticks throw 40 coloured
+  sawdust flakes (wind flutters them), gone after 5-8 s; at most one burst a second. Tested: a slow sweep threw
+  none, a wiggle threw one burst of 38 that floated down in ~2 s and was gone by ~8 s.
+- [x] Released v0.7.3 (2026-11-01).
 
 ## Ideas
 

@@ -43,7 +43,7 @@ What's new
   of whatever your PC plays; the mouse pointer as a broom; closing a window throws its pile off; pumpkins on Halloween, jelly hearts on Valentine's Day and
   fireworks after midnight on New Year's; an hourglass on the taskbar that runs out in the minutes you set; a ball dropped on any app that flashes for
   your attention; fireflies in the evening (the pets chase them) and birds in the morning; a sparkle trail behind the
-  mouse pointer; new windows; busy apps warm what sits on their windows, so snow melts on a working game but stays on an idle
+  mouse pointer; confetti when you wiggle it; new windows; busy apps warm what sits on their windows, so snow melts on a working game but stays on an idle
   app; new windows
   shake sand loose.
 - **New elements** (Special menu): BIRD flies in flocks; FISH swim in schools in any liquid; BALL makes one round
