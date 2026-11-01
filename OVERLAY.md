@@ -373,7 +373,7 @@ tray menu: the tray menu stays native on purpose.
   with the hour faked: fireflies drift at 0.3 px/tick, about a third lit; flocks fly across and leave.
   3 s. Tested with my own form flashing twice: balls landed on it and stayed.
 - [ ] Day and night: fireflies and darker leaves in the evening, birds in the morning, by the clock.
-- [ ] Release v0.7.2 once a few of these are in.
+- [x] Released v0.7.2 (2026-10-31) with all of the above.
 
 ## Ideas
 
