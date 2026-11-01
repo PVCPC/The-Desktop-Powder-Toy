@@ -354,7 +354,8 @@ tray menu: the tray menu stays native on purpose.
   and buoyed by the level beside them; tested: floats half sunk in water, settles a third deep in sand, nothing lost.
 - [x] Wind (2026-10-31): a gust that turns every 4 s; falling leaves flutter and drift with it (tested: mean -0.6 to +0.35
   px/tick sideways while falling 0.55), snow at 40%, rain not.
-- [ ] Jelly sinking through a 1 px JOIN rope.
+- [x] Jelly sinking through a 1 px JOIN rope (2026-10-31): no diagonal squeezing between corner pixels, and the cells
+  along each body's springs block other bodies (a stretched rope's gaps); tested: jelly on a sagging bridge stays put for 1500 ticks.
 - [ ] Pets notice you: follow or flee the pointer, sit when it's still, wave when you're back from idle.
 - [ ] Holidays by date: New Year fireworks at midnight, Halloween pumpkins rolling on the taskbar, February hearts.
 - [ ] Taskbar hourglass: sand runs out with the hour or a set timer.

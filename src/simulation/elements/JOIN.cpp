@@ -159,9 +159,13 @@ static void Step(Simulation *sim, int id, Body &b)
 	// while placing, at most 3 of its pixels share a cell (sub-pixel positions round together, but TPT turns big
 	// piles into black holes)
 	static std::vector<unsigned char> crowd(XRES * YRES);
+	// the cells along each body's springs (body, tick): a stretched rope has gaps between its pixels, but other bodies
+	// can't fall through them
+	static std::vector<std::pair<int, int>> links(XRES * YRES);
 	bool placing = false;
 	auto free = [&](int x, int y) {
 		if (x < 0 || y < 0 || x >= XRES || y >= YRES || sim->PixelWall(x, y) || sim->IsWallBlocking(x, y, PT_JOIN)) return false;
+		if (auto [lb, lt] = links[y * XRES + x]; lb && lb != id && lt >= sim->currentTick - 1) return false;
 		int r = sim->pmap[y][x];
 		return !r || (TYP(r) == PT_JOIN && parts[ID(r)].tmp == id && (!placing || crowd[y * XRES + x] < 3)) || (elements[TYP(r)].Properties & TYPE_GAS);
 	};
@@ -172,7 +176,8 @@ static void Step(Simulation *sim, int id, Body &b)
 		for (int k = 1; k <= n; k++)
 		{
 			float nx = x0 + (tx - x0) * k / n, ny = y0 + (ty - y0) * k / n;
-			if (!free(at(nx), at(ny))) return false;
+			int cx = at(x), cy = at(y), ex = at(nx), ey = at(ny);
+			if (!free(ex, ey) || (cx != ex && cy != ey && !free(ex, cy) && !free(cx, ey))) return false; // no squeezing between corners
 			x = nx, y = ny;
 		}
 		x = tx, y = ty;
@@ -287,6 +292,13 @@ static void Step(Simulation *sim, int id, Body &b)
 		crowd[y * XRES + x]++;
 	}
 	for (int j : b.members) crowd[at(parts[j].y) * XRES + at(parts[j].x)] = 0;
+	for (auto &s : b.springs)
+	{
+		int ax = at(parts[s.a].x), ay = at(parts[s.a].y), bx = at(parts[s.b].x), by = at(parts[s.b].y);
+		int n = std::max(std::abs(bx - ax), std::abs(by - ay));
+		for (int k = 1; k < n; k++)
+			links[(ay + (by - ay) * k / n) * XRES + ax + (bx - ax) * k / n] = { id, sim->currentTick };
+	}
 }
 
 static int update(UPDATE_FUNC_ARGS)
