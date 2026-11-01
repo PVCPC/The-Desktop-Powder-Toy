@@ -375,6 +375,16 @@ tray menu: the tray menu stays native on purpose.
   with the hour faked: fireflies drift at 0.3 px/tick, about a third lit; flocks fly across and leave.
 - [x] Released v0.7.2 (2026-10-31) with all of the above.
 
+## Fun to-do 2 (my own picks, 2026-11-01)
+
+- [x] Sparkle trail (Fun toggle "Sparkle trail"): a moving pointer sheds 2 cold sparks a tick (EMBR at 22 C, life
+  20-40, glitter colours). Tested with a scripted pointer: ~50 sparks while moving, none 40 ticks after it stops, a
+  sawdust floor under them never caught.
+- [x] Pets chase fireflies: a firefly within 80 px (scanned every 20 ticks) draws the pet under it, where it jumps at
+  it. Tested: the pet ran 29 -> 150 after one and followed it back.
+- [ ] Confetti: wiggle the pointer fast to throw a burst of confetti that flutters down and fades.
+- [ ] Release v0.7.3.
+
 ## Ideas
 
 - **Menu inspiration: Kingsway** (2017), whose whole UI is a fake retro desktop. Every TPT panel would be its own

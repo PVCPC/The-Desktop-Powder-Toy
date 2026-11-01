@@ -91,6 +91,26 @@ static int PetComm(Simulation *sim, playerst *figh, int f)
 		if (m.speed > 6) dir[f] = m.x < cx ? 2 : 1, left[f] = shy[f] = 90;
 		else dir[f] = std::abs(m.x - cx) < 10 ? 0 : (m.x < cx ? 1 : 2);
 	}
+	// a firefly (the overlay's evening BIRD, tmp 1) close by: run after it and jump at it when under it
+	else if (flee[f] <= 0)
+	{
+		static int fireflyX[MAX_FIGHTERS], fireflyY[MAX_FIGHTERS], seen[MAX_FIGHTERS];
+		if ((sim->currentTick + f) % 20 == 0)
+		{
+			seen[f] = 0;
+			int best = 1 << 30;
+			for (int y = std::max(0, cy - 50); y < std::min(YRES, cy + 10); y++)
+				for (int x = std::max(0, cx - 80); x < std::min(XRES, cx + 80); x++)
+					if (int r = sim->pmap[y][x]; r && TYP(r) == PT_BIRD && sim->parts[ID(r)].tmp == 1 && std::abs(x - cx) < best)
+						best = std::abs(x - cx), fireflyX[f] = x, fireflyY[f] = y, seen[f] = 1;
+		}
+		if (seen[f])
+		{
+			left[f] = 20;
+			dir[f] = std::abs(fireflyX[f] - cx) < 4 ? 0 : (fireflyX[f] < cx ? 1 : 2);
+			if (!dir[f] && fireflyY[f] < cy - 4 && sim->rng.chance(1, 8)) return 0x04;
+		}
+	}
 	if (sim->petGreet > sim->currentTick)
 	{
 		return (sim->currentTick + f * 7) % 30 < 4 ? 0x04 : 0;

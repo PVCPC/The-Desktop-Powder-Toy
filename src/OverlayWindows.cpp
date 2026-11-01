@@ -108,7 +108,7 @@ namespace
 		float hot = 0;                           // busy apps' windows warm what sits on them, 0-3
 		float hourglass = 0;                     // minutes the taskbar hourglass runs (0: none)
 		int weatherKind = 0;                    // 0 by the season, 1 snow, 2 rain, 3 leaves
-		bool bin = false, broom = false, closeToss = false, openShake = false, holidays = false, notify = false, dayNight = false;
+		bool bin = false, broom = false, closeToss = false, openShake = false, holidays = false, notify = false, dayNight = false, trail = false;
 		std::vector<HWND> flashed; // windows that flashed their taskbar button (a new message) since the last tick
 	} fun;
 	HWND mainWindow = nullptr;    // TPT's own window
@@ -2601,7 +2601,7 @@ namespace
 			}
 			y += S(26) * int(std::size(feel)) + S(94);
 
-			top = Group(x, y, w, S(26) * 15 + S(8), L"Fun");
+			top = Group(x, y, w, S(26) * 16 + S(8), L"Fun");
 			struct FunToggle { const wchar_t *name, *tip; bool *v; const char *pref; };
 			FunToggle funToggles[] = {
 				{ L"Recycle Bin eats sand", L"Sand that lands on the Recycle Bin icon disappears into it (with icons as walls)", &fun.bin, "Bin" },
@@ -2611,6 +2611,7 @@ namespace
 				{ L"Holidays", L"Pumpkins roll about on Halloween, jelly hearts fall on Valentine's Day, fireworks go up after midnight on New Year's", &fun.holidays, "Holidays" },
 				{ L"Notifications drop a ball", L"When an app flashes its taskbar button (a new message in Discord, Teams and the like), a ball drops onto its window", &fun.notify, "Notify" },
 				{ L"Day and night", L"By the clock: fireflies come out and fallen leaves go dark in the evening, birds fly over in the morning", &fun.dayNight, "DayNight" },
+				{ L"Sparkle trail", L"The mouse pointer leaves a short trail of cold sparks over the desktop", &fun.trail, "Trail" },
 			};
 			for (int i = 0; i < int(std::size(funToggles)); i++)
 			{
@@ -2656,7 +2657,7 @@ namespace
 					GlobalPrefs::Ref().Set("Overlay.Fun.WeatherKind", i);
 				}) + S(18);
 			}
-			y += S(26) * 15 + S(16);
+			y += S(26) * 16 + S(16);
 
 			top = Group(x, y, w, S(76), L"Gravity");
 			const wchar_t *gravs[] = { L"Vertical", L"Off", L"Radial", L"Custom" };
@@ -4750,7 +4751,7 @@ void OverlayWindows::Init(void *mainHwnd)
 		*v = prefs.Get(ByteString("Overlay.Feel.") + name, *v);
 	for (auto [v, name] : { std::pair{ &fun.pets, "Pets" }, { &fun.weather, "Weather" }, { &fun.music, "Music" }, { &fun.weatherIdle, "WeatherIdle" }, { &fun.weatherLast, "WeatherLast" }, { &fun.hot, "Hot" }, { &fun.hourglass, "Hourglass" } })
 		*v = prefs.Get(ByteString("Overlay.Fun.") + name, *v);
-	for (auto [v, name] : { std::pair{ &fun.bin, "Bin" }, { &fun.broom, "Broom" }, { &fun.closeToss, "CloseToss" }, { &fun.openShake, "OpenShake" }, { &fun.holidays, "Holidays" }, { &fun.notify, "Notify" }, { &fun.dayNight, "DayNight" } })
+	for (auto [v, name] : { std::pair{ &fun.bin, "Bin" }, { &fun.broom, "Broom" }, { &fun.closeToss, "CloseToss" }, { &fun.openShake, "OpenShake" }, { &fun.holidays, "Holidays" }, { &fun.notify, "Notify" }, { &fun.dayNight, "DayNight" }, { &fun.trail, "Trail" } })
 		*v = prefs.Get(ByteString("Overlay.Fun.") + name, *v);
 	fun.weatherKind = prefs.Get("Overlay.Fun.WeatherKind", 0);
 	// Default UI scale: the larger of Windows' display scaling (TPT is DPI aware) and screen height / 1080, in
@@ -5587,7 +5588,9 @@ static void TickFun(Simulation *sim)
 		if (firefly) p.dcolour = (sim->currentTick + v.first * 37) % 160 < 50 ? 0xFFFFF070 : 0xFF404020; // blink
 		return false;
 	});
-	auto open = [sim](int x, int y) { return !sim->pmap[y][x] && !sim->PixelWall(x, y); }; // not in a window or on anything
+	auto open = [sim](int x, int y) { // on screen, not in a window or on anything
+		return x >= CELL && y >= CELL && x < XRES - CELL && y < YRES - CELL && !sim->pmap[y][x] && !sim->PixelWall(x, y);
+	};
 	if (dusk && visitors.size() < 12 && sim->rng.chance(1, 60))
 	{
 		int x = sim->rng.between(XRES / 10, XRES * 9 / 10), y = YRES - sim->rng.between(40, 160);
@@ -5601,7 +5604,7 @@ static void TickFun(Simulation *sim)
 		int x0 = 0, y0 = 0;
 		for (int tries = 0, made = 0; tries < 60 && made < 7; tries++)
 		{
-			if (!made) x0 = sim->rng.between(XRES / 10, XRES * 9 / 10), y0 = sim->rng.between(40, YRES / 2);
+			if (!made) x0 = sim->rng.between(XRES / 10, XRES * 9 / 10), y0 = sim->rng.between(CELL, std::max(CELL, YRES / 2));
 			int x = x0 + sim->rng.between(-10, 10), y = y0 + sim->rng.between(-6, 6);
 			if (open(x, y))
 				if (int i = sim->create_part(-1, x, y, PT_BIRD); i >= 0)
@@ -5748,6 +5751,21 @@ static void TickFun(Simulation *sim)
 			}
 		}
 	}
+	// Sparkle trail: a moving pointer sheds a few cold sparks (EMBR at room temperature: they set nothing alight)
+	if (auto &m = sim->petPointer; fun.trail && m.speed > 2 && m.x > CELL && m.y > CELL && m.x < XRES - CELL && m.y < YRES - CELL)
+		for (int k = 0; k < 2; k++)
+		{
+			int x = m.x + sim->rng.between(-2, 2), y = m.y + sim->rng.between(-2, 2);
+			if (sim->pmap[y][x] || sim->PixelWall(x, y)) continue;
+			if (int i = sim->create_part(-1, x, y, PT_EMBR); i >= 0)
+			{
+				auto &p = sim->parts[i];
+				p.temp = 295.15f, p.life = sim->rng.between(20, 40);
+				p.vx = (sim->rng.uniform01() - 0.5f) * 1.5f, p.vy = -sim->rng.uniform01();
+				static const uint32_t glitter[] = { 0xFFFFF0A0, 0xFFA0E0FF, 0xFFFFA0E0, 0xFFC0FFA0 };
+				p.dcolour = glitter[sim->rng.between(0, 3)];
+			}
+		}
 }
 
 static void TickWindowWalls()
