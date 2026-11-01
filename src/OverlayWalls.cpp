@@ -41,7 +41,7 @@ static Simulation::WindowMarks &Marks(Simulation *sim, const OverlayWall &w)
 		}
 		m.w = ww, m.h = wh;
 	}
-	m.x = m.wx = w.x0, m.y = m.wy = w.y0;
+	m.x = w.x0, m.y = w.y0;
 	return m;
 }
 
@@ -530,7 +530,7 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 	{
 		if (w.solid || !w.id) continue;
 		int ww = w.x1 - w.x0, wh = w.y1 - w.y0;
-		if (auto it = sim->windowMarks.find(w.id); it != sim->windowMarks.end()) it->second.x = it->second.wx = w.x0, it->second.y = it->second.wy = w.y0;
+		if (auto it = sim->windowMarks.find(w.id); it != sim->windowMarks.end()) it->second.x = w.x0, it->second.y = w.y0;
 		auto kindAt = [&](int x, int y) {
 			if (x < 0 || y < 0 || x >= XRES || y >= YRES) return -1;
 			int r = sim->pmap[y][x];
@@ -612,10 +612,10 @@ void OverlayDrawMarks(const Simulation *sim, uint32_t *argb, int stride, const u
 		for (int j = 0; j < m.h; j++)
 			for (int i = 0; i < m.w; i++)
 			{
-				int x = m.x + i, y = m.y + j, wx = m.wx + i, wy = m.wy + j; // drawn where it is, the walls where they were
-				if (x < 0 || y < 0 || x >= XRES || y >= YRES || wx < 0 || wy < 0 || wx >= XRES || wy >= YRES) continue;
+				int x = m.x + i, y = m.y + j;
+				if (x < 0 || y < 0 || x >= XRES || y >= YRES) continue;
 				if (m.any[Simulation::MarkHole] && m.a[Simulation::MarkHole][size_t(j) * m.w + i]) continue; // below
-				if (!(occupied[size_t(wy) * XRES + wx] & wallBit) || OwnerAt(wx, wy) != id) continue; // hidden behind another window
+				if (!(occupied[size_t(y) * XRES + x] & wallBit) || OwnerAt(x, y) != id) continue; // hidden behind another window
 				uint32_t r = 0, g = 0, b = 0, a = 0; // premultiplied, painted over each other in order
 				for (int kind = 0; kind < Simulation::MarkHole; kind++)
 				{
@@ -640,29 +640,40 @@ void OverlayDrawMarks(const Simulation *sim, uint32_t *argb, int stride, const u
 		// made them: acid a corroded yellow-green, a blast charred black with a glowing edge.
 		auto &hole = m.a[Simulation::MarkHole];
 		int z = ZOf(id);
+		auto behind = [&](int x, int y) { // what is behind, under whatever is drawn here (particles, a glow, the marks of the window behind)
+			auto &p = argb[size_t(y) * stride + x];
+			if (uint32_t k = uint32_t((1 - std::clamp(overlayFeel.holeOpacity, 0.f, 1.f)) * 255), a = p >> 24; k && a < 255)
+			{
+				uint32_t c = backdrop ? backdrop[size_t(y) * XRES + x] : 0x1A1A1A, f = k * (255 - a) / 255;
+				auto under = [&](int sh) { return std::min(255u, ((p >> sh) & 0xFF) + ((c >> sh) & 0xFF) * f / 255) << sh; };
+				p = (a + f) << 24 | under(16) | under(8) | under(0);
+			}
+		};
 		for (int j = 0; j < m.h; j++)
 			for (int i = 0; i < m.w; i++)
 			{
 				uint8_t how = hole[size_t(j) * m.w + i];
 				int x = m.x + i, y = m.y + j;
 				if (!how || x < 0 || y < 0 || x >= XRES || y >= YRES) continue;
-				int wx = std::clamp(m.wx + i, 0, XRES - 1), wy = std::clamp(m.wy + j, 0, YRES - 1);
-				if (int oz = owner.size() ? int(owner[size_t(wy) * XRES + wx]) - 1 : -1; z < 0 || (oz >= 0 && oz < z)) continue; // a window in front covers this hole
-				auto &p = argb[size_t(y) * stride + x];
-				// what is behind, under whatever is drawn here (particles, a glow, the marks of the window behind)
-				if (uint32_t k = uint32_t((1 - std::clamp(overlayFeel.holeOpacity, 0.f, 1.f)) * 255), a = p >> 24; k && a < 255)
-				{
-					uint32_t c = backdrop ? backdrop[size_t(y) * XRES + x] : 0x1A1A1A, f = k * (255 - a) / 255;
-					auto under = [&](int sh) { return std::min(255u, ((p >> sh) & 0xFF) + ((c >> sh) & 0xFF) * f / 255) << sh; };
-					p = (a + f) << 24 | under(16) | under(8) | under(0);
-				}
+				if (int oz = owner.size() ? int(owner[size_t(y) * XRES + x]) - 1 : -1; z < 0 || (oz >= 0 && oz < z)) continue; // a window in front covers this hole
+				behind(x, y);
+				// the window's real border (Windows draws a thin line round it, just at or past where the sim has its edge)
+				// is covered too where the hole reaches the edge, out to 2 px where no other window is
+				if (overlayFeel.holeBorder)
+					for (int s = 1; s <= 2; s++)
+					{
+						int ox = i == 0 ? -s : i == m.w - 1 ? s : 0, oy = j == 0 ? -s : j == m.h - 1 ? s : 0;
+						auto open = [&](int u, int v) { return u >= 0 && v >= 0 && u < XRES && v < YRES && !(owner.size() && owner[size_t(v) * XRES + u]); };
+						if (ox && open(x + ox, y)) behind(x + ox, y);
+						if (oy && open(x, y + oy)) behind(x, y + oy);
+						if (ox && oy && open(x + ox, y + oy)) behind(x + ox, y + oy);
+					}
 				for (int dy = -2; dy <= 2; dy++)
 					for (int dx = -2; dx <= 2; dx++)
 					{
 						int u = i + dx, v = j + dy, d = std::max(std::abs(dx), std::abs(dy));
 						if (!d || u < 0 || v < 0 || u >= m.w || v >= m.h || hole[size_t(v) * m.w + u] || x + dx < 0 || y + dy < 0 || x + dx >= XRES || y + dy >= YRES) continue;
-						int ux = std::clamp(wx + dx, 0, XRES - 1), uy = std::clamp(wy + dy, 0, YRES - 1);
-						if (!(occupied[size_t(uy) * XRES + ux] & wallBit) || OwnerAt(ux, uy) != id) continue;
+						if (!(occupied[size_t(y + dy) * XRES + x + dx] & wallBit) || OwnerAt(x + dx, y + dy) != id) continue;
 						uint32_t rim = how >= 200 ? (d == 1 ? 0xF0C8E040 : 0xA0708A20)  // acid
 						                          : (d == 1 ? 0xF0E0661A : 0xE0140A06); // blast: ember, then char
 						auto &q = argb[size_t(y + dy) * stride + x + dx];

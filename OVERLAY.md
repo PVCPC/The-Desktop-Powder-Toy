@@ -463,10 +463,19 @@ On/off things are Fun toggles; things with an amount are More fun sliders.
 - [x] Memory (user 11-01 "10 GB?"): measured 50 s of landing stars and big meteors on real windows: ours flat at
   ~700 MB, no other process grew. Shots now reuse one bitmap, shoot each window once, twice a second, and let it
   go when no hole is left; mark layers are made only when a window gets that kind.
-- [ ] Speed: the overlay is CPU-bound at ~20-25 fps on a 5120x1440 screen (sim 2560x720), so holes follow a drag at
-  that rate. Measured per frame: present ~40 ms, of it OverlayApplyWalls ~18 ms (owner pass ~4, the pressure-chunk
-  scan + impacts the rest). Next: profile properly, then cut whole-screen passes per frame.
 - [x] Release v0.7.8 (2026-11-01).
+
+## Speed and drags (user 2026-11-01: "how much faster at 1.8 million pixels? and the dragged windows")
+- [x] Drawing thread (Overlay.cpp GpuLoop): the main thread hands each frame over and goes back to the sim; the
+  thread draws at every vblank, sliding windows that moved since the frame (WindowShifts, up to 16, in the bg shader)
+  with their holes, marks and riding sand. Measured with a test window moved in code: ~190 presents/s while moving.
+  Sim went from ~20-25 ticks/s to its normal ~62-67 on a light scene (the present no longer blocks it). FollowMarks
+  removed (the slide replaces it).
+- [x] "Hide window borders at holes" (Overlay.Feel.HoleBorder, default on): hole pixels on a window's edge also
+  cover 1-2 px outward where no window is, hiding DWM's dark border line there.
+- [ ] Heavy scenes (~200k particles of water/fire/plant): 11-15 ticks/s, the sim's own particle update ~37 ms of a
+  ~59 ms frame (FrameTime spans). TPT's renderer thread on the overlay measured no gain (11-14 both ways), so left
+  off. Next would be a multithreaded UpdateParticles: big, risks element behaviour; only if asked.
 
 ## Ideas
 

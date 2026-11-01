@@ -18,6 +18,8 @@
 #include <execution>
 #include <cstdio>
 #include <utility>
+#include <mutex>
+#include <thread>
 #include <algorithm>
 #ifdef _WIN32
 # include <SDL_syswm.h>
@@ -150,6 +152,14 @@ namespace
 	// (~4.5 ms at 5120x1440). Ours stays, at alpha 1 of 255, to take the clicks: see-through pixels pass them on by
 	// turning it click-through while the mouse is over one. Null without DirectComposition (Windows 7), a D3D11
 	// device or the shader compiler: UpdateLayeredWindow then.
+	// A particle the drawing thread carries on: from where it is in the frame at its speed (sim pixels a frame), or
+	// riding the window `ride` (sand on top of a rising one)
+	struct Mover
+	{
+		float x, y, vx, vy;
+		uint32_t colour;
+		void *ride;
+	};
 	struct Gpu
 	{
 		HWND view = nullptr;
@@ -170,6 +180,12 @@ namespace
 		ID3D11Texture2D *frame = nullptr;
 		ID3D11ShaderResourceView *frameView = nullptr;
 		int w = 0, h = 0, ww = 0, wh = 0, partsCap = 0;
+		// handed to the drawing thread (GpuLoop), under `lock` like everything above
+		std::mutex lock;
+		std::vector<uint32_t> pending; // the newest frame
+		bool fresh = false, drawing = false, shifted = false;
+		std::vector<Mover> movers;
+		double frameAt = 0, period = 1 / 60.0, lastT = 1;
 		RECT at{};
 		bool alphaSet = false; // our window's own picture is at alpha 1 (reset whenever WS_EX_LAYERED is toggled)
 	};
@@ -181,7 +197,7 @@ namespace
 	};
 
 	constexpr char shaders[] = R"(
-cbuffer C : register(b0) { float2 scale; float2 screen; };
+cbuffer C : register(b0) { float2 scale; float2 screen; int moved; int3 pad; int4 rects[16]; float4 offs[16]; };
 Texture2D<float4> frame : register(t0);
 struct V { float4 pos : SV_Position; float4 col : COLOR; };
 V Bg(uint id : SV_VertexID)
@@ -192,7 +208,23 @@ V Bg(uint id : SV_VertexID)
 	o.col = 0;
 	return o;
 }
-float4 BgPs(V i) : SV_Target { return frame.Load(int3(i.pos.xy / scale, 0)); }
+// windows that moved since the frame (rects: where it had them, offs: how far they've gone, sim pixels): what is drawn on
+// one goes with it, and where it was is left clear
+float4 BgPs(V i) : SV_Target
+{
+	float2 f = i.pos.xy / scale;
+	float4 c = frame.Load(int3(f, 0)), patch = 0;
+	bool inNew = false, inOld = false;
+	for (int k = 0; k < moved; k++)
+	{
+		int4 r = rects[k];
+		int2 q = int2(floor(f - offs[k].xy));
+		if (!inNew && q.x >= r.x && q.y >= r.y && q.x < r.z && q.y < r.w) patch = frame.Load(int3(q, 0)), inNew = true;
+		if (f.x >= r.x && f.y >= r.y && f.x < r.z && f.y < r.w) inOld = true;
+	}
+	if (inNew && patch.a > 0) return patch;
+	return inOld ? 0 : c;
+}
 V Part(uint id : SV_VertexID, float2 at : AT, float4 col : COLOR)
 {
 	float2 p = round(at * scale) + float2(id & 1, id >> 1) * scale;
@@ -203,6 +235,14 @@ V Part(uint id : SV_VertexID, float2 at : AT, float4 col : COLOR)
 }
 float4 PartPs(V i) : SV_Target { return i.col; }
 )";
+
+	struct Constants // the shaders' cbuffer C
+	{
+		float scale[2], screen[2];
+		int moved, pad[3];
+		int rects[16][4];
+		float offs[16][4];
+	};
 
 	Gpu *MakeGpu()
 	{
@@ -256,7 +296,7 @@ float4 PartPs(V i) : SV_Target { return i.col; }
 			raster.FillMode = D3D11_FILL_SOLID;
 			raster.CullMode = D3D11_CULL_NONE;
 			raster.DepthClipEnable = TRUE;
-			D3D11_BUFFER_DESC cb{ 32, D3D11_USAGE_DYNAMIC, D3D11_BIND_CONSTANT_BUFFER, D3D11_CPU_ACCESS_WRITE };
+			D3D11_BUFFER_DESC cb{ sizeof(Constants), D3D11_USAGE_DYNAMIC, D3D11_BIND_CONSTANT_BUFFER, D3D11_CPU_ACCESS_WRITE };
 			ok = bgVs && bgPs && partVs && partPs &&
 			     SUCCEEDED(g->device->CreateVertexShader(bgVs->GetBufferPointer(), bgVs->GetBufferSize(), nullptr, &g->bgVs)) &&
 			     SUCCEEDED(g->device->CreatePixelShader(bgPs->GetBufferPointer(), bgPs->GetBufferSize(), nullptr, &g->bgPs)) &&
@@ -277,6 +317,94 @@ float4 PartPs(V i) : SV_Target { return i.col; }
 			return nullptr;
 		}
 		return g;
+	}
+
+	// The drawing thread: at each screen refresh, the newest frame the main thread handed over, its moving particles
+	// carried on, and every window that moved since slid along with what is drawn on it (holes, marks, the sand on
+	// top). A dragged window keeps up at the screen's rate however slow the sim and the frames behind it are. Only
+	// draws when something changed.
+	void GpuLoop(Gpu *gp)
+	{
+		auto &g = *gp;
+		IDXGIOutput *out = nullptr;
+		std::vector<Part> parts;
+		for (;;)
+		{
+			if (out) out->WaitForVBlank();
+			else Sleep(4);
+			auto shifts = OverlayWindows::WindowShifts();
+			if (shifts.size() > 16) shifts.resize(16); // ponytail: 16 moving at once; more just don't slide till the next frame
+			std::lock_guard lock(g.lock);
+			if (!out && g.chain) g.chain->GetContainingOutput(&out);
+			if (!g.chain || !g.target || !g.frame || g.pending.size() != size_t(g.w) * g.h) continue;
+			float t = float(std::clamp((Now() - g.frameAt) / g.period, 0.0, 1.0));
+			bool sliding = !g.movers.empty() && g.lastT < 1;
+			if (!g.fresh && shifts.empty() && !g.shifted && !sliding) continue;
+			g.shifted = !shifts.empty(), g.lastT = t;
+			if (g.fresh) g.context->UpdateSubresource(g.frame, 0, nullptr, g.pending.data(), g.w * 4, 0), g.fresh = false;
+			parts.clear();
+			for (auto &m : g.movers)
+			{
+				float y = m.y + m.vy * t;
+				if (m.ride)
+					for (auto &s : shifts)
+						if (s.id == m.ride) y += s.dy;
+				parts.push_back({ m.x + m.vx * t, y, m.colour });
+			}
+			if (int(parts.size()) > g.partsCap)
+			{
+				if (g.parts) g.parts->Release(), g.parts = nullptr;
+				g.partsCap = std::max(int(parts.size()) * 2, 4096);
+				D3D11_BUFFER_DESC d{ UINT(g.partsCap * sizeof(Part)), D3D11_USAGE_DYNAMIC, D3D11_BIND_VERTEX_BUFFER, D3D11_CPU_ACCESS_WRITE };
+				if (FAILED(g.device->CreateBuffer(&d, nullptr, &g.parts))) g.partsCap = 0, parts.clear();
+			}
+			D3D11_MAPPED_SUBRESOURCE map;
+			if (!parts.empty() && SUCCEEDED(g.context->Map(g.parts, 0, D3D11_MAP_WRITE_DISCARD, 0, &map)))
+			{
+				std::memcpy(map.pData, parts.data(), parts.size() * sizeof(Part));
+				g.context->Unmap(g.parts, 0);
+			}
+			if (SUCCEEDED(g.context->Map(g.constants, 0, D3D11_MAP_WRITE_DISCARD, 0, &map)))
+			{
+				Constants c{ { float(g.ww) / g.w, float(g.wh) / g.h }, { float(g.ww), float(g.wh) }, int(shifts.size()) };
+				for (size_t k = 0; k < shifts.size(); k++)
+				{
+					auto &s = shifts[k];
+					c.rects[k][0] = s.x0, c.rects[k][1] = s.y0, c.rects[k][2] = s.x1, c.rects[k][3] = s.y1;
+					c.offs[k][0] = s.dx, c.offs[k][1] = s.dy;
+				}
+				std::memcpy(map.pData, &c, sizeof(c));
+				g.context->Unmap(g.constants, 0);
+			}
+
+			D3D11_VIEWPORT vp{ 0, 0, float(g.ww), float(g.wh), 0, 1 };
+			g.context->RSSetViewports(1, &vp);
+			g.context->RSSetState(g.noCull);
+			g.context->OMSetRenderTargets(1, &g.target, nullptr);
+			g.context->VSSetConstantBuffers(0, 1, &g.constants);
+			g.context->PSSetConstantBuffers(0, 1, &g.constants);
+			// the frame, scaled up, the moved windows slid
+			g.context->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFF);
+			g.context->IASetInputLayout(nullptr);
+			g.context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+			g.context->VSSetShader(g.bgVs, nullptr, 0);
+			g.context->PSSetShader(g.bgPs, nullptr, 0);
+			g.context->PSSetShaderResources(0, 1, &g.frameView);
+			g.context->Draw(3, 0);
+			// the moving particles, over it
+			if (!parts.empty())
+			{
+				UINT stride = sizeof(Part), offset = 0;
+				g.context->OMSetBlendState(g.over, nullptr, 0xFFFFFFFF);
+				g.context->IASetInputLayout(g.partLayout);
+				g.context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+				g.context->IASetVertexBuffers(0, 1, &g.parts, &stride, &offset);
+				g.context->VSSetShader(g.partVs, nullptr, 0);
+				g.context->PSSetShader(g.partPs, nullptr, 0);
+				g.context->DrawInstanced(4, UINT(parts.size()), 0, 0);
+			}
+			g.chain->Present(0, 0);
+		}
 	}
 
 	// One frame (premultiplied, w x h; the moving particles' pixels get `empty`) for a ww x wh window. False: not
@@ -334,11 +462,13 @@ float4 PartPs(V i) : SV_Target { return i.col; }
 			ApplyHitTest();
 		}
 
+		std::lock_guard lock(g.lock); // the drawing thread uses all that follows
 		if (!g.chain || ww != g.ww || wh != g.wh)
 		{
 			if (g.target) g.target->Release(), g.target = nullptr;
 			if (g.chain)
 			{
+				g.context->ClearState(); // let go of the old buffers
 				g.chain->ResizeBuffers(2, ww, wh, DXGI_FORMAT_B8G8R8A8_UNORM, 0);
 			}
 			else
@@ -381,22 +511,21 @@ float4 PartPs(V i) : SV_Target { return i.col; }
 		}
 
 		// out of the frame, into squares: first the sand on top of a window that rose since the sim last read it (it
-		// would sink into the window by up to a tick), lifted with it. Only rising: the sim doesn't carry a pile
-		// sideways (the window slides out from under it) and a falling window leaves it to gravity.
-		static std::vector<Part> parts;
-		parts.clear();
+		// would sink into the window by up to a tick): it rides the window, the drawing thread lifting it as the window
+		// goes. Only rising: the sim doesn't carry a pile sideways (the window slides out from under it) and a falling
+		// window leaves it to gravity.
+		std::vector<Mover> movers;
 		for (auto &s : OverlayWindows::WindowShifts())
 			for (int x = std::max(s.x0, 0); s.dy < 0 && x < std::min(s.x1, w); x++)
 				for (int y = std::min(s.y0, h) - 1; y >= 0; y--)
 				{
 					auto &px = argb[size_t(y) * w + x];
 					if (px >> 24 < 2) break; // the top of the pile
-					parts.push_back({ float(x), y + s.dy, px });
+					movers.push_back({ float(x), float(y), 0, 0, px, s.id });
 					px = empty;
 				}
 		// then the moving particles, carried on at their speed (one tick at most); not into a still particle or a
 		// wall, where the sim will stop them: overshooting and snapping back would flicker
-		float t = float(std::clamp((Now() - frameAt) / framePeriod, 0.0, 1.0));
 		for (auto &m : moving)
 		{
 			int x = int(m.x), y = int(m.y);
@@ -410,57 +539,15 @@ float4 PartPs(V i) : SV_Target { return i.col; }
 				auto o = frameOccupied[size_t(ny) * XRES + nx];
 				open = !(o & OnWall) && (!(o & OnParticle) || (o & Moves));
 			}
-			parts.push_back({ open ? m.x + m.vx * t : m.x, open ? m.y + m.vy * t : m.y, px });
+			movers.push_back({ m.x, m.y, open ? m.vx : 0, open ? m.vy : 0, px, nullptr });
 			px = empty;
 		}
-		if (int(parts.size()) > g.partsCap)
-		{
-			if (g.parts) g.parts->Release(), g.parts = nullptr;
-			g.partsCap = std::max(int(parts.size()) * 2, 4096);
-			D3D11_BUFFER_DESC d{ UINT(g.partsCap * sizeof(Part)), D3D11_USAGE_DYNAMIC, D3D11_BIND_VERTEX_BUFFER, D3D11_CPU_ACCESS_WRITE };
-			if (FAILED(g.device->CreateBuffer(&d, nullptr, &g.parts))) return g.partsCap = 0, false;
-		}
-		D3D11_MAPPED_SUBRESOURCE map;
-		if (!parts.empty() && SUCCEEDED(g.context->Map(g.parts, 0, D3D11_MAP_WRITE_DISCARD, 0, &map)))
-		{
-			std::memcpy(map.pData, parts.data(), parts.size() * sizeof(Part));
-			g.context->Unmap(g.parts, 0);
-		}
-		if (SUCCEEDED(g.context->Map(g.constants, 0, D3D11_MAP_WRITE_DISCARD, 0, &map)))
-		{
-			float c[8] = { float(ww) / w, float(wh) / h, float(ww), float(wh) };
-			std::memcpy(map.pData, c, sizeof(c));
-			g.context->Unmap(g.constants, 0);
-		}
-		g.context->UpdateSubresource(g.frame, 0, nullptr, argb, w * 4, 0);
-
-		D3D11_VIEWPORT vp{ 0, 0, float(ww), float(wh), 0, 1 };
-		g.context->RSSetViewports(1, &vp);
-		g.context->RSSetState(g.noCull);
-		g.context->OMSetRenderTargets(1, &g.target, nullptr);
-		g.context->VSSetConstantBuffers(0, 1, &g.constants);
-		g.context->PSSetConstantBuffers(0, 1, &g.constants);
-		// the frame, scaled up
-		g.context->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFF);
-		g.context->IASetInputLayout(nullptr);
-		g.context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		g.context->VSSetShader(g.bgVs, nullptr, 0);
-		g.context->PSSetShader(g.bgPs, nullptr, 0);
-		g.context->PSSetShaderResources(0, 1, &g.frameView);
-		g.context->Draw(3, 0);
-		// the moving particles, over it
-		if (!parts.empty())
-		{
-			UINT stride = sizeof(Part), offset = 0;
-			g.context->OMSetBlendState(g.over, nullptr, 0xFFFFFFFF);
-			g.context->IASetInputLayout(g.partLayout);
-			g.context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-			g.context->IASetVertexBuffers(0, 1, &g.parts, &stride, &offset);
-			g.context->VSSetShader(g.partVs, nullptr, 0);
-			g.context->PSSetShader(g.partPs, nullptr, 0);
-			g.context->DrawInstanced(4, UINT(parts.size()), 0, 0);
-		}
-		g.chain->Present(0, 0);
+		// to the drawing thread, which puts it on the screen at its next refresh
+		g.pending.assign(argb, argb + size_t(w) * h);
+		g.fresh = true;
+		g.movers = std::move(movers);
+		g.frameAt = frameAt, g.period = framePeriod;
+		if (!g.drawing) g.drawing = true, std::thread(GpuLoop, &g).detach();
 		return true;
 	}
 

@@ -2620,7 +2620,7 @@ namespace
 				{ L"Explosion shake", L"How hard explosions shake the REAL windows they hit; they go back where they were (off by default)", &overlayFeel.shake, 3, "Shake" },
 				{ L"Blasts and burning", L"How hard explosions, bombs, DEST, singularities and anything 2000 C or hotter break windows and icons (with Destructible on)", &overlayFeel.blast, 3, "Blast" },
 			};
-			top = Group(x, y, w, S(26) * int(std::size(feel)) + S(86), L"Desktop physics");
+			top = Group(x, y, w, S(26) * int(std::size(feel)) + S(112), L"Desktop physics");
 			Toggle(x + S(12), top, L"Destructible windows and icons", overlayFeel.destructible, false, [] {
 				overlayFeel.destructible = !overlayFeel.destructible;
 				GlobalPrefs::Ref().Set("Overlay.Feel.Destructible", overlayFeel.destructible);
@@ -2633,7 +2633,11 @@ namespace
 				overlayFeel.shardParticles = !overlayFeel.shardParticles;
 				GlobalPrefs::Ref().Set("Overlay.Feel.ShardParticles", overlayFeel.shardParticles);
 			}, L"Off: solid chunks that spin, fall and fade. On: broken glass in the sim, which piles up, melts and reacts");
-			top += S(78);
+			Toggle(x + S(12), top + S(78), L"Hide window borders at holes", overlayFeel.holeBorder, false, [] {
+				overlayFeel.holeBorder = !overlayFeel.holeBorder;
+				GlobalPrefs::Ref().Set("Overlay.Feel.HoleBorder", overlayFeel.holeBorder);
+			}, L"On: where a hole breaks through a window's edge, the thin dark border Windows draws round the real window is covered too. Off: it stays, showing where the real window is");
+			top += S(104);
 			for (int i = 0; i < int(std::size(feel)); i++)
 			{
 				auto &f = feel[i];
@@ -2647,7 +2651,7 @@ namespace
 					GlobalPrefs::Ref().Set(ByteString("Overlay.Feel.") + f.pref, *f.v);
 				}, f.tip);
 			}
-			y += S(26) * int(std::size(feel)) + S(94);
+			y += S(26) * int(std::size(feel)) + S(120);
 
 			top = Group(x, y, w, S(26) * 24 + S(8), L"Fun");
 			struct FunToggle { const wchar_t *name, *tip; bool *v; const char *pref; };
@@ -4816,6 +4820,7 @@ void OverlayWindows::Init(void *mainHwnd)
 	overlayFeel.destructible = prefs.Get("Overlay.Feel.Destructible", false);
 	overlayFeel.shardTint = prefs.Get("Overlay.Feel.ShardTint", true);
 	overlayFeel.shardParticles = prefs.Get("Overlay.Feel.ShardParticles", false);
+	overlayFeel.holeBorder = prefs.Get("Overlay.Feel.HoleBorder", true);
 	for (auto [v, name] : { std::pair{ &overlayFeel.grip, "Grip" }, { &overlayFeel.fling, "Fling" }, { &overlayFeel.push, "Push" }, { &overlayFeel.wind, "Wind" }, { &overlayFeel.scorch, "Scorch" }, { &overlayFeel.frost, "Frost" }, { &overlayFeel.acid, "Acid" }, { &overlayFeel.water, "Water" }, { &overlayFeel.acidEat, "AcidEat" }, { &overlayFeel.blast, "Blast" }, { &overlayFeel.holeOpacity, "HoleSolid" }, { &overlayFeel.shards, "Shards" }, { &overlayFeel.shardSize, "ShardSize" }, { &overlayFeel.blackHole, "BlackHole" }, { &overlayFeel.shake, "Shake" } })
 		*v = prefs.Get(ByteString("Overlay.Feel.") + name, *v);
 	for (auto [v, name] : { std::pair{ &fun.pets, "Pets" }, { &fun.weather, "Weather" }, { &fun.music, "Music" }, { &fun.weatherIdle, "WeatherIdle" }, { &fun.weatherLast, "WeatherLast" }, { &fun.hot, "Hot" }, { &fun.hourglass, "Hourglass" } })
@@ -4841,7 +4846,6 @@ void OverlayWindows::Init(void *mainHwnd)
 
 static void TickRecording();
 static void TickWindowWalls();
-static void FollowMarks(Simulation *sim);
 
 void OverlayWindows::Tick()
 {
@@ -5143,6 +5147,7 @@ static const std::vector<uint32_t> &HoleBackdrop(RECT sr, int sw, int sh)
 }
 
 static std::map<HWND, RECT> wallRects, frameRects; // the wall windows when the sim last read them / at the frame drawn
+static std::mutex frameLock; // frameRects: WindowShifts is also asked from the GPU drawing thread
 
 // What is really behind holed windows: the windows under each one, captured with PrintWindow a few times a second on
 // a worker thread (scaled to sim pixels), over the wallpaper.
@@ -5328,7 +5333,6 @@ void OverlayWindows::ApplySimMasks(uint32_t *argb, int w, const uint8_t *occupie
 		}
 		for (int i = 0; i < zn; i++) row[zx0 + i] = saved[i] | 0xFF000000;
 	}
-	FollowMarks(sim);
 	const uint32_t *backdrop = nullptr;
 	if (std::any_of(sim->windowMarks.begin(), sim->windowMarks.end(), [](auto &m) { return m.second.any[Simulation::MarkHole]; }))
 	{
@@ -5527,7 +5531,10 @@ static std::vector<DeskIcon> DesktopIcons()
 
 void OverlayWindows::FrameWalls(std::vector<uint8_t> &mask, uint8_t bit)
 {
-	frameRects = wallRects;
+	{
+		std::lock_guard lock(frameLock);
+		frameRects = wallRects;
+	}
 	if (!&GameController::Ref()) return;
 	auto &walls = GameController::Ref().GetModel()->GetSimulation()->pixelWalls;
 	for (size_t i = 0; i < walls.size() && i < mask.size(); i++)
@@ -5542,6 +5549,7 @@ std::vector<OverlayWindows::WindowShift> OverlayWindows::WindowShifts()
 	int sw = sr.right - sr.left, sh = sr.bottom - sr.top;
 	if (sw <= 0 || sh <= 0) return out;
 	auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); }; // as TickWindowWalls
+	std::lock_guard lock(frameLock);
 	for (auto &[hwnd, at] : frameRects)
 	{
 		RECT r;
@@ -5549,7 +5557,7 @@ std::vector<OverlayWindows::WindowShift> OverlayWindows::WindowShifts()
 		if (r.left == at.left && r.top == at.top) continue;
 		out.push_back({ px(at.left - sr.left, WINDOWW, sw), px(at.top - sr.top, WINDOWH, sh), px(at.right - sr.left, WINDOWW, sw),
 		                px(at.bottom - sr.top, WINDOWH, sh), float(double(r.left - at.left) * WINDOWW / sw),
-		                float(double(r.top - at.top) * WINDOWH / sh) });
+		                float(double(r.top - at.top) * WINDOWH / sh), hwnd });
 	}
 	return out;
 }
@@ -6091,25 +6099,6 @@ static void TickFun(Simulation *sim)
 		}
 	}
 	if (castles && sim->currentTick % 18000 == 0) castles = 0; // ponytail: a rough count; they crumble after 5 min anyway
-}
-
-// Every frame drawn (the screen's rate, above the sim's): a dragged window's holes and marks follow it, not just
-// every tick
-static void FollowMarks(Simulation *sim)
-{
-	RECT sr;
-	GetWindowRect(mainWindow, &sr);
-	int sw = sr.right - sr.left, sh = sr.bottom - sr.top;
-	if (sw <= 0 || sh <= 0) return;
-	auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); }; // as below
-	for (auto &[id, m] : sim->windowMarks)
-	{
-		RECT r;
-		if (!wallRects.count(HWND(id)) || DwmGetWindowAttribute(HWND(id), DWMWA_EXTENDED_FRAME_BOUNDS, &r, sizeof(r)) != S_OK) continue;
-		int x0 = std::max(0, px(r.left - sr.left, WINDOWW, sw)), y0 = std::max(0, px(r.top - sr.top, WINDOWH, sh));
-		int x1 = std::min(XRES, px(r.right - sr.left, WINDOWW, sw)), y1 = std::min(YRES, px(r.bottom - sr.top, WINDOWH, sh));
-		if (x1 - x0 == m.w && y1 - y0 == m.h) m.x = x0, m.y = y0; // resized: the next tick sorts it out
-	}
 }
 
 static void TickWindowWalls()

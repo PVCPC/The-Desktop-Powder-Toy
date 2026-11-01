@@ -199,10 +199,9 @@ public:
 	// pixel by pixel. Nothing moves or is drawn into it; unlike walls it never deletes what's already there.
 	std::vector<uint8_t> pixelWalls;
 	// Marks particles left on those windows, by window (OverlayWall::id): per kind, 0-255 per window pixel from its
-	// top-left (x, y: where that is now, in sim pixels, followed every frame; wx, wy: where the sim's walls had it on
-	// the last tick). Cleared with the sim.
+	// top-left (x, y: where that is now, in sim pixels). Cleared with the sim.
 	enum WindowMark { MarkWater, MarkFrost, MarkAcid, MarkSoot, MarkCrack, MarkHole, MarkKinds }; // drawn in this order (holes: 255 = eaten away)
-	struct WindowMarks { int x = 0, y = 0, w = 0, h = 0, wx = 0, wy = 0; std::array<std::vector<uint8_t>, MarkKinds> a; std::array<bool, MarkKinds> any{}; };
+	struct WindowMarks { int x = 0, y = 0, w = 0, h = 0; std::array<std::vector<uint8_t>, MarkKinds> a; std::array<bool, MarkKinds> any{}; };
 	std::map<uintptr_t, WindowMarks> windowMarks;
 	bool PixelWall(int x, int y) const
 	{

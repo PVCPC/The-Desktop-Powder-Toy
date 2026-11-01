@@ -39,6 +39,9 @@ What's new
   is broken: clearing the sim mends everything, and the **Windows heal** slider (More fun) lets holes grow back by themselves.
   **Windows crack first** makes glass crack on the first hit and break on the next. Stacked windows break one at a
   time: a hole in the front window shows the window behind, which still stops sand until it breaks too.
+  **Hide window borders at holes** (on by default) paints over the thin dark line Windows draws round a window where
+  a hole cuts its edge; switch it off to keep that line showing where the real window is. A dragged window, with its
+  holes and the sand on top, moves at your screen's refresh rate, not the sim's.
 - **Fun switches** (Simulation window, all off by default): stick figure pets that wander your windows and
   taskbar; snow, rain with lightning, leaves by the season, hail or low fog, drifting in the wind; pets run from fire, come over to a slow mouse pointer, scatter from a fast one and hop to greet you when
   you come back; the Recycle Bin eats sand that lands on it; sand hops to the beat

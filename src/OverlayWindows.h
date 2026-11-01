@@ -3,7 +3,7 @@
 #include <functional>
 #include <vector>
 #include "common/String.h"
-#define DESKTOP_VERSION L"0.7.8" // The Desktop Powder Toy release; the GitHub tag is v + this
+#define DESKTOP_VERSION L"0.7.9" // The Desktop Powder Toy release; the GitHub tag is v + this
 
 // Overlay mode's own desktop windows (element palette, notices), Vista-styled. Windows only so far.
 namespace OverlayWindows
@@ -24,11 +24,12 @@ namespace OverlayWindows
 	// on wall pixels.
 	void FrameWalls(std::vector<uint8_t> &mask, uint8_t bit);
 	// The windows that moved since the last frame drawn read them: where the sim had them, and how far they've gone
-	// since (sim pixels).
+	// since (sim pixels). Safe from any thread (the GPU drawing thread asks at every screen refresh).
 	struct WindowShift
 	{
 		int x0, y0, x1, y1;
 		float dx, dy;
+		void *id; // the window
 	};
 	std::vector<WindowShift> WindowShifts();
 	// Clears the w x h frame where our app windows are, the frame being shown at ww x wh: the sim layer sits on top,

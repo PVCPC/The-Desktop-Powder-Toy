@@ -29,6 +29,7 @@ struct OverlayFeel
 	bool destructible = false; // acid and blasts eat holes in windows and icons (overlay only)
 	bool shardTint = true;     // shards take the colour of what broke
 	bool shardParticles = false; // shards are sim particles (broken glass) instead of drawn chunks
+	bool holeBorder = true;      // where a hole reaches a window's edge, cover the thin border Windows draws round it
 };
 extern OverlayFeel overlayFeel;
 
