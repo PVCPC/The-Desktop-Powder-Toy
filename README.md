@@ -47,7 +47,7 @@ What's new
   app; new windows shake sand loose. The **More fun** group has a slider for each of these (far left is off): pets
   nap in the hours you pick (little z's float up), gather in the middle when you're away and hop for as long as you
   like when you come back; snowmen on deep snow (how many, how deep); dragging a window up fast throws what sits on
-  it (how hard); paper planes (how often, how fast); a rainbow after the rain (how long, how bright); pets fetch a
+  it (how hard); paper planes (how often, how fast); a faint, see-through rainbow after the rain, sometimes a double one (how long, how bright, how often double); pets fetch a
   ball and kick it back toward the mouse pointer (how far they'll run, how hard they kick); and a volcano by the
   clock that smokes when your PC is busy and erupts lava when it's busier (the CPU level that wakes it, how high
   it throws).

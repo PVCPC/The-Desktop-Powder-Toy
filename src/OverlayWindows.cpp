@@ -114,6 +114,7 @@ namespace
 		float lift = 0;                          // how hard a window dragged up throws what sits on it
 		float planes = 0, planeSpeed = 1;        // a paper plane every this many minutes (0: none), how fast
 		float rainbow = 0, rainbowGlow = 0.6f;   // seconds a rainbow shows after rain (0: never), how strong
+		float rainbowDouble = 0.25f;             // the chance it is a double rainbow
 		float fetch = 0, kick = 1;               // pets fetch balls this far away (px, 0: no), kick strength
 		float volcano = 0, volcanoForce = 1;     // CPU use (0-1) that wakes the taskbar volcano (0: none), lava force
 		bool bin = false, broom = false, closeToss = false, openShake = false, holidays = false, notify = false, dayNight = false, trail = false, confetti = false;
@@ -133,7 +134,8 @@ namespace
 		{ L"Paper planes", L"Every this many minutes a pet (or the edge of the screen) throws a paper plane that glides until it lands", &fun.planes, 0, 30, "Planes", 2 },
 		{ L"Plane speed", L"How fast the paper planes fly", &fun.planeSpeed, 0.25f, 3, "PlaneSpeed", 0 },
 		{ L"Rainbow after rain", L"When the rain (Weather) has fallen half a minute or more and stops, a rainbow shows for this many seconds", &fun.rainbow, 0, 120, "Rainbow", 6 },
-		{ L"Rainbow brightness", L"How strong the rainbow's colours are", &fun.rainbowGlow, 0.1f, 1, "RainbowGlow", 0 },
+		{ L"Rainbow brightness", L"How strong the rainbow's colours are (it stays see-through, like a real one)", &fun.rainbowGlow, 0.1f, 1, "RainbowGlow", 0 },
+		{ L"Double rainbow chance", L"How often a second, fainter rainbow, its colours the other way round, shows above the first", &fun.rainbowDouble, 0, 1, "RainbowDouble", 0 },
 		{ L"Pets fetch", L"Pets run after a ball up to this far away and kick it back toward the mouse pointer", &fun.fetch, 0, 400, "Fetch", 5 },
 		{ L"Fetch kick", L"How hard the pets kick the ball back", &fun.kick, 0.25f, 3, "Kick", 0 },
 		{ L"Volcano wakes at", L"A little volcano by the clock smokes once the PC's total CPU use passes this, and erupts lava at 20% more", &fun.volcano, 0, 1, "Volcano", 0 },
@@ -143,6 +145,7 @@ namespace
 	struct PaperPlane { float x, y, vx, vy; int landed; };
 	std::vector<PaperPlane> paperPlanes;
 	ULONGLONG rainbowUntil = 0;
+	bool rainbowTwice = false; // this one is a double rainbow
 	HWND mainWindow = nullptr;    // TPT's own window
 	std::string recording;        // Overlay.Keys.<name> being recorded in the Overlay tab, or empty
 	std::function<void()> later; // run on the next tick, outside any window's message handling
@@ -5861,7 +5864,7 @@ static void TickFun(Simulation *sim)
 	}
 	else if (rainSince >= 0 && sim->currentTick - rainLast > 120)
 	{
-		if (rainLast - rainSince >= 1800 && fun.rainbow >= 1) rainbowUntil = GetTickCount64() + ULONGLONG(fun.rainbow * 1000);
+		if (rainLast - rainSince >= 1800 && fun.rainbow >= 1) rainbowUntil = GetTickCount64() + ULONGLONG(fun.rainbow * 1000), rainbowTwice = sim->rng.uniform01() < fun.rainbowDouble;
 		rainSince = -1;
 	}
 	// Snowmen (ice, snow-white) on snow at least snowDepth deep, checked every 5 s
@@ -6372,24 +6375,35 @@ void OverlayWindows::DrawExtras(uint32_t *argb, int w, int h)
 		auto mix = [&](int s) { return uint32_t(((rgb >> s) & 0xFF) * a + ((p >> s) & 0xFF) * (1 - a)) << s; };
 		p = mix(0) | mix(8) | mix(16) | (uint32_t(255 * a + (p >> 24) * (1 - a)) << 24);
 	};
-	// the rainbow: seven bands on a wide arc, only where nothing else is drawn (behind it all); fades in and out
+	// the rainbow: a faint, see-through arc whose colours blend into each other, soft at both edges and fading toward
+	// its feet; only where nothing else is drawn (behind it all), not over windows; fades in and out
 	if (auto now = GetTickCount64(); now < rainbowUntil)
 	{
 		float left = (rainbowUntil - now) / 1000.f;
-		float a = fun.rainbowGlow * 0.6f * std::min({ 1.f, (fun.rainbow - left) / 3, left / 3 });
-		static const uint32_t bands[] = { 0xFF2020, 0xFF8C00, 0xFFE000, 0x30C030, 0x2080FF, 0x4B30C0, 0x9040E0 };
+		float a = fun.rainbowGlow * 0.45f * std::min({ 1.f, (fun.rainbow - left) / 3, left / 3 });
 		auto play = sim->PlayRect();
-		int ph = play.size.Y, th = std::max(1, ph / 240), cx = play.pos.X + play.size.X / 2, cy = play.pos.Y + ph + ph / 5, outer = cy - play.pos.Y - ph / 4;
-		for (int k = 0; k < 7 * th; k++)
-		{
-			int r = outer - k, n = int(3.2f * r);
-			for (int i = 0; i <= n; i++)
+		int ph = play.size.Y, rows = std::max(7, ph / 14), cx = play.pos.X + play.size.X / 2, cy = play.pos.Y + ph + ph / 5;
+		auto arc = [&](int outer, int rows, bool flip, float a) { // red outside (flip: inside)
+			static const uint32_t stops[] = { 0xFF2020, 0xFF8C00, 0xFFE000, 0x30C030, 0x2080FF, 0x4B30C0, 0x9040E0 };
+			for (int k = 0; k < rows; k++)
 			{
-				float t = float(M_PI) * (1 + float(i) / n);
-				int x = cx + int(r * std::cos(t)), y = cy + int(r * std::sin(t));
-				if (x >= 0 && y >= 0 && x < std::min(w, XRES) && y < std::min(h, YRES) && !(argb[y * w + x] >> 24) && !sim->PixelWall(x, y)) put(x, y, bands[k / th], a);
+				float f = 6.f * (flip ? rows - 1 - k : k) / (rows - 1), mix = f - int(f); // between colour stop int(f) and the next
+				uint32_t c0 = stops[int(f)], c1 = stops[std::min(6, int(f) + 1)], rgb = 0;
+				for (int s = 0; s < 24; s += 8) rgb |= uint32_t(((c0 >> s) & 0xFF) * (1 - mix) + ((c1 >> s) & 0xFF) * mix) << s;
+				float edge = std::sin(float(M_PI) * (k + 0.5f) / rows); // soft inner and outer edges
+				int r = outer - k, n = int(3.2f * r);
+				for (int i = 0; i <= n; i++)
+				{
+					float t = float(M_PI) * (1 + float(i) / n), up = -std::sin(t); // 1 at the top, 0 at the feet
+					int x = cx + int(r * std::cos(t)), y = cy + int(r * std::sin(t));
+					if (x >= 0 && y >= 0 && x < std::min(w, XRES) && y < std::min(h, YRES) && !(argb[y * w + x] >> 24) && !sim->PixelWall(x, y))
+						put(x, y, rgb, a * edge * std::min(1.f, up * 1.5f));
+				}
 			}
-		}
+		};
+		int outer = cy - play.pos.Y - ph / 4;
+		arc(outer, rows, false, a);
+		if (rainbowTwice) arc(outer + rows * 2, rows * 13 / 10, true, a * 0.4f); // the double: wider, fainter, colours reversed
 	}
 	// paper planes: a white dart with a grey fold, nose first; landed ones fade over their last 2 s
 	for (auto &pl : paperPlanes)

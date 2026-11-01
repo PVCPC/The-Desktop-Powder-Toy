@@ -412,6 +412,8 @@ The "More fun" group under Fun, one table (moreFun[]) for the rows and their pre
   cone 100 px left of the tray end smokes past the level and throws lava 20% past it; thrown lava (or its stone)
   goes after 8 s. Normal mode only. Tested in a free gap: smoke at idle, lava under 16 busy threads.
 - [x] Release v0.7.4 (2026-11-01).
+- [x] Rainbow like a real one (user 11-01: "faint and see through", "a little wider", "double rainbow chance"):
+  blended colours, soft edges, fading feet, at most 27% strong at default brightness; ph/14 rows wide; "Double rainbow chance" slider (default 25%) adds a wider, fainter arc outside with the colours reversed. v0.7.5.
 
 ## Ideas
 
