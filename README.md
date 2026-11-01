@@ -48,6 +48,8 @@ What's new
 - **Scorched wallpaper** (a switch, off by default): fire, lava and anything 300 C or hotter blackens the desktop
   background behind it and acid pits it. Only the overlay draws it: your real wallpaper is never changed, and clearing
   the sim wipes it.
+- **Taskbar toys** (two switches in Fun, off by default): hold Ctrl and drag an app's taskbar button up off the
+  taskbar to throw a stone block in its icon's colour; or have every app that opens pop one up out of its button.
 - **Fun switches** (Simulation window, all off by default): stick figure pets that wander your windows and
   taskbar; snow, rain with lightning, leaves by the season, hail or low fog, drifting in the wind; pets run from fire, come over to a slow mouse pointer, scatter from a fast one and hop to greet you when
   you come back; the Recycle Bin eats sand that lands on it; sand hops to the beat

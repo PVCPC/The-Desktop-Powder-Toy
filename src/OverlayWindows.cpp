@@ -77,6 +77,7 @@
 #include <exdisp.h>
 #include <shobjidl.h>
 #include <wincodec.h>
+#include <uiautomation.h>
 #pragma comment(lib, "windowscodecs.lib")
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "oleaut32.lib")
@@ -123,6 +124,7 @@ namespace
 		bool starsLand = false;                  // now and then a shooting star comes down and hits something
 		float birdRest = 10;                     // s a landed bird rests (about)
 		bool petHoles = false, showers = false;  // pets use holes in windows; meteor showers on their nights
+		bool taskThrow = false, taskPop = false; // Ctrl-drag a taskbar button off to throw a block; apps that open pop one out
 		float meteors = 0;                       // big meteors an hour at night
 		std::vector<HWND> flashed; // windows that flashed their taskbar button (a new message) since the last tick
 	} fun;
@@ -2662,7 +2664,7 @@ namespace
 			}
 			y += S(26) * int(std::size(feel)) + S(120);
 
-			top = Group(x, y, w, S(26) * 24 + S(8), L"Fun");
+			top = Group(x, y, w, S(26) * 26 + S(8), L"Fun");
 			struct FunToggle { const wchar_t *name, *tip; bool *v; const char *pref; };
 			FunToggle funToggles[] = {
 				{ L"Recycle Bin eats sand", L"Sand that lands on the Recycle Bin icon disappears into it (with icons as walls)", &fun.bin, "Bin" },
@@ -2680,6 +2682,8 @@ namespace
 				{ L"Windows crack first", L"With Destructible on, a hit on whole glass only cracks it; another hit on the cracks breaks it out. Cracks fade as windows heal", &overlayFeel.crack, "Crack" },
 				{ L"Pets explore holes", L"Pets drop through holes broken in windows instead of turning back, and stop to look out of a hole they stand in", &fun.petHoles, "PetHoles" },
 				{ L"Meteor showers", L"On the real shower nights (Quadrantids, Lyrids, Eta Aquariids, Perseids, Orionids, Leonids, Geminids) shooting stars come ten times as often, at least 60 an hour", &fun.showers, "Showers" },
+				{ L"Throw from the taskbar", L"Hold Ctrl and drag an app's taskbar button up off the taskbar: a stone block in its icon's colour drops from the pointer, thrown the way you moved", &fun.taskThrow, "TaskThrow" },
+				{ L"Apps pop out of the taskbar", L"When an app opens a window, a stone block in its icon's colour pops up out of its taskbar button", &fun.taskPop, "TaskPop" },
 			};
 			for (int i = 0; i < int(std::size(funToggles)); i++)
 			{
@@ -2732,7 +2736,7 @@ namespace
 					GlobalPrefs::Ref().Set("Overlay.Fun.WeatherKind", i);
 				}) + S(18);
 			}
-			y += S(26) * 24 + S(16);
+			y += S(26) * 26 + S(16);
 
 			top = Group(x, y, w, S(26) * int(std::size(moreFun)) + S(8), L"More fun");
 			for (int i = 0; i < int(std::size(moreFun)); i++)
@@ -4692,6 +4696,86 @@ namespace
 
 	// The notification-area (tray) icon: left click shows or hides the Elements window, right click opens a menu.
 	NOTIFYICONDATAW tray{};
+	// The taskbar's app buttons as UI Automation sees them (screen pixels), polled on a worker thread every half second
+	// while a taskbar toy is on. A button whose name changed just after a window was created (Windows 11 names them
+	// "App - 2 running windows") is the app that opened.
+	struct TaskButton { std::wstring name; RECT r; };
+	std::atomic<ULONGLONG> windowCreated = 0;
+	std::mutex taskMutex;
+	std::vector<TaskButton> taskButtons;
+	std::vector<RECT> taskPopped;
+	void StartTaskButtons()
+	{
+		static bool started = false;
+		if (started) return;
+		started = true;
+		std::thread([] {
+			CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+			IUIAutomation *uia = nullptr;
+			IUIAutomationCondition *buttons = nullptr;
+			VARIANT v{};
+			v.vt = VT_I4, v.lVal = UIA_ButtonControlTypeId;
+			if (FAILED(CoCreateInstance(__uuidof(CUIAutomation), nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&uia))) ||
+			    FAILED(uia->CreatePropertyCondition(UIA_ControlTypePropertyId, v, &buttons)))
+				return;
+			std::vector<std::wstring> before;
+			bool first = true;
+			for (;; Sleep(500))
+			{
+				if (!fun.taskThrow && !fun.taskPop)
+				{
+					first = true;
+					continue;
+				}
+				std::vector<TaskButton> now;
+				auto scan = [&](HWND hwnd, bool any) { // any: every button (Windows 10's task list); else Windows 11's task buttons
+					IUIAutomationElement *root = nullptr;
+					IUIAutomationElementArray *found = nullptr;
+					if (hwnd && SUCCEEDED(uia->ElementFromHandle(hwnd, &root)) && SUCCEEDED(root->FindAll(TreeScope_Descendants, buttons, &found)) && found)
+					{
+						int n = 0;
+						found->get_Length(&n);
+						for (int i = 0; i < n; i++)
+						{
+							IUIAutomationElement *e = nullptr;
+							if (FAILED(found->GetElement(i, &e)) || !e) continue;
+							BSTR cls = nullptr, name = nullptr;
+							RECT r{};
+							e->get_CurrentClassName(&cls);
+							if ((any || (cls && wcsstr(cls, L"TaskListButton"))) && SUCCEEDED(e->get_CurrentName(&name)) && SUCCEEDED(e->get_CurrentBoundingRectangle(&r)) && r.right > r.left)
+								now.push_back({ name ? name : L"", r });
+							SysFreeString(cls);
+							SysFreeString(name);
+							e->Release();
+						}
+						found->Release();
+					}
+					if (root) root->Release();
+				};
+				for (const wchar_t *cls : { L"Shell_TrayWnd", L"Shell_SecondaryTrayWnd" })
+					for (HWND tray = FindWindowExW(nullptr, nullptr, cls, nullptr); tray; tray = FindWindowExW(nullptr, tray, cls, nullptr))
+					{
+						scan(tray, false);
+						HWND list = nullptr;
+						EnumChildWindows(tray, [](HWND h, LPARAM lp) {
+							wchar_t c[32];
+							if (GetClassNameW(h, c, 32) && !wcscmp(c, L"MSTaskListWClass")) return *reinterpret_cast<HWND *>(lp) = h, FALSE;
+							return TRUE;
+						}, LPARAM(&list));
+						scan(list, true);
+					}
+				std::lock_guard lock(taskMutex);
+				if (!first && fun.taskPop && GetTickCount64() - windowCreated < 4000)
+					for (auto &b : now)
+						if (std::find(before.begin(), before.end(), b.name) == before.end()) taskPopped.push_back(b.r);
+				before.clear();
+				for (auto &b : now) before.push_back(b.name);
+				taskButtons = std::move(now);
+				first = false;
+			}
+		}).detach();
+	}
+
 	constexpr UINT trayMessage = WM_APP + 1;
 
 	LRESULT CALLBACK TrayProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
@@ -4706,6 +4790,7 @@ namespace
 		if (msg == shellHook)
 		{
 			if (wp == HSHELL_FLASH && fun.notify) fun.flashed.push_back(HWND(lp));
+			if (wp == HSHELL_WINDOWCREATED) windowCreated = GetTickCount64();
 			return 0;
 		}
 		if (msg == WM_ENDSESSION && wp)
@@ -4835,7 +4920,7 @@ void OverlayWindows::Init(void *mainHwnd)
 		*v = prefs.Get(ByteString("Overlay.Feel.") + name, *v);
 	for (auto [v, name] : { std::pair{ &fun.pets, "Pets" }, { &fun.weather, "Weather" }, { &fun.music, "Music" }, { &fun.weatherIdle, "WeatherIdle" }, { &fun.weatherLast, "WeatherLast" }, { &fun.hot, "Hot" }, { &fun.hourglass, "Hourglass" } })
 		*v = prefs.Get(ByteString("Overlay.Fun.") + name, *v);
-	for (auto [v, name] : { std::pair{ &fun.bin, "Bin" }, { &fun.broom, "Broom" }, { &fun.closeToss, "CloseToss" }, { &fun.openShake, "OpenShake" }, { &fun.holidays, "Holidays" }, { &fun.notify, "Notify" }, { &fun.dayNight, "DayNight" }, { &fun.trail, "Trail" }, { &fun.confetti, "Confetti" }, { &fun.castles, "Castles" }, { &fun.perch, "Perch" }, { &fun.starsLand, "StarsLand" }, { &overlayFeel.crack, "Crack" }, { &fun.petHoles, "PetHoles" }, { &fun.showers, "Showers" } })
+	for (auto [v, name] : { std::pair{ &fun.bin, "Bin" }, { &fun.broom, "Broom" }, { &fun.closeToss, "CloseToss" }, { &fun.openShake, "OpenShake" }, { &fun.holidays, "Holidays" }, { &fun.notify, "Notify" }, { &fun.dayNight, "DayNight" }, { &fun.trail, "Trail" }, { &fun.confetti, "Confetti" }, { &fun.castles, "Castles" }, { &fun.perch, "Perch" }, { &fun.starsLand, "StarsLand" }, { &overlayFeel.crack, "Crack" }, { &fun.petHoles, "PetHoles" }, { &fun.showers, "Showers" }, { &fun.taskThrow, "TaskThrow" }, { &fun.taskPop, "TaskPop" } })
 		*v = prefs.Get(ByteString("Overlay.Fun.") + name, *v);
 	fun.weatherKind = prefs.Get("Overlay.Fun.WeatherKind", 0);
 	for (auto &f : moreFun)
@@ -6393,6 +6478,58 @@ static void TickWindowWalls()
 				if (x * x + y * y <= 10) sim->create_part(-1, cx + x, cy + y, PT_BALL);
 	}
 	fun.flashed.clear();
+	// Taskbar toys: Ctrl-drag an app's taskbar button off the taskbar and a block in its icon's colour drops from the
+	// pointer, thrown the way it moved; an app that opens pops one up out of its button. Blocks are stone in that colour.
+	if (fun.taskThrow || fun.taskPop)
+	{
+		StartTaskButtons();
+		auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); };
+		auto block = [&](const RECT &b, int cx, int cy, float vx, float vy) {
+			uint32_t colour = 0x808080; // the most vivid pixel of the button: its icon
+			int x0 = std::max(0, px(b.left - sr.left, WINDOWW, sw)), y0 = std::max(0, px(b.top - sr.top, WINDOWH, sh));
+			int x1 = std::min(XRES, px(b.right - sr.left, WINDOWW, sw)), y1 = std::min(YRES, px(b.bottom - sr.top, WINDOWH, sh));
+			std::vector<uint32_t> pix(size_t(std::max(0, x1 - x0)) * std::max(0, y1 - y0));
+			if (pix.size() && overlayGrabScreen && overlayGrabScreen(x0, y0, x1 - x0, y1 - y0, pix.data()))
+				for (int best = 40; auto c : pix)
+				{
+					int r = c >> 16 & 0xFF, g = c >> 8 & 0xFF, bl = c & 0xFF, s = std::max({ r, g, bl }) - std::min({ r, g, bl });
+					if (s > best) best = s, colour = c & 0xFFFFFF;
+				}
+			for (int y = -5; y <= 5; y++)
+				for (int x = -5; x <= 5; x++)
+					if (int i = sim->create_part(-1, cx + x, cy + y, PT_STNE); i >= 0)
+					{
+						auto &part = sim->parts[i];
+						part.dcolour = 0xFF000000 | colour;
+						part.vx = vx, part.vy = vy;
+					}
+		};
+		std::vector<TaskButton> buttons;
+		std::vector<RECT> popped;
+		{
+			std::lock_guard lock(taskMutex);
+			buttons = taskButtons;
+			popped.swap(taskPopped);
+		}
+		for (auto &b : popped)
+			if (fun.taskPop) block(b, px((b.left + b.right) / 2 - sr.left, WINDOWW, sw), px(b.top - sr.top, WINDOWH, sh) - 8, 0, -4);
+		static bool armed = false, thrown = false;
+		static RECT from;
+		static POINT last;
+		POINT c;
+		GetCursorPos(&c);
+		if (GetAsyncKeyState(VK_LBUTTON) >= 0) armed = thrown = false;
+		else if (fun.taskThrow && !armed && !thrown && GetAsyncKeyState(VK_CONTROL) < 0)
+			for (auto &b : buttons)
+				if (PtInRect(&b.r, c)) armed = true, from = b.r;
+		if (armed && (c.y < from.top - 8 || c.y > from.bottom + 8)) // off the taskbar
+		{
+			block(from, px(c.x - sr.left, WINDOWW, sw), px(c.y - sr.top, WINDOWH, sh),
+			      std::clamp(float(px(c.x - last.x, WINDOWW, sw)), -15.f, 15.f), std::clamp(float(px(c.y - last.y, WINDOWH, sh)), -15.f, 15.f));
+			armed = false, thrown = true;
+		}
+		last = c;
+	}
 	// The volcano: a stone cone on the taskbar left of the hourglass; it smokes while the PC's total CPU use is past the
 	// slider, and throws lava while it is 20% past it. Rebuilt where broken, like the hourglass
 	static float cpu = 0;

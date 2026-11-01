@@ -498,6 +498,10 @@ On/off things are Fun toggles; things with an amount are More fun sliders.
 - [x] 0.8.4 Scorched wallpaper (toggle in Desktop physics, pref Overlay.Feel.Wallpaper, off): particles >= 300 C
   soot and acid pits on the desktop where no wall is, as windowMarks[0] (id 0 = no window), drawn under particles;
   only while overlayWallpaperSeen (window walls on, or layer behind windows). Scorch/Acid sliders set the rate.
+- [x] 0.8.5 Taskbar toys (Fun toggles TaskThrow / TaskPop, off): UI Automation worker polls taskbar buttons every 0.5 s
+  (Win11 class *TaskListButton*, Win10 buttons under MSTaskListWClass); pop = a button name not seen before within 4 s of
+  HSHELL_WINDOWCREATED; throw = Ctrl + left button down on a button, then the pointer leaves it vertically by 8 px.
+  Block = 11x11 STNE, dcolour = most saturated pixel of the button. Pop tested live (own window); throw needs real input.
 - [ ] Next for ~5x, all elements kept: (A) per-block particle slots so create/kill needs no lock; (B) RecalcFreeParticles
   on all cores (~5 ms); (C) review the rest one by one (PLNT, VINE, SPRK...); (D) sleeping regions, as a toggle.
 
