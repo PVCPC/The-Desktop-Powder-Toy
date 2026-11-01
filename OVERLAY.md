@@ -367,12 +367,12 @@ tray menu: the tray menu stays native on purpose.
   right end; grains drop through the plugged neck so the top holds the time left, then it turns over; rebuilt where
   broken or cleared. Tested at 1 min: 88 grains drained evenly (74/14 -> 6/82), turned over to 88/0, nothing lost.
 - [x] Notifications (2026-10-31, Fun toggle "Notifications drop a ball"): the tray window is a shell hook window;
+  HSHELL_FLASH (an app flashing its taskbar button) drops a small ball onto that window, at most one per window per
+  3 s. Tested with my own form flashing twice: balls landed on it and stayed.
 - [x] Day and night (2026-10-31, Fun toggle "Day and night", by the clock): 19:00-05:00 up to 12 fireflies (BIRD tmp 1:
   slow loners) blink low over open desktop, and fallen leaves come down darker; 06:00-10:00 a flock of 7 birds now and
   then (about every 2 min) sets off from open desktop. Spawns skip windows (walls: anything inside is stuck). Tested
   with the hour faked: fireflies drift at 0.3 px/tick, about a third lit; flocks fly across and leave.
-  3 s. Tested with my own form flashing twice: balls landed on it and stayed.
-- [ ] Day and night: fireflies and darker leaves in the evening, birds in the morning, by the clock.
 - [x] Released v0.7.2 (2026-10-31) with all of the above.
 
 ## Ideas
