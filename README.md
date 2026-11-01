@@ -50,6 +50,9 @@ What's new
   the sim wipes it.
 - **Taskbar toys** (two switches in Fun, off by default): hold Ctrl and drag an app's taskbar button up off the
   taskbar to throw a stone block in its icon's colour; or have every app that opens pop one up out of its button.
+- **Small extras** (switches in Fun, off by default): gravity leans toward the window you are using; weekday
+  weather (Monday rain, Tuesday fog, Wednesday hail, Thursday snow, Friday leaves); typing puffs cold sparks from the
+  text cursor.
 - **Fun switches** (Simulation window, all off by default): stick figure pets that wander your windows and
   taskbar; snow, rain with lightning, leaves by the season, hail or low fog, drifting in the wind; pets run from fire, come over to a slow mouse pointer, scatter from a fast one and hop to greet you when
   you come back; the Recycle Bin eats sand that lands on it; sand hops to the beat

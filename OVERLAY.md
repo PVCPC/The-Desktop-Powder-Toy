@@ -502,6 +502,10 @@ On/off things are Fun toggles; things with an amount are More fun sliders.
   (Win11 class *TaskListButton*, Win10 buttons under MSTaskListWClass); pop = a button name not seen before within 4 s of
   HSHELL_WINDOWCREATED; throw = Ctrl + left button down on a button, then the pointer leaves it vertically by 8 px.
   Block = 11x11 STNE, dcolour = most saturated pixel of the button. Pop tested live (own window); throw needs real input.
+- [x] 0.8.6 Fun toggles Tilt / Weekday / Typing (off): Tilt takes GRAV_VERTICAL as GRAV_CUSTOM, customGravityX eases
+  to +-0.5 by the foreground window's side, gives VERTICAL back when off (tested: 0.32 lean, mode 0 after). Weekday
+  overrides the season kind Mon-Fri. Typing = GetLastInputInfo changed with the pointer still; sparks at the
+  GetGUIThreadInfo caret or the window top (ColdSpark, shared with the trail). Typing untested live (needs keys).
 - [ ] Next for ~5x, all elements kept: (A) per-block particle slots so create/kill needs no lock; (B) RecalcFreeParticles
   on all cores (~5 ms); (C) review the rest one by one (PLNT, VINE, SPRK...); (D) sleeping regions, as a toggle.
 

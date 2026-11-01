@@ -125,6 +125,7 @@ namespace
 		float birdRest = 10;                     // s a landed bird rests (about)
 		bool petHoles = false, showers = false;  // pets use holes in windows; meteor showers on their nights
 		bool taskThrow = false, taskPop = false; // Ctrl-drag a taskbar button off to throw a block; apps that open pop one out
+		bool tilt = false, weekday = false, typing = false; // gravity leans to the active window; weather by weekday; typing sparks
 		float meteors = 0;                       // big meteors an hour at night
 		std::vector<HWND> flashed; // windows that flashed their taskbar button (a new message) since the last tick
 	} fun;
@@ -2664,7 +2665,7 @@ namespace
 			}
 			y += S(26) * int(std::size(feel)) + S(120);
 
-			top = Group(x, y, w, S(26) * 26 + S(8), L"Fun");
+			top = Group(x, y, w, S(26) * 29 + S(8), L"Fun");
 			struct FunToggle { const wchar_t *name, *tip; bool *v; const char *pref; };
 			FunToggle funToggles[] = {
 				{ L"Recycle Bin eats sand", L"Sand that lands on the Recycle Bin icon disappears into it (with icons as walls)", &fun.bin, "Bin" },
@@ -2684,6 +2685,9 @@ namespace
 				{ L"Meteor showers", L"On the real shower nights (Quadrantids, Lyrids, Eta Aquariids, Perseids, Orionids, Leonids, Geminids) shooting stars come ten times as often, at least 60 an hour", &fun.showers, "Showers" },
 				{ L"Throw from the taskbar", L"Hold Ctrl and drag an app's taskbar button up off the taskbar: a stone block in its icon's colour drops from the pointer, thrown the way you moved", &fun.taskThrow, "TaskThrow" },
 				{ L"Apps pop out of the taskbar", L"When an app opens a window, a stone block in its icon's colour pops up out of its taskbar button", &fun.taskPop, "TaskPop" },
+				{ L"Gravity leans to your window", L"Gravity tilts toward the side of the screen the window you are using is on, so loose sand slides that way (only while Gravity is the normal down)", &fun.tilt, "Tilt" },
+				{ L"Weekday weather", L"With Weather on and set to the season: Monday rain, Tuesday fog, Wednesday hail, Thursday snow, Friday leaves; weekends by the season", &fun.weekday, "Weekday" },
+				{ L"Typing sparks", L"Typing now and then puffs a few cold sparks up from the text cursor (or the top of the window you type in)", &fun.typing, "Typing" },
 			};
 			for (int i = 0; i < int(std::size(funToggles)); i++)
 			{
@@ -2736,7 +2740,7 @@ namespace
 					GlobalPrefs::Ref().Set("Overlay.Fun.WeatherKind", i);
 				}) + S(18);
 			}
-			y += S(26) * 26 + S(16);
+			y += S(26) * 29 + S(16);
 
 			top = Group(x, y, w, S(26) * int(std::size(moreFun)) + S(8), L"More fun");
 			for (int i = 0; i < int(std::size(moreFun)); i++)
@@ -4920,7 +4924,7 @@ void OverlayWindows::Init(void *mainHwnd)
 		*v = prefs.Get(ByteString("Overlay.Feel.") + name, *v);
 	for (auto [v, name] : { std::pair{ &fun.pets, "Pets" }, { &fun.weather, "Weather" }, { &fun.music, "Music" }, { &fun.weatherIdle, "WeatherIdle" }, { &fun.weatherLast, "WeatherLast" }, { &fun.hot, "Hot" }, { &fun.hourglass, "Hourglass" } })
 		*v = prefs.Get(ByteString("Overlay.Fun.") + name, *v);
-	for (auto [v, name] : { std::pair{ &fun.bin, "Bin" }, { &fun.broom, "Broom" }, { &fun.closeToss, "CloseToss" }, { &fun.openShake, "OpenShake" }, { &fun.holidays, "Holidays" }, { &fun.notify, "Notify" }, { &fun.dayNight, "DayNight" }, { &fun.trail, "Trail" }, { &fun.confetti, "Confetti" }, { &fun.castles, "Castles" }, { &fun.perch, "Perch" }, { &fun.starsLand, "StarsLand" }, { &overlayFeel.crack, "Crack" }, { &fun.petHoles, "PetHoles" }, { &fun.showers, "Showers" }, { &fun.taskThrow, "TaskThrow" }, { &fun.taskPop, "TaskPop" } })
+	for (auto [v, name] : { std::pair{ &fun.bin, "Bin" }, { &fun.broom, "Broom" }, { &fun.closeToss, "CloseToss" }, { &fun.openShake, "OpenShake" }, { &fun.holidays, "Holidays" }, { &fun.notify, "Notify" }, { &fun.dayNight, "DayNight" }, { &fun.trail, "Trail" }, { &fun.confetti, "Confetti" }, { &fun.castles, "Castles" }, { &fun.perch, "Perch" }, { &fun.starsLand, "StarsLand" }, { &overlayFeel.crack, "Crack" }, { &fun.petHoles, "PetHoles" }, { &fun.showers, "Showers" }, { &fun.taskThrow, "TaskThrow" }, { &fun.taskPop, "TaskPop" }, { &fun.tilt, "Tilt" }, { &fun.weekday, "Weekday" }, { &fun.typing, "Typing" } })
 		*v = prefs.Get(ByteString("Overlay.Fun.") + name, *v);
 	fun.weatherKind = prefs.Get("Overlay.Fun.WeatherKind", 0);
 	for (auto &f : moreFun)
@@ -5741,6 +5745,20 @@ static void TossAbove(Simulation *sim, int x0, int y0, int x1, bool close)
 }
 
 // The Fun group's pets, weather and music, once per sim tick (not while paused)
+// A cold spark (EMBR at room temperature: it sets nothing alight) in a glitter colour, drifting up
+static void ColdSpark(Simulation *sim, int x, int y)
+{
+	if (x < CELL || y < CELL || x >= XRES - CELL || y >= YRES - CELL || sim->pmap[y][x] || sim->PixelWall(x, y)) return;
+	if (int i = sim->create_part(-1, x, y, PT_EMBR); i >= 0)
+	{
+		auto &p = sim->parts[i];
+		p.temp = 295.15f, p.life = sim->rng.between(20, 40);
+		p.vx = (sim->rng.uniform01() - 0.5f) * 1.5f, p.vy = -sim->rng.uniform01();
+		static const uint32_t glitter[] = { 0xFFFFF0A0, 0xFFA0E0FF, 0xFFFFA0E0, 0xFFC0FFA0 };
+		p.dcolour = glitter[sim->rng.between(0, 3)];
+	}
+}
+
 static void TickFun(Simulation *sim)
 {
 	static int last = -1;
@@ -5836,6 +5854,8 @@ static void TickFun(Simulation *sim)
 			localtime_s(&local, &now);
 			int m = local.tm_mon + 1;
 			kind = m == 12 || m <= 2 ? 1 : m >= 9 && m <= 11 ? 3 : 2;
+			// Weekday weather: Monday rain, Tuesday fog, Wednesday hail, Thursday snow, Friday leaves; weekends by the season
+			if (fun.weekday && local.tm_wday >= 1 && local.tm_wday <= 5) kind = std::array{ 2, 5, 4, 1, 3 }[local.tm_wday - 1];
 		}
 		static const uint32_t autumn[] = { 0xFFC0501A, 0xFFD9822B, 0xFFB8860B, 0xFF8B4513, 0xFFCC3300 };
 		float n = fun.weather * XRES / 600.f;
@@ -5989,19 +6009,7 @@ static void TickFun(Simulation *sim)
 	}
 	// Sparkle trail: a moving pointer sheds a few cold sparks (EMBR at room temperature: they set nothing alight)
 	if (auto &m = sim->petPointer; fun.trail && m.speed > 2 && m.x > CELL && m.y > CELL && m.x < XRES - CELL && m.y < YRES - CELL)
-		for (int k = 0; k < 2; k++)
-		{
-			int x = m.x + sim->rng.between(-2, 2), y = m.y + sim->rng.between(-2, 2);
-			if (sim->pmap[y][x] || sim->PixelWall(x, y)) continue;
-			if (int i = sim->create_part(-1, x, y, PT_EMBR); i >= 0)
-			{
-				auto &p = sim->parts[i];
-				p.temp = 295.15f, p.life = sim->rng.between(20, 40);
-				p.vx = (sim->rng.uniform01() - 0.5f) * 1.5f, p.vy = -sim->rng.uniform01();
-				static const uint32_t glitter[] = { 0xFFFFF0A0, 0xFFA0E0FF, 0xFFFFA0E0, 0xFFC0FFA0 };
-				p.dcolour = glitter[sim->rng.between(0, 3)];
-			}
-		}
+		for (int k = 0; k < 2; k++) ColdSpark(sim, m.x + sim->rng.between(-2, 2), m.y + sim->rng.between(-2, 2));
 	// Confetti: the pointer wiggled fast (4 turns within 40 ticks) throws a burst of coloured flakes (sawdust, so the
 	// wind flutters them like leaves) that go like the weather does
 	static int lastX = -1, lastSign = 0, cooldown = 0;
@@ -6529,6 +6537,53 @@ static void TickWindowWalls()
 			armed = false, thrown = true;
 		}
 		last = c;
+	}
+	// Window gravity: gravity leans toward the side the active window is on (half a sideways pull at the screen's edge),
+	// swinging over slowly. It takes over plain down gravity only, as custom gravity, and gives it back when switched off.
+	// ponytail: a scene saved while leaning keeps custom gravity; reset Gravity by hand if that matters.
+	static bool tilting = false;
+	if (fun.tilt && (sim->gravityMode == GRAV_VERTICAL || (tilting && sim->gravityMode == GRAV_CUSTOM)))
+	{
+		float lean = 0;
+		if (auto it = wallRects.find(GetForegroundWindow()); it != wallRects.end())
+			lean = std::clamp(((it->second.left + it->second.right) / 2 - sr.left) / float(sw) * 2 - 1, -1.f, 1.f) * 0.5f;
+		if (!tilting) sim->customGravityX = 0;
+		sim->gravityMode = GRAV_CUSTOM, tilting = true;
+		sim->customGravityX += (lean - sim->customGravityX) * 0.02f;
+		sim->customGravityY = 1;
+	}
+	else if (tilting)
+	{
+		if (sim->gravityMode == GRAV_CUSTOM) sim->gravityMode = GRAV_VERTICAL;
+		tilting = false;
+	}
+	// Typing sparks: keys pressed (new input with the pointer still and no button down) now and then puff cold sparks
+	// up from the text cursor, or from the top of the window being typed in where the app has no standard one
+	if (fun.typing)
+	{
+		static DWORD lastInput = 0;
+		static POINT lastPoint;
+		LASTINPUTINFO li{ sizeof(li) };
+		POINT pt;
+		GetCursorPos(&pt);
+		bool typed = GetLastInputInfo(&li) && li.dwTime != lastInput && pt.x == lastPoint.x && pt.y == lastPoint.y &&
+		             GetAsyncKeyState(VK_LBUTTON) >= 0 && GetAsyncKeyState(VK_RBUTTON) >= 0;
+		lastInput = li.dwTime, lastPoint = pt;
+		GUITHREADINFO gi{ sizeof(gi) };
+		POINT at{ -1, -1 };
+		if (typed && sim->rng.uniform01() < 0.4f)
+		{
+			if (GetGUIThreadInfo(0, &gi) && gi.hwndCaret)
+				at = { gi.rcCaret.left, gi.rcCaret.top }, ClientToScreen(gi.hwndCaret, &at);
+			else if (auto it = wallRects.find(GetForegroundWindow()); it != wallRects.end())
+				at = { it->second.left + long(sim->rng.uniform01() * (it->second.right - it->second.left)), it->second.top };
+		}
+		if (at.x >= 0)
+		{
+			auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); };
+			int x = px(at.x - sr.left, WINDOWW, sw), y = px(at.y - sr.top, WINDOWH, sh) - 3;
+			for (int k = 0; k < 4; k++) ColdSpark(sim, x + sim->rng.between(-3, 3), y + sim->rng.between(-2, 0));
+		}
 	}
 	// The volcano: a stone cone on the taskbar left of the hourglass; it smokes while the PC's total CPU use is past the
 	// slider, and throws lava while it is 20% past it. Rebuilt where broken, like the hourglass
