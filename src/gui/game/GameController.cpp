@@ -413,6 +413,24 @@ void GameController::DrawPoints(int toolSelection, ui::Point oldPos, ui::Point n
 	activeTool->shiftBehaviour = gameView->ShiftBehaviour();
 	activeTool->ctrlBehaviour = gameView->CtrlBehaviour();
 	activeTool->altBehaviour = gameView->AltBehaviour();
+	// BALL and JOIN: pressing on one of them grabs it instead of painting; dragging carries it, letting go throws it
+	auto &grab = sim->grab;
+	int body = activeTool->Identifier == "DEFAULT_PT_BALL" ? PT_BALL : activeTool->Identifier == "DEFAULT_PT_JOIN" ? PT_JOIN : 0;
+	if (body && !held)
+		for (int d = 0; d <= 3 && !grab.on; d++)
+			for (int dy = -d; dy <= d && !grab.on; dy++)
+				for (int dx = -d; dx <= d && !grab.on; dx++)
+				{
+					int x = newPos.X + dx, y = newPos.Y + dy;
+					if (x < 0 || y < 0 || x >= XRES || y >= YRES) continue;
+					int r = sim->pmap[y][x];
+					if (r && TYP(r) == body && sim->parts[ID(r)].tmp) grab.on = true, grab.type = body, grab.body = sim->parts[ID(r)].tmp;
+				}
+	if (grab.on)
+	{
+		grab.x = float(newPos.X), grab.y = float(newPos.Y);
+		return;
+	}
 	if (!held)
 		activeTool->Draw(sim, cBrush, newPos);
 	else
@@ -445,6 +463,11 @@ void GameController::ToolClick(int toolSelection, ui::Point point)
 	Brush &cBrush = gameModel->GetBrush();
 	if (!activeTool)
 		return;
+	if (sim->grab.on) // let go of a held ball or jelly: it flies on with the speed it had
+	{
+		sim->grab.on = false;
+		return;
+	}
 	activeTool->Click(sim, cBrush, point);
 }
 
@@ -549,7 +572,10 @@ bool GameController::MouseUp(int x, int y, unsigned button, MouseupReason reason
 {
 	bool ret = commandInterface->HandleEvent(MouseUpEvent{ x, y, button, reason });
 	if (reason != mouseUpNormal)
+	{
+		gameModel->GetSimulation()->grab.on = false;
 		return ret;
+	}
 	if (ret && foundSignID != -1 && y<YRES && x<XRES && !gameView->GetPlacingSave())
 	{
 		ui::Point point = gameModel->AdjustZoomCoords(ui::Point(x, y));

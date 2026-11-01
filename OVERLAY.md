@@ -338,6 +338,26 @@ tray menu: the tray menu stays native on purpose.
   the cursor where clicks go to the desktop; window closed/opened = TossAbove on the band over it (TickFun,
   TickWindowWalls). Tested headless: pets walk, snow falls and piles, bin eats 30/30 grains, close throws the
   pile up. Music and broom untested (no simulated input or audio).
+- [x] (2026-10-31) BIRD, FISH, BALL, JOIN elements; pets flee heat; rain lightning (v0.7.1). Pets ride moving windows,
+  broom sweeps its path, Weather waits (idle minutes) / Weather lasts (seconds), stronger music bounce (de6c0c5).
+
+## Fun to-do (user 2026-10-31: "add them all", in this order)
+
+- [x] Grab and throw balls and jelly with the mouse (2026-10-31: with BALL or JOIN selected, pressing on one grabs it; it
+  chases the pointer and flies on with that speed when let go; a JOIN body hangs off the grabbed pixel. Tested with a
+  scripted hand: ball, jelly (137/137 px) and rope (61/61) carried and thrown. Real mouse untested.)
+- [ ] Busy apps run hot: a window's temperature follows its app's CPU use; snow melts on busy windows (covers "snow
+  melts on hot windows").
+- [ ] Pets play with balls (kick them along).
+- [ ] Balls sink into powders and liquids instead of resting on top.
+- [ ] Wind pushes leaves (sideways drift, swirls).
+- [ ] Jelly sinking through a 1 px JOIN rope.
+- [ ] Pets notice you: follow or flee the pointer, sit when it's still, wave when you're back from idle.
+- [ ] Holidays by date: New Year fireworks at midnight, Halloween pumpkins rolling on the taskbar, February hearts.
+- [ ] Taskbar hourglass: sand runs out with the hour or a set timer.
+- [ ] Notifications drop something (a ball or leaf) onto that app's window.
+- [ ] Day and night: fireflies and darker leaves in the evening, birds in the morning, by the clock.
+- [ ] Release v0.7.2 once a few of these are in.
 
 ## Ideas
 

@@ -62,6 +62,7 @@ namespace
 		std::vector<int> members;
 		std::vector<Spring> springs;
 		int lastTick = -1;
+		int hold = -1; // the pixel the mouse holds, while it does
 	};
 	std::map<int, Body> bodies;
 	int nextId = 1;
@@ -184,17 +185,36 @@ static void Step(Simulation *sim, int id, Body &b)
 	// where each pixel would go this tick (gravity, wind), then pull those spots back to the springs' lengths a few
 	// times, never into anything solid (or the bottom of a blob gets squashed into the floor and the rest piles up)
 	static std::vector<float> px(NPART), py(NPART), sx(NPART), sy(NPART);
+	// held by the mouse: the pixel nearest where it grabbed follows the pointer, the rest hangs off it
+	auto &g = sim->grab;
+	if (!(g.on && g.type == PT_JOIN && g.body == id)) b.hold = -1;
+	else if (b.hold < 0 || parts[b.hold].type != PT_JOIN || parts[b.hold].tmp != id)
+	{
+		float best = 1e9f;
+		for (int j : b.members)
+			if (float d = std::hypot(parts[j].x - g.x, parts[j].y - g.y); d < best) best = d, b.hold = j;
+	}
+	auto fixed = [&](int j) { return parts[j].tmp2 || j == b.hold; };
+	// the hand's pull, which the rest of the body shares (springs alone let the held pixel run off and snap)
+	float hx = b.hold < 0 ? 0 : std::clamp((g.x - parts[b.hold].x) * 0.5f, -8.f, 8.f);
+	float hy = b.hold < 0 ? 0 : std::clamp((g.y - parts[b.hold].y) * 0.5f, -8.f, 8.f);
 	for (int j : b.members)
 	{
 		auto &p = parts[j];
 		px[j] = p.x, py[j] = p.y;
-		if (!p.tmp2)
+		if (j == b.hold)
+		{
+			vel[j] = { hx, hy };
+			go(px[j], py[j], p.x + hx, p.y + hy);
+		}
+		else if (!p.tmp2)
 		{
 			int cx = std::clamp(at(p.x) / CELL, 0, XCELLS - 1), cy = std::clamp(at(p.y) / CELL, 0, YCELLS - 1);
 			auto &[vx, vy] = vel[j];
 			vy += 0.1f;
 			vx += (sim->vx[cy][cx] - vx) * 0.02f, vy += (sim->vy[cy][cx] - vy) * 0.02f;
-			vx = std::clamp(vx * 0.99f, -4.f, 4.f), vy = std::clamp(vy * 0.99f, -4.f, 4.f);
+			if (b.hold >= 0) vx += (hx - vx) * 0.3f, vy += (hy - vy) * 0.3f;
+			vx = std::clamp(vx * 0.99f, -8.f, 8.f), vy = std::clamp(vy * 0.99f, -8.f, 8.f);
 			go(px[j], py[j], p.x + vx, p.y + vy);
 		}
 		sx[j] = px[j], sy[j] = py[j];
@@ -222,7 +242,7 @@ static void Step(Simulation *sim, int id, Body &b)
 			float a = std::atan2(cross, dot), c = std::cos(a), s = std::sin(a);
 			for (int j : b.members)
 			{
-				if (parts[j].tmp2) continue;
+				if (fixed(j)) continue;
 				float qx = shape[j].first - sx0, qy = shape[j].second - sy0;
 				px[j] += (cx + c * qx - s * qy - px[j]) * 0.25f, py[j] += (cy + s * qx + c * qy - py[j]) * 0.25f;
 			}
@@ -233,7 +253,7 @@ static void Step(Simulation *sim, int id, Body &b)
 		for (size_t k = 0; k < b.springs.size(); k++)
 		{
 			auto &s = b.springs[it & 1 ? b.springs.size() - 1 - k : k]; // alternate directions, or the blob creeps one way
-			float wa = parts[s.a].tmp2 ? 0.f : 1.f, wb = parts[s.b].tmp2 ? 0.f : 1.f;
+			float wa = fixed(s.a) ? 0.f : 1.f, wb = fixed(s.b) ? 0.f : 1.f;
 			float dx = px[s.b] - px[s.a], dy = py[s.b] - py[s.a], d = std::hypot(dx, dy);
 			if (wa + wb == 0 || d < 0.01f) continue;
 			float c = (d - s.rest) / d / (wa + wb);

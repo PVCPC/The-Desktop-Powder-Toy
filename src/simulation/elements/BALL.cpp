@@ -124,6 +124,11 @@ static void Step(Simulation *sim, int id, Ball &b)
 	b.vx += (sim->vx[ccy][ccx] - b.vx) * 0.04f;
 	b.vy += (sim->vy[ccy][ccx] - b.vy) * 0.04f;
 	b.vx *= 0.998f, b.vy *= 0.998f;
+	if (auto &g = sim->grab; g.on && g.type == PT_BALL && g.body == id) // held: chases the pointer, keeps that speed when let go
+	{
+		b.vx = std::clamp((g.x - b.cx) * 0.35f, -12.f, 12.f);
+		b.vy = std::clamp((g.y - b.cy) * 0.35f, -12.f, 12.f);
+	}
 
 	int other = 0; // another ball in the way, if that's what it hit
 	auto blocked = [&](int X, int Y, float &nx, float &ny) {
