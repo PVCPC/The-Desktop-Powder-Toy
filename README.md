@@ -39,7 +39,8 @@ What's new
   is broken: clearing the sim mends everything.
 - **Fun switches** (Simulation window, all off by default): stick figure pets that wander your windows and
   taskbar; snow, rain with lightning, or leaves by the season; pets run from fire; the Recycle Bin eats sand that lands on it; sand hops to the beat
-  of whatever your PC plays; the mouse pointer as a broom; closing a window throws its pile off; new windows
+  of whatever your PC plays; the mouse pointer as a broom; closing a window throws its pile off; new windows; busy apps warm what sits on their windows, so snow melts on a working game but stays on an idle
+  app; new windows
   shake sand loose.
 - **New elements** (Special menu): BIRD flies in flocks; FISH swim in schools in any liquid; BALL makes one round
   ball per brush click, the brush's size, that bounces, rolls and knocks other balls; JOIN holds what you paint in

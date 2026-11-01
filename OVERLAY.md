@@ -346,7 +346,8 @@ tray menu: the tray menu stays native on purpose.
 - [x] Grab and throw balls and jelly with the mouse (2026-10-31: with BALL or JOIN selected, pressing on one grabs it; it
   chases the pointer and flies on with that speed when let go; a JOIN body hangs off the grabbed pixel. Tested with a
   scripted hand: ball, jelly (137/137 px) and rope (61/61) carried and thrown. Real mouse untested.)
-- [ ] Busy apps run hot: a window's temperature follows its app's CPU use; snow melts on busy windows (covers "snow
+- [x] Busy apps run hot (2026-10-31, Fun slider "Busy apps run hot"): what sits on a window warms toward 20 C + 100 C per
+  core its app keeps busy (CPU sampled every 30 ticks); tested: snow on a busy window melted in 2 s, on an idle one stayed (covers "snow
   melts on hot windows").
 - [ ] Pets play with balls (kick them along).
 - [ ] Balls sink into powders and liquids instead of resting on top.

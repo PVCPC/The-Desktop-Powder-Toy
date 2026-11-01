@@ -105,6 +105,7 @@ namespace
 	{
 		float pets = 0, weather = 0, music = 0; // pets: how many; weather and music 0-3
 		float weatherIdle = 0, weatherLast = 90; // weather only after this many minutes idle (0: always); seconds a piece stays
+		float hot = 0;                           // busy apps' windows warm what sits on them, 0-3
 		int weatherKind = 0;                    // 0 by the season, 1 snow, 2 rain, 3 leaves
 		bool bin = false, broom = false, closeToss = false, openShake = false;
 	} fun;
@@ -2598,7 +2599,7 @@ namespace
 			}
 			y += S(26) * int(std::size(feel)) + S(94);
 
-			top = Group(x, y, w, S(26) * 10 + S(8), L"Fun");
+			top = Group(x, y, w, S(26) * 11 + S(8), L"Fun");
 			struct FunToggle { const wchar_t *name, *tip; bool *v; const char *pref; };
 			FunToggle funToggles[] = {
 				{ L"Recycle Bin eats sand", L"Sand that lands on the Recycle Bin icon disappears into it (with icons as walls)", &fun.bin, "Bin" },
@@ -2621,6 +2622,7 @@ namespace
 				{ L"Weather waits", L"Weather only starts once you have left the PC alone this many minutes, and stops when you come back (off: always)", &fun.weatherIdle, 0, 30, "WeatherIdle", 2 },
 				{ L"Weather lasts", L"How long each flake, leaf or drop stays before it melts or fades; they thin out one by one", &fun.weatherLast, 10, 600, "WeatherLast", 3 },
 				{ L"Music bounce", L"Sand hops and fire flares to the beat of whatever your PC is playing (only the sound level is read)", &fun.music, 0, 3, "Music", 0 },
+				{ L"Busy apps run hot", L"A window warms whatever sits on it by how hard its app is working: snow melts on a busy game or browser and stays on an idle one", &fun.hot, 0, 3, "Hot", 0 },
 			};
 			int sy = top + int(std::size(funToggles)) * S(26);
 			for (auto &f : funSliders)
@@ -2648,7 +2650,7 @@ namespace
 					GlobalPrefs::Ref().Set("Overlay.Fun.WeatherKind", i);
 				}) + S(18);
 			}
-			y += S(26) * 10 + S(16);
+			y += S(26) * 11 + S(16);
 
 			top = Group(x, y, w, S(76), L"Gravity");
 			const wchar_t *gravs[] = { L"Vertical", L"Off", L"Radial", L"Custom" };
@@ -4733,7 +4735,7 @@ void OverlayWindows::Init(void *mainHwnd)
 	overlayFeel.shardParticles = prefs.Get("Overlay.Feel.ShardParticles", false);
 	for (auto [v, name] : { std::pair{ &overlayFeel.grip, "Grip" }, { &overlayFeel.fling, "Fling" }, { &overlayFeel.push, "Push" }, { &overlayFeel.wind, "Wind" }, { &overlayFeel.scorch, "Scorch" }, { &overlayFeel.frost, "Frost" }, { &overlayFeel.acid, "Acid" }, { &overlayFeel.water, "Water" }, { &overlayFeel.acidEat, "AcidEat" }, { &overlayFeel.blast, "Blast" }, { &overlayFeel.holeOpacity, "HoleSolid" }, { &overlayFeel.shards, "Shards" }, { &overlayFeel.shardSize, "ShardSize" }, { &overlayFeel.blackHole, "BlackHole" }, { &overlayFeel.shake, "Shake" } })
 		*v = prefs.Get(ByteString("Overlay.Feel.") + name, *v);
-	for (auto [v, name] : { std::pair{ &fun.pets, "Pets" }, { &fun.weather, "Weather" }, { &fun.music, "Music" }, { &fun.weatherIdle, "WeatherIdle" }, { &fun.weatherLast, "WeatherLast" } })
+	for (auto [v, name] : { std::pair{ &fun.pets, "Pets" }, { &fun.weather, "Weather" }, { &fun.music, "Music" }, { &fun.weatherIdle, "WeatherIdle" }, { &fun.weatherLast, "WeatherLast" }, { &fun.hot, "Hot" } })
 		*v = prefs.Get(ByteString("Overlay.Fun.") + name, *v);
 	for (auto [v, name] : { std::pair{ &fun.bin, "Bin" }, { &fun.broom, "Broom" }, { &fun.closeToss, "CloseToss" }, { &fun.openShake, "OpenShake" } })
 		*v = prefs.Get(ByteString("Overlay.Fun.") + name, *v);
@@ -5775,6 +5777,50 @@ static void TickWindowWalls()
 			if (fun.openShake && !wallRects.count(hwnd)) toss(r, false);
 	}
 	wallRects = std::move(now);
+	// Busy apps run hot: what sits on a window's top warms toward 20 C + 100 C per core its app keeps busy (at 100%)
+	static std::map<HWND, float> busy; // cores in use, sampled every half second
+	if (fun.hot <= 0) busy.clear();
+	else
+	{
+		if (sim->currentTick % 30 == 0)
+		{
+			static std::map<DWORD, std::pair<ULONGLONG, ULONGLONG>> was; // pid: CPU time, when (100 ns)
+			std::map<DWORD, std::pair<ULONGLONG, ULONGLONG>> is;
+			auto u64 = [](FILETIME f) { return ULARGE_INTEGER{ { f.dwLowDateTime, f.dwHighDateTime } }.QuadPart; };
+			FILETIME ft;
+			GetSystemTimeAsFileTime(&ft);
+			busy.clear();
+			for (auto &[hwnd, r] : wallRects)
+			{
+				DWORD pid = 0;
+				GetWindowThreadProcessId(hwnd, &pid);
+				if (!is.count(pid))
+					if (HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid))
+					{
+						FILETIME c, e, k, u;
+						if (GetProcessTimes(h, &c, &e, &k, &u)) is[pid] = { u64(k) + u64(u), u64(ft) };
+						CloseHandle(h);
+					}
+				auto a = is.find(pid), b = was.find(pid);
+				if (a != is.end() && b != was.end() && a->second.second > b->second.second)
+					busy[hwnd] = float(a->second.first - b->second.first) / float(a->second.second - b->second.second);
+			}
+			was = std::move(is);
+		}
+		auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); };
+		for (auto &[hwnd, cores] : busy)
+		{
+			auto it = wallRects.find(hwnd);
+			if (cores < 0.05f || it == wallRects.end()) continue;
+			auto &r = it->second;
+			float to = std::min(20 + 100 * cores * fun.hot, 600.f) + 273.15f;
+			int x0 = std::max(0, px(r.left - sr.left, WINDOWW, sw)), x1 = std::min(XRES, px(r.right - sr.left, WINDOWW, sw));
+			int y0 = px(r.top - sr.top, WINDOWH, sh);
+			for (int y = std::max(0, y0 - 3); y < std::min(YRES, y0); y++)
+				for (int x = x0; x < x1; x++)
+					if (int q = sim->pmap[y][x]; q && sim->parts[ID(q)].temp < to) sim->parts[ID(q)].temp += (to - sim->parts[ID(q)].temp) * 0.05f;
+		}
+	}
 	static POINT broomAt{ -1, -1 };
 	if (broom)
 	{
