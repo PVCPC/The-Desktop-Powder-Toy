@@ -150,7 +150,7 @@ public:
 	int birdRest = 600; // ticks a landed bird rests, about
 	float petFetchRange = 0, petKick = 1; // pets run after balls this far (0: no fetch) and kick them back this hard
 	struct { bool on = false; int type = 0, body = 0; float x = 0, y = 0; } grab; // a BALL or JOIN body held by the mouse
-	bool parallelUpdate = true;
+	bool parallelUpdate = false;
 	bool parallelPhase = false; // the blocks are running: creating, killing and changing particles take parallelLock
 	std::recursive_mutex parallelLock;
 
