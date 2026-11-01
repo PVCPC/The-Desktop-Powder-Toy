@@ -111,6 +111,17 @@ static int PetComm(Simulation *sim, playerst *figh, int f)
 			if (!dir[f] && fireflyY[f] < cy - 4 && sim->rng.chance(1, 8)) return 0x04;
 		}
 	}
+	if (sim->petNap && flee[f] <= 0)
+	{
+		return 0;
+	}
+	if (sim->petGather && flee[f] <= 0)
+	{
+		left[f] = 30;
+		auto play = sim->PlayRect();
+		int mid = play.pos.X + play.size.X / 2;
+		dir[f] = std::abs(cx - mid) < 30 ? 0 : (cx > mid ? 1 : 2);
+	}
 	if (sim->petGreet > sim->currentTick)
 	{
 		return (sim->currentTick + f * 7) % 30 < 4 ? 0x04 : 0;

@@ -916,6 +916,7 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 					p = k ? ((((p & 0xFF00FF) * k) >> 8) & 0xFF00FF) | ((((p & 0xFF00) * k) >> 8) & 0xFF00) | ((((p >> 24) * k) >> 8) << 24) : 0;
 				}
 		}
+		OverlayWindows::DrawExtras(argb.data(), w, h);
 	}
 	OverlayWindows::ClearUnderWindows(argb.data(), w, h, ww, wh);
 	// Drawing at the screen's rate only pays while something moves: particles, a window, the menus fading, or TPT in

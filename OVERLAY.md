@@ -387,6 +387,22 @@ tray menu: the tray menu stays native on purpose.
   none, a wiggle threw one burst of 38 that floated down in ~2 s and was gone by ~8 s.
 - [x] Released v0.7.3 (2026-11-01).
 
+## Fun to-do 3 (user 2026-11-01: "add that new batch", each with sliders for length, times, intensity)
+
+The "More fun" group under Fun, one table (moreFun[]) for the rows and their prefs; the far left is off.
+
+- [x] Pets nap: "Pets nap from" / "Pets wake at" (hours); in those hours, after 10 s with no input, pets stand still
+  and z's float up from them (drawn on the frame, OverlayWindows::DrawExtras). Tested: pet held still.
+- [x] Pets gather: "Pets gather after" (minutes away) -> pets walk to the middle of the play area; "Welcome back hop"
+  (0-10 s) sets how long they hop when you return. Tested: pet walked 20 -> 63 (middle 80) and waited.
+- [ ] Snowmen: deep enough snow gets a carrot nose and coal eyes (how many, how deep).
+- [ ] Window lift: a window dragged up fast tosses what sits on it (strength).
+- [ ] Paper planes: a pet now and then throws one that glides across (how often, speed).
+- [ ] Rainbow after rain (how long it stays, how bright).
+- [ ] Pets fetch: a thrown ball gets chased and kicked back toward the pointer (how keen, kick strength).
+- [ ] Taskbar volcano: heavy CPU makes a volcano by the clock smoke, then erupt (CPU level that wakes it, force).
+- [ ] Release v0.7.4.
+
 ## Ideas
 
 - **Menu inspiration: Kingsway** (2017), whose whole UI is a fake retro desktop. Every TPT panel would be its own

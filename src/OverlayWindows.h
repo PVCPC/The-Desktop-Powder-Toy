@@ -34,6 +34,8 @@ namespace OverlayWindows
 	// Clears the w x h frame where our app windows are, the frame being shown at ww x wh: the sim layer sits on top,
 	// so this keeps sand off them and lets clicks reach them.
 	void ClearUnderWindows(uint32_t *argb, int w, int h, int ww, int wh);
+	// Fun things drawn over the sim-sized frame (premultiplied): the napping pets' z's
+	void DrawExtras(uint32_t *argb, int w, int h);
 	// The playable area in cells, saved in prefs (Overlay.PlayArea.*).
 	void SetPlayArea(int x, int y, int w, int h);
 	// overlay:window: the window shows the sim's top-left w x h pixels; the play area follows (not saved over the

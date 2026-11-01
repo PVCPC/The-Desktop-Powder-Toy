@@ -108,9 +108,20 @@ namespace
 		float hot = 0;                           // busy apps' windows warm what sits on them, 0-3
 		float hourglass = 0;                     // minutes the taskbar hourglass runs (0: none)
 		int weatherKind = 0;                    // 0 by the season, 1 snow, 2 rain, 3 leaves
+		float napFrom = 0, napUntil = 7;         // pets nap from/until this hour (napFrom 0: never; 24 = midnight)
+		float gather = 0, welcome = 2;           // pets gather after this many minutes away (0: never); hop this many s back
 		bool bin = false, broom = false, closeToss = false, openShake = false, holidays = false, notify = false, dayNight = false, trail = false, confetti = false;
 		std::vector<HWND> flashed; // windows that flashed their taskbar button (a new message) since the last tick
 	} fun;
+	// A Fun slider row; unit: 0 %, 1 count, 2 minutes, 3 seconds (10 s steps), 4 clock hour, 5 px, 6 seconds
+	struct FunSlider { const wchar_t *name, *tip; float *v; float lo, hi; const char *pref; int unit; };
+	// The More fun group (Overlay.Fun.*): 0 / the far left is off where it can be
+	FunSlider moreFun[] = {
+		{ L"Pets nap from", L"From this hour the pets stop and doze (z's float up) until you move the mouse; they doze off again after 10 s", &fun.napFrom, 0, 24, "NapFrom", 4 },
+		{ L"Pets wake at", L"The hour the pets stop napping", &fun.napUntil, 1, 12, "NapUntil", 4 },
+		{ L"Pets gather after", L"Leave the PC alone this many minutes and the pets gather in the middle of the screen", &fun.gather, 0, 30, "Gather", 2 },
+		{ L"Welcome back hop", L"How long the pets hop for joy when you come back after a minute or more away", &fun.welcome, 0, 10, "Welcome", 6 },
+	};
 	HWND mainWindow = nullptr;    // TPT's own window
 	std::string recording;        // Overlay.Keys.<name> being recorded in the Overlay tab, or empty
 	std::function<void()> later; // run on the next tick, outside any window's message handling
@@ -2622,7 +2633,6 @@ namespace
 					GlobalPrefs::Ref().Set(ByteString("Overlay.Fun.") + f.pref, *f.v);
 				}, f.tip);
 			}
-			struct FunSlider { const wchar_t *name, *tip; float *v; float lo, hi; const char *pref; int unit; }; // unit: 0 %, 1 count, 2 minutes, 3 seconds
 			FunSlider funSliders[] = {
 				{ L"Pets", L"Stick figures that wander your windows and taskbar (how many). Fire and long falls can kill them; new ones drop in", &fun.pets, 0, 10, "Pets", 1 },
 				{ L"Weather", L"Snow, rain (with lightning) or leaves falling from the top of the screen (how heavy). It melts or fades after a while", &fun.weather, 0, 3, "Weather", 0 },
@@ -2633,19 +2643,25 @@ namespace
 				{ L"Hourglass", L"A glass hourglass on the taskbar whose sand runs out in this many minutes, counted from when you set it; then it starts again", &fun.hourglass, 0, 120, "Hourglass", 2 },
 			};
 			int sy = top + int(std::size(funToggles)) * S(26);
-			for (auto &f : funSliders)
-			{
-				Caption(x + S(12), sy, f.name);
+			auto funRow = [&](const FunSlider &f, int ry) {
+				Caption(x + S(12), ry, f.name);
 				wchar_t val[16];
 				if (f.unit == 1) swprintf(val, 16, *f.v >= 1 ? L"%d" : L"off", int(*f.v));
 				else if (f.unit == 2) swprintf(val, 16, *f.v >= 1 ? L"%d min" : L"off", int(*f.v));
 				else if (f.unit == 3) swprintf(val, 16, L"%d s", int(*f.v));
+				else if (f.unit == 4) swprintf(val, 16, *f.v >= 1 ? L"%d:00" : L"off", int(*f.v) % 24);
+				else if (f.unit == 5) swprintf(val, 16, L"%d px", int(*f.v));
+				else if (f.unit == 6) swprintf(val, 16, *f.v >= 1 ? L"%d s" : L"off", int(*f.v));
 				else swprintf(val, 16, *f.v > 0 ? L"%d%%" : L"off", int(std::lround(*f.v * 100)));
-				Caption(x + w - S(60), sy, val);
-				Slider(x + S(160), sy, w - S(232), *f.v, f.lo, f.hi, [f](float v) {
+				Caption(x + w - S(60), ry, val);
+				Slider(x + S(160), ry, w - S(232), *f.v, f.lo, f.hi, [f](float v) {
 					*f.v = f.unit == 3 ? std::round(v / 10) * 10 : f.unit ? std::round(v) : std::round(v * 20) / 20;
 					GlobalPrefs::Ref().Set(ByteString("Overlay.Fun.") + f.pref, *f.v);
 				}, f.tip);
+			};
+			for (auto &f : funSliders)
+			{
+				funRow(f, sy);
 				sy += S(26);
 			}
 			Caption(x + S(12), sy, L"Weather is");
@@ -2659,6 +2675,13 @@ namespace
 				}) + S(18);
 			}
 			y += S(26) * 17 + S(16);
+
+			top = Group(x, y, w, S(26) * int(std::size(moreFun)) + S(8), L"More fun");
+			for (int i = 0; i < int(std::size(moreFun)); i++)
+			{
+				funRow(moreFun[i], top + i * S(26));
+			}
+			y += S(26) * int(std::size(moreFun)) + S(16);
 
 			top = Group(x, y, w, S(76), L"Gravity");
 			const wchar_t *gravs[] = { L"Vertical", L"Off", L"Radial", L"Custom" };
@@ -4755,6 +4778,8 @@ void OverlayWindows::Init(void *mainHwnd)
 	for (auto [v, name] : { std::pair{ &fun.bin, "Bin" }, { &fun.broom, "Broom" }, { &fun.closeToss, "CloseToss" }, { &fun.openShake, "OpenShake" }, { &fun.holidays, "Holidays" }, { &fun.notify, "Notify" }, { &fun.dayNight, "DayNight" }, { &fun.trail, "Trail" }, { &fun.confetti, "Confetti" } })
 		*v = prefs.Get(ByteString("Overlay.Fun.") + name, *v);
 	fun.weatherKind = prefs.Get("Overlay.Fun.WeatherKind", 0);
+	for (auto &f : moreFun)
+		*f.v = prefs.Get(ByteString("Overlay.Fun.") + f.pref, *f.v);
 	// Default UI scale: the larger of Windows' display scaling (TPT is DPI aware) and screen height / 1080, in
 	// quarter steps. Overridable.
 	HDC screen = GetDC(nullptr);
@@ -5568,7 +5593,8 @@ static void TickFun(Simulation *sim)
 	{
 		DWORD idleMs = GetTickCount() - input.dwTime;
 		if (idleMs >= 60000) away = true;
-		else if (away && idleMs < 1000) away = false, sim->petGreet = sim->currentTick + 120;
+		else if (away && idleMs < 1000) away = false, sim->petGreet = sim->currentTick + int(fun.welcome * 60);
+		sim->petGather = fun.gather >= 1 && idleMs >= DWORD(fun.gather * 60000);
 	}
 	// Day and night, by the clock: fireflies from 19:00 to 05:00 (and darker leaves), a flock of birds now and then
 	// from 06:00 to 10:00
@@ -5580,6 +5606,13 @@ static void TickFun(Simulation *sim)
 		hour = local.tm_hour;
 	}
 	bool dusk = fun.dayNight && (hour >= 19 || hour < 5);
+	// Pets nap: in the nap hours, once the mouse and keys have been still 10 s
+	{
+		int from = int(fun.napFrom) % 24, until = int(fun.napUntil);
+		bool napHours = fun.napFrom >= 1 && (from < until ? hour >= from && hour < until : hour >= from || hour < until);
+		LASTINPUTINFO still{ sizeof(still) };
+		sim->petNap = napHours && GetLastInputInfo(&still) && GetTickCount() - still.dwTime >= 10000;
+	}
 	static std::vector<std::pair<int, int>> visitors; // particle, the tick it goes (fireflies: never, while it's dark)
 	std::erase_if(visitors, [&](auto &v) {
 		auto &p = sim->parts[v.first];
@@ -6155,6 +6188,37 @@ static void TickWindowWalls()
 	}
 }
 
+void OverlayWindows::DrawExtras(uint32_t *argb, int w, int h)
+{
+	auto *sim = GameController::Ref().GetModel()->GetSimulation();
+	auto put = [&](int x, int y, uint32_t rgb, float a) { // premultiplied "over"
+		if (x < 0 || y < 0 || x >= std::min(w, XRES) || y >= std::min(h, YRES) || a <= 0) return;
+		auto &p = argb[y * w + x];
+		auto mix = [&](int s) { return uint32_t(((rgb >> s) & 0xFF) * a + ((p >> s) & 0xFF) * (1 - a)) << s; };
+		p = mix(0) | mix(8) | mix(16) | (uint32_t(255 * a + (p >> 24) * (1 - a)) << 24);
+	};
+	// napping pets: three small z's drifting up from each one's head and fading
+	if (sim->petNap)
+	{
+		auto step = int(GetTickCount64() / 50);
+		for (int f = 0; f < MAX_FIGHTERS; f++)
+		{
+			auto &pet = sim->fighters[f];
+			if (!pet.spwn) continue;
+			int hx = int(pet.legs[4] + pet.legs[12]) / 2, hy = int(std::min(pet.legs[5], pet.legs[13])) - 16;
+			for (int k = 0; k < 3; k++)
+			{
+				int age = (step + k * 20 + f * 7) % 60; // 0-59
+				int zx = hx + 3 + age / 8, zy = hy - age / 3;
+				float a = 0.9f * (1 - age / 60.f);
+				for (int i = 0; i < 3; i++) // z: top row, bottom row, and the middle of the diagonal
+					put(zx + i, zy, 0xE0F0FF, a), put(zx + i, zy + 2, 0xE0F0FF, a);
+				put(zx + 1, zy + 1, 0xE0F0FF, a);
+			}
+		}
+	}
+}
+
 void OverlayWindows::ClearUnderWindows(uint32_t *argb, int w, int h, int ww, int wh)
 {
 	// ponytail: also clears where another app's window covers ours; walk the z-order if that ever matters.
@@ -6595,6 +6659,7 @@ void OverlayWindows::ApplySimMasks(uint32_t *, int, const uint8_t *) {}
 void OverlayWindows::FrameWalls(std::vector<uint8_t> &, uint8_t) {}
 std::vector<OverlayWindows::WindowShift> OverlayWindows::WindowShifts() { return {}; }
 void OverlayWindows::ClearUnderWindows(uint32_t *, int, int, int, int) {}
+void OverlayWindows::DrawExtras(uint32_t *, int, int) {}
 void OverlayWindows::SetPlayArea(int, int, int, int) {}
 void OverlayWindows::SetWindowedView(int, int) {}
 bool OverlayWindows::AreaMouse(int, int, int) { return false; }
