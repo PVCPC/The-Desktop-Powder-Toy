@@ -124,6 +124,17 @@ static void Step(Simulation *sim, int id, Ball &b)
 	b.vx += (sim->vx[ccy][ccx] - b.vx) * 0.04f;
 	b.vy += (sim->vy[ccy][ccx] - b.vy) * 0.04f;
 	b.vx *= 0.998f, b.vy *= 0.998f;
+	// a stick figure (a desktop pet) that walks into a slow ball kicks it away from itself
+	if (std::abs(b.vx) < 1)
+		for (int y = std::max(0, int(b.cy - b.radius) - 20); y <= std::min(YRES - 1, int(b.cy + b.radius)); y++)
+			for (int x = std::max(0, int(b.cx - b.radius) - 5); x <= std::min(XRES - 1, int(b.cx + b.radius) + 5); x++)
+				if (int r = sim->pmap[y][x]; r && (TYP(r) == PT_FIGH || TYP(r) == PT_STKM || TYP(r) == PT_STKM2))
+				{
+					b.vx = (b.cx >= x ? 1 : -1) * (2.5f + 2 * sim->rng.uniform01()) * std::min(1.f, 8 / b.radius);
+					b.vy = std::min(b.vy, -1.5f);
+					y = YRES;
+					break;
+				}
 	if (auto &g = sim->grab; g.on && g.type == PT_BALL && g.body == id) // held: chases the pointer, keeps that speed when let go
 	{
 		b.vx = std::clamp((g.x - b.cx) * 0.35f, -12.f, 12.f);

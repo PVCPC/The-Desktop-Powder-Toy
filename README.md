@@ -43,7 +43,7 @@ What's new
   app; new windows
   shake sand loose.
 - **New elements** (Special menu): BIRD flies in flocks; FISH swim in schools in any liquid; BALL makes one round
-  ball per brush click, the brush's size, that bounces, rolls and knocks other balls; JOIN holds what you paint in
+  ball per brush click, the brush's size, that bounces, rolls, knocks other balls and gets kicked about by pets; JOIN holds what you paint in
   one stroke together, so a line from a metal post hangs like a rope, a line between two posts sags like a bridge
   and a blob wobbles like jelly. With BALL or JOIN selected, press on a ball or jelly to pick it up, and let go
   while moving to throw it.

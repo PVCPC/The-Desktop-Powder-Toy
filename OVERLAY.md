@@ -349,7 +349,7 @@ tray menu: the tray menu stays native on purpose.
 - [x] Busy apps run hot (2026-10-31, Fun slider "Busy apps run hot"): what sits on a window warms toward 20 C + 100 C per
   core its app keeps busy (CPU sampled every 30 ticks); tested: snow on a busy window melted in 2 s, on an idle one stayed (covers "snow
   melts on hot windows").
-- [ ] Pets play with balls (kick them along).
+- [x] Pets play with balls (2026-10-31): a stick figure (FIGH, STKM) next to a slow ball kicks it away from itself (tested: 200 -> 281 px).
 - [ ] Balls sink into powders and liquids instead of resting on top.
 - [ ] Wind pushes leaves (sideways drift, swirls).
 - [ ] Jelly sinking through a 1 px JOIN rope.
