@@ -79,7 +79,7 @@ static bool Mine(Simulation *sim, int r, int id)
 static Ball &Gather(Simulation *sim, int i)
 {
 	static const int colours[] = { 0xE04A4A, 0x3A8FE0, 0xFFD21A, 0x5AC85A, 0xFF8C1A, 0xB45AE0 };
-	int tmp = sim->parts[i].tmp, id = tmp ? tmp : nextId++, colour = tmp ? sim->parts[i].ctype : colours[sim->rng.between(0, 5)];
+	int tmp = sim->parts[i].tmp, id = tmp ? tmp : nextId++, colour = tmp || sim->parts[i].ctype ? sim->parts[i].ctype : colours[sim->rng.between(0, 5)];
 	std::vector<std::pair<int, std::pair<int, int>>> found;
 	std::vector<std::pair<int, int>> todo{ { int(sim->parts[i].x + 0.5f), int(sim->parts[i].y + 0.5f) } };
 	sim->parts[i].tmp = -1; // marks visited until the end
@@ -108,6 +108,8 @@ static Ball &Gather(Simulation *sim, int i)
 		sx += at.first, sy += at.second;
 	}
 	auto &b = balls[id] = Ball{};
+	b.vx = sim->parts[i].tmp2 / 100.f; // a starting roll (tmp2 = px/tick x100: the holiday pumpkins), not kept
+	for (auto &[j, at] : found) sim->parts[j].tmp2 = 0;
 	b.cx = std::round(sx / found.size()), b.cy = std::round(sy / found.size());
 	b.radius = std::max(1.f, std::sqrt(found.size() / 3.14159f));
 	for (auto &[j, at] : found)
@@ -121,7 +123,8 @@ static void Step(Simulation *sim, int id, Ball &b)
 	// gravity, a little drag, and the air (wind, explosions) pushing it
 	int ccx = std::clamp(int(b.cx) / CELL, 0, XCELLS - 1), ccy = std::clamp(int(b.cy) / CELL, 0, YCELLS - 1);
 	b.vy += 0.12f;
-	b.vx += (sim->vx[ccy][ccx] - b.vx) * 0.04f;
+	float ax = sim->vx[ccy][ccx];
+	b.vx += (ax - b.vx) * (std::abs(ax) > std::abs(b.vx) ? 0.04f : 0.004f); // wind pushes it; still air hardly stops a roll
 	b.vy += (sim->vy[ccy][ccx] - b.vy) * 0.04f;
 	b.vx *= 0.998f, b.vy *= 0.998f;
 	// a stick figure (a desktop pet) that walks into a slow ball kicks it away from itself

@@ -40,7 +40,8 @@ What's new
 - **Fun switches** (Simulation window, all off by default): stick figure pets that wander your windows and
   taskbar; snow, rain with lightning, or leaves by the season, drifting in the wind; pets run from fire, come over to a slow mouse pointer, scatter from a fast one and hop to greet you when
   you come back; the Recycle Bin eats sand that lands on it; sand hops to the beat
-  of whatever your PC plays; the mouse pointer as a broom; closing a window throws its pile off; new windows; busy apps warm what sits on their windows, so snow melts on a working game but stays on an idle
+  of whatever your PC plays; the mouse pointer as a broom; closing a window throws its pile off; pumpkins on Halloween, jelly hearts on Valentine's Day and
+  fireworks after midnight on New Year's; new windows; busy apps warm what sits on their windows, so snow melts on a working game but stays on an idle
   app; new windows
   shake sand loose.
 - **New elements** (Special menu): BIRD flies in flocks; FISH swim in schools in any liquid; BALL makes one round

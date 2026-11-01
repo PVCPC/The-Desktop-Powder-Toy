@@ -107,7 +107,7 @@ namespace
 		float weatherIdle = 0, weatherLast = 90; // weather only after this many minutes idle (0: always); seconds a piece stays
 		float hot = 0;                           // busy apps' windows warm what sits on them, 0-3
 		int weatherKind = 0;                    // 0 by the season, 1 snow, 2 rain, 3 leaves
-		bool bin = false, broom = false, closeToss = false, openShake = false;
+		bool bin = false, broom = false, closeToss = false, openShake = false, holidays = false;
 	} fun;
 	HWND mainWindow = nullptr;    // TPT's own window
 	std::string recording;        // Overlay.Keys.<name> being recorded in the Overlay tab, or empty
@@ -2599,13 +2599,14 @@ namespace
 			}
 			y += S(26) * int(std::size(feel)) + S(94);
 
-			top = Group(x, y, w, S(26) * 11 + S(8), L"Fun");
+			top = Group(x, y, w, S(26) * 12 + S(8), L"Fun");
 			struct FunToggle { const wchar_t *name, *tip; bool *v; const char *pref; };
 			FunToggle funToggles[] = {
 				{ L"Recycle Bin eats sand", L"Sand that lands on the Recycle Bin icon disappears into it (with icons as walls)", &fun.bin, "Bin" },
 				{ L"Mouse is a broom", L"Where clicks go to the desktop, the mouse pointer is a solid paddle that shoves and scoops sand", &fun.broom, "Broom" },
 				{ L"Closing a window throws its sand", L"Close or minimise a window and the pile on it is tossed off", &fun.closeToss, "CloseToss" },
 				{ L"New windows shake sand loose", L"A window that opens bumps the sand above it into the air", &fun.openShake, "OpenShake" },
+				{ L"Holidays", L"Pumpkins roll about on Halloween, jelly hearts fall on Valentine's Day, fireworks go up after midnight on New Year's", &fun.holidays, "Holidays" },
 			};
 			for (int i = 0; i < int(std::size(funToggles)); i++)
 			{
@@ -2650,7 +2651,7 @@ namespace
 					GlobalPrefs::Ref().Set("Overlay.Fun.WeatherKind", i);
 				}) + S(18);
 			}
-			y += S(26) * 11 + S(16);
+			y += S(26) * 12 + S(16);
 
 			top = Group(x, y, w, S(76), L"Gravity");
 			const wchar_t *gravs[] = { L"Vertical", L"Off", L"Radial", L"Custom" };
@@ -4737,7 +4738,7 @@ void OverlayWindows::Init(void *mainHwnd)
 		*v = prefs.Get(ByteString("Overlay.Feel.") + name, *v);
 	for (auto [v, name] : { std::pair{ &fun.pets, "Pets" }, { &fun.weather, "Weather" }, { &fun.music, "Music" }, { &fun.weatherIdle, "WeatherIdle" }, { &fun.weatherLast, "WeatherLast" }, { &fun.hot, "Hot" } })
 		*v = prefs.Get(ByteString("Overlay.Fun.") + name, *v);
-	for (auto [v, name] : { std::pair{ &fun.bin, "Bin" }, { &fun.broom, "Broom" }, { &fun.closeToss, "CloseToss" }, { &fun.openShake, "OpenShake" } })
+	for (auto [v, name] : { std::pair{ &fun.bin, "Bin" }, { &fun.broom, "Broom" }, { &fun.closeToss, "CloseToss" }, { &fun.openShake, "OpenShake" }, { &fun.holidays, "Holidays" } })
 		*v = prefs.Get(ByteString("Overlay.Fun.") + name, *v);
 	fun.weatherKind = prefs.Get("Overlay.Fun.WeatherKind", 0);
 	// Default UI scale: the larger of Windows' display scaling (TPT is DPI aware) and screen height / 1080, in
@@ -5592,6 +5593,43 @@ static void TickFun(Simulation *sim)
 		fallen.pop_front();
 		int t = sim->parts[i].type;
 		if (t == type || (type == PT_SNOW && t == PT_WATR)) sim->kill_part(i);
+	}
+	// Holidays, by the date: pumpkins (balls) on Halloween, jelly hearts (JOIN) on Valentine's Day, fireworks in the
+	// first hour of New Year's Day
+	if (fun.holidays)
+	{
+		time_t now = time(nullptr);
+		tm local;
+		localtime_s(&local, &now);
+		int month = local.tm_mon + 1, day = local.tm_mday;
+		int cx = sim->rng.between(XRES / 10, XRES * 9 / 10);
+		if (month == 10 && day == 31 && sim->currentTick % 900 == 0)
+		{
+			float vx = (sim->rng.chance(1, 2) ? 1 : -1) * (1.5f + sim->rng.uniform01());
+			for (int y = -4; y <= 4; y++)
+				for (int x = -4; x <= 4; x++)
+					if (x * x + y * y <= 18)
+						if (int i = sim->create_part(-1, cx + x, 12 + y, PT_BALL); i >= 0) sim->parts[i].ctype = 0xFF7518, sim->parts[i].tmp2 = int(vx * 100);
+		}
+		if (month == 2 && day == 14 && sim->currentTick % 300 == 0)
+		{
+			static const char *heart[] = { ".XX.XX.", "XXXXXXX", "XXXXXXX", ".XXXXX.", "..XXX..", "...X..." };
+			for (int y = 0; y < 12; y++)
+				for (int x = 0; x < 14; x++)
+					if (heart[y / 2][x / 2] == 'X')
+						if (int i = sim->create_part(-1, cx + x, 10 + y, PT_JOIN); i >= 0) sim->parts[i].dcolour = 0xFFE0305A;
+		}
+		if (month == 1 && day == 1 && local.tm_hour == 0 && sim->rng.chance(1, 40))
+		{
+			int y = YRES - 30; // from the first free spot up from the bottom (over the taskbar)
+			while (y > YRES / 2 && (sim->pmap[y][cx] || sim->PixelWall(cx, y))) y--;
+			if (int i = sim->create_part(-1, cx, y, PT_FIRW); i >= 0)
+			{
+				auto &p = sim->parts[i];
+				p.tmp = 1, p.life = sim->rng.between(20, 29); // lit, as by fire (FIRW.cpp)
+				p.vy = -(p.life + 20) * 0.2f, p.vx = sim->rng.uniform01() - 0.5f;
+			}
+		}
 	}
 	// Wind: a gust that turns every few seconds; falling leaves flutter and drift with it, snow a little, rain not
 	static float gust = 0, gustTo = 0;

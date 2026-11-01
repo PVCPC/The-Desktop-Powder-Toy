@@ -359,7 +359,10 @@ tray menu: the tray menu stays native on purpose.
 - [x] Pets notice you (2026-10-31): a slow pointer near a pet draws it over and it stops under it, a fast one
   startles it away for 1.5 s; back after a minute away, pets hop to greet you. Tested with a scripted pointer
   (overlay:window): walked 40 -> 98 to a pointer at 90, ran 70 px from a fast one. Greeting untested (needs real idle).
-- [ ] Holidays by date: New Year fireworks at midnight, Halloween pumpkins rolling on the taskbar, February hearts.
+- [x] Holidays (2026-10-31, Fun toggle "Holidays", by the date): Halloween = an orange ball pumpkin every 15 s, thrown
+  in sideways so it rolls; 14 Feb = a red jelly (JOIN) heart every 5 s; 1 Jan 00:00-01:00 = lit FIRW fireworks from
+  near the bottom. Tested (other dates faked): pumpkins roll ~90 px after landing, hearts stay whole (108 px), fireworks
+  burst. Balls: still air now brakes a roll 10x less (wind still pushes as before).
 - [ ] Taskbar hourglass: sand runs out with the hour or a set timer.
 - [ ] Notifications drop something (a ball or leaf) onto that app's window.
 - [ ] Day and night: fireflies and darker leaves in the evening, birds in the morning, by the clock.
