@@ -9,7 +9,7 @@
 #include <map>
 
 OverlayFeel overlayFeel;
-std::vector<std::pair<int, int>> overlayImpacts;
+std::vector<OverlayImpact> overlayImpacts;
 
 // Chunks of broken window, drawn over the sim: jagged pieces that spin, arc, bounce off windows and fade where they land.
 struct Debris
@@ -33,33 +33,45 @@ static Simulation::WindowMarks &Marks(Simulation *sim, const OverlayWall &w)
 	{
 		for (auto &a : m.a)
 		{
+			if (a.empty()) continue; // a kind this window never had (made by Kind when first needed)
 			std::vector<uint8_t> b(size_t(ww) * wh, 0);
-			for (int j = 0; j < std::min(wh, m.h) && !a.empty(); j++)
+			for (int j = 0; j < std::min(wh, m.h); j++)
 				for (int i = 0; i < std::min(ww, m.w); i++) b[size_t(j) * ww + i] = a[size_t(j) * m.w + i];
 			a = std::move(b);
 		}
 		m.w = ww, m.h = wh;
 	}
-	m.x = w.x0, m.y = w.y0;
+	m.x = m.wx = w.x0, m.y = m.wy = w.y0;
 	return m;
+}
+
+// One kind of a window's marks, made when first needed (most windows never get most kinds: each is a byte a pixel)
+static std::vector<uint8_t> &Kind(Simulation::WindowMarks &m, int kind)
+{
+	auto &a = m.a[kind];
+	if (a.empty()) a.assign(size_t(m.w) * m.h, 0);
+	return a;
+}
+
+// Who shows at each sim pixel as of the last tick: 1 + the index of the frontmost window or icon there that isn't
+// broken through there (0: none), and the walls' ids by that index (front first)
+static std::vector<uint16_t> owner;
+static std::vector<uintptr_t> ownerIds;
+static uintptr_t OwnerAt(int x, int y)
+{
+	auto o = owner.size() ? owner[size_t(y) * XRES + x] : 0;
+	return o && o <= ownerIds.size() ? ownerIds[o - 1] : 0;
+}
+static int ZOf(uintptr_t id) // front first; -1: not a wall now
+{
+	auto it = std::find(ownerIds.begin(), ownerIds.end(), id);
+	return it == ownerIds.end() ? -1 : int(it - ownerIds.begin());
 }
 
 void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 {
 	auto old = std::move(sim->pixelWalls);
 	auto &mask = sim->pixelWalls;
-	mask.assign(size_t(XRES) * YRES, 0);
-	for (auto &w : walls)
-		for (int y = w.y0; y < w.y1; y++)
-		{
-			if (!w.solid)
-			{
-				std::fill(&mask[size_t(y) * XRES + w.x0], &mask[size_t(y) * XRES + w.x1], 1);
-				continue;
-			}
-			for (int x = w.x0; x < w.x1; x++)
-				if (w.solid(x, y)) mask[size_t(y) * XRES + x] = 1;
-		}
 	// Healing: holes grow back in from their edges (out of the window counts as whole), one ragged ring at a time,
 	// 20 rings in the minutes set; a spot with a particle in it waits
 	static int healTick = 0;
@@ -68,6 +80,12 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 		healTick = 0;
 		for (auto &[id, m] : sim->windowMarks)
 		{
+			if (m.any[Simulation::MarkCrack]) // cracks fade
+			{
+				bool any = false;
+				for (auto &p : Kind(m, Simulation::MarkCrack)) p -= std::min<uint8_t>(p, 64), any |= p != 0;
+				m.any[Simulation::MarkCrack] = any;
+			}
 			auto &h = m.a[Simulation::MarkHole];
 			if (!m.any[Simulation::MarkHole] || h.empty()) continue;
 			auto was = h;
@@ -88,31 +106,101 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 	}
 	// Destructible (off unless switched on): acid and blasts eat holes in windows and icons. Only the sim's walls and
 	// the overlay's paint change, and clearing the sim mends them: the real windows and icons are never touched.
+	// A hole in a front window shows the window behind it, and that one still stops sand: only a pixel no window covers
+	// whole is open. Walls come front first; drawn back to front, the front one wins except where it is holed.
 	using M = Simulation::WindowMark;
-	for (auto &w : walls)
-		if (auto it = sim->windowMarks.find(w.id); overlayFeel.destructible && w.id && it != sim->windowMarks.end() && it->second.any[M::MarkHole])
+	std::vector<const std::vector<uint8_t> *> holes(walls.size(), nullptr);
+	if (overlayFeel.destructible)
+		for (size_t k = 0; k < walls.size(); k++)
+			if (auto it = sim->windowMarks.find(walls[k].id); walls[k].id && it != sim->windowMarks.end() && it->second.any[M::MarkHole])
+				holes[k] = &Kind(Marks(sim, walls[k]), M::MarkHole);
+	auto solidAt = [&](size_t k, int x, int y) {
+		auto &w = walls[k];
+		return x >= w.x0 && x < w.x1 && y >= w.y0 && y < w.y1 && (!w.solid || w.solid(x, y)) &&
+		       !(holes[k] && (*holes[k])[size_t(y - w.y0) * (w.x1 - w.x0) + (x - w.x0)]);
+	};
+	owner.assign(size_t(XRES) * YRES, 0);
+	ownerIds.clear();
+	for (auto &w : walls) ownerIds.push_back(w.id);
+	for (size_t k = walls.size(); k-- > 0;)
+	{
+		auto &w = walls[k];
+		for (int y = w.y0; y < w.y1; y++)
 		{
-			auto &m = Marks(sim, w);
-			for (int y = w.y0; y < w.y1; y++)
+			auto *row = &owner[size_t(y) * XRES];
+			if (!w.solid && !holes[k])
+				std::fill(row + w.x0, row + w.x1, uint16_t(k + 1));
+			else
 				for (int x = w.x0; x < w.x1; x++)
-					if (m.a[M::MarkHole][size_t(y - w.y0) * m.w + (x - w.x0)]) mask[size_t(y) * XRES + x] = 0;
+					if (solidAt(k, x, y)) row[x] = uint16_t(k + 1);
 		}
+	}
+	mask.resize(owner.size());
+	for (size_t i = 0; i < owner.size(); i++) mask[i] = owner[i] != 0;
 	enum { Blasted = 100, Eaten = 200 }; // what made the hole: its rim shows it
-	auto eat = [&](int x, int y, uint8_t how) { // a wall pixel: the window or icon it belongs to loses it
-		for (auto &w : walls)
-			if (w.id && x >= w.x0 && x < w.x1 && y >= w.y0 && y < w.y1 && (!w.solid || w.solid(x, y)))
-			{
-				auto &m = Marks(sim, w);
-				m.a[M::MarkHole][size_t(y - w.y0) * m.w + (x - w.x0)] = how;
-				m.any[M::MarkHole] = true;
-				mask[size_t(y) * XRES + x] = 0;
-				return;
-			}
+	auto eat = [&](int x, int y, uint8_t how) { // a wall pixel: the window or icon showing there loses it, the one behind shows
+		size_t p = size_t(y) * XRES + x, k = owner[p] - 1;
+		if (!owner[p] || !walls[k].id) return;
+		auto &w = walls[k];
+		auto &m = Marks(sim, w);
+		auto &h = Kind(m, M::MarkHole);
+		h[size_t(y - w.y0) * m.w + (x - w.x0)] = how;
+		m.any[M::MarkHole] = true;
+		holes[k] = &h;
+		uint16_t next = 0;
+		for (size_t j = k + 1; j < walls.size() && !next; j++)
+			if (solidAt(j, x, y)) next = uint16_t(j + 1);
+		owner[p] = next, mask[p] = next != 0;
 	};
 	// what touches a window: acid eats it, DEST and singularities destroy it, a bomb blows a chunk out, and anything
 	// 2000 C or hotter (plasma, burning thermite, lightning) burns through it
+	auto crackCell = [&](int x, int y, bool write) -> uint8_t * { // the crack mark of the window showing at a wall pixel
+		size_t p = size_t(y) * XRES + x;
+		if (!owner[p] || !walls[owner[p] - 1].id) return nullptr;
+		auto &w = walls[owner[p] - 1];
+		auto it = sim->windowMarks.find(w.id);
+		if (!write && (it == sim->windowMarks.end() || !it->second.any[M::MarkCrack])) return nullptr;
+		auto &m = Marks(sim, w);
+		m.any[M::MarkCrack] |= write;
+		return &Kind(m, M::MarkCrack)[size_t(y - w.y0) * m.w + (x - w.x0)];
+	};
 	std::vector<uint32_t> grab;
 	auto chunk = [&](int cx, int cy, float r, uint8_t how, const float *toward = nullptr) {
+		if (overlayFeel.crack && !toward)
+		{
+			// cracks first: a hit on whole glass only crazes it (jagged lines out from the hit); one on the cracks breaks it
+			int R = int(r) + 3, seen = 0, cracked = 0;
+			for (int y = std::max(0, cy - R); y < std::min(YRES, cy + R + 1); y++)
+				for (int x = std::max(0, cx - R); x < std::min(XRES, cx + R + 1); x++)
+					if ((x - cx) * (x - cx) + (y - cy) * (y - cy) <= R * R && mask[size_t(y) * XRES + x])
+					{
+						seen++;
+						if (auto *c = crackCell(x, y, false); c && *c) cracked++;
+					}
+			// a blast's shock wave hits for several ticks: near where it just cracked the glass, it is still that one hit
+			static std::vector<std::tuple<int, int, int>> fresh;
+			std::erase_if(fresh, [&](auto &f) { return sim->currentTick - std::get<2>(f) > 45; });
+			bool same = std::any_of(fresh.begin(), fresh.end(), [&](auto &f) { return std::hypot(float(std::get<0>(f) - cx), float(std::get<1>(f) - cy)) <= r + 20; });
+			if (seen && same) return;
+			if (seen && cracked < 3)
+			{
+				fresh.push_back({ cx, cy, sim->currentTick });
+				int rays = sim->rng.between(5, 8);
+				for (int k = 0; k < rays; k++)
+				{
+					float a = k * 6.283f / rays + sim->rng.uniform01() * 0.6f, len = std::min(40.f, r * (3 + 3 * sim->rng.uniform01())), px = float(cx), py = float(cy);
+					for (int s = 0; s < int(len); s++)
+					{
+						a += (sim->rng.uniform01() - 0.5f) * 0.5f;
+						px += std::cos(a), py += std::sin(a);
+						int x = int(px), y = int(py);
+						if (x < 0 || y < 0 || x >= XRES || y >= YRES || !mask[size_t(y) * XRES + x]) break;
+						if (auto *c = crackCell(x, y, true)) *c = 255;
+					}
+				}
+				return;
+			}
+		}
 		int n = int(r) + 2, bx0 = std::max(0, cx - n), by0 = std::max(0, cy - n), bx1 = std::min(XRES, cx + n), by1 = std::min(YRES, cy + n);
 		std::vector<std::pair<int, int>> chips;
 		for (int y = by0; y < by1; y++)
@@ -189,6 +277,18 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 				}
 				continue;
 			}
+			if (t == PT_SNOW && p.dcolour == overlayHailColour) // hail: now and then a stone that hits a window chips it
+			{
+				int x = int(p.x + 0.5f), y = int(p.y + 0.5f);
+				if (p.vy > 1.5f && overlayFeel.blast > 0 && sim->rng.uniform01() < 0.03f * overlayFeel.blast)
+					for (int dy = 1; dy <= 3; dy++)
+						if (y + dy < YRES && x >= 0 && x < XRES && mask[size_t(y + dy) * XRES + x])
+						{
+							chunk(x, y + dy, 1, Blasted);
+							break;
+						}
+				continue;
+			}
 			bool acid = t == PT_ACID && overlayFeel.acidEat > 0, hot = p.temp >= 2273.15f && overlayFeel.blast > 0;
 			bool destroys = (t == PT_DEST || t == PT_SING || t == PT_BOMB) && overlayFeel.blast > 0;
 			if (!acid && !hot && !destroys) continue;
@@ -219,12 +319,27 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 			}
 		}
 	// shooting stars that came down: a burst of sparks and a puff, and a chunk out of a window they hit
-	for (auto [ix, iy] : overlayImpacts)
+	for (auto [ix, iy, size] : overlayImpacts)
 	{
-		if (overlayFeel.destructible && overlayFeel.blast > 0) chunk(ix, iy, 4 * overlayFeel.blast, Blasted);
-		sim->pv[iy / CELL][ix / CELL] += 6;
-		for (int k = 0; k < 14; k++)
-			if (int s = sim->create_part(-1, std::clamp(ix + sim->rng.between(-3, 3), 0, XRES - 1), std::clamp(iy - sim->rng.between(1, 5), 0, YRES - 1), PT_EMBR); s >= 0)
+		if (overlayFeel.destructible && overlayFeel.blast > 0) chunk(ix, iy, 4 * size * overlayFeel.blast, Blasted);
+		sim->pv[iy / CELL][ix / CELL] += 6 * size;
+		if (size > 1) // a big meteor: a crater, the rim thrown up and out
+		{
+			auto &elements = SimulationData::CRef().elements;
+			int R = int(5 * size);
+			for (int y = std::max(0, iy - R); y < std::min(YRES, iy + R); y++)
+				for (int x = std::max(0, ix - R); x < std::min(XRES, ix + R); x++)
+					if (int r = sim->pmap[y][x])
+					{
+						float dx = float(x - ix), dy = float(y - iy), d = std::hypot(dx, dy);
+						if (d > R) continue;
+						if (d < R / 2.f) sim->kill_part(ID(r));
+						else if (!(elements[TYP(r)].Properties & TYPE_SOLID))
+							sim->parts[ID(r)].vx = dx / std::max(1.f, d) * 5, sim->parts[ID(r)].vy = -4 - 4 * sim->rng.uniform01();
+					}
+		}
+		for (int k = 0; k < int(14 * size); k++)
+			if (int s = sim->create_part(-1, std::clamp(ix + sim->rng.between(-3, 3), 0, XRES - 1), std::clamp(iy - sim->rng.between(1, 5), 0, YRES - 1), k % 3 == 2 && size > 1 ? PT_SMKE : PT_EMBR); s >= 0)
 				sim->parts[s].vx = (sim->rng.uniform01() - 0.5f) * 6, sim->parts[s].vy = -1 - 3 * sim->rng.uniform01();
 	}
 	overlayImpacts.clear();
@@ -415,7 +530,7 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 	{
 		if (w.solid || !w.id) continue;
 		int ww = w.x1 - w.x0, wh = w.y1 - w.y0;
-		if (auto it = sim->windowMarks.find(w.id); it != sim->windowMarks.end()) it->second.x = w.x0, it->second.y = w.y0;
+		if (auto it = sim->windowMarks.find(w.id); it != sim->windowMarks.end()) it->second.x = it->second.wx = w.x0, it->second.y = it->second.wy = w.y0;
 		auto kindAt = [&](int x, int y) {
 			if (x < 0 || y < 0 || x >= XRES || y >= YRES) return -1;
 			int r = sim->pmap[y][x];
@@ -431,7 +546,7 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 		};
 		auto mark = [&](int kind, int x, int y) { // a window pixel next to what touched it
 			auto &m = Marks(sim, w);
-			auto &a = m.a[kind];
+			auto &a = Kind(m, kind);
 			m.any[kind] = true;
 			auto add = [&](int i, int j, float v, int cap) {
 				int sx = x - w.x0 + i, sy = y - w.y0 + j;
@@ -489,18 +604,18 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 void OverlayDrawMarks(const Simulation *sim, uint32_t *argb, int stride, const uint8_t *occupied, uint8_t wallBit, const uint32_t *backdrop)
 {
 	// per kind: colour (premultiplied below) and how opaque at full strength, of 256
-	constexpr uint32_t colour[] = { 0x8AA8C8, 0xE4F0FF, 0x7A9A2A, 0x221A12 };
-	constexpr int opacity[] = { 110, 170, 190, 224 };
+	constexpr uint32_t colour[] = { 0x8AA8C8, 0xE4F0FF, 0x7A9A2A, 0x221A12, 0x16191C };
+	constexpr int opacity[] = { 110, 170, 190, 224, 235 };
 	for (auto &[id, m] : sim->windowMarks)
 	{
 		if (std::none_of(m.any.begin(), m.any.end(), [](bool b) { return b; })) continue;
 		for (int j = 0; j < m.h; j++)
 			for (int i = 0; i < m.w; i++)
 			{
-				int x = m.x + i, y = m.y + j;
-				if (x < 0 || y < 0 || x >= XRES || y >= YRES) continue;
+				int x = m.x + i, y = m.y + j, wx = m.wx + i, wy = m.wy + j; // drawn where it is, the walls where they were
+				if (x < 0 || y < 0 || x >= XRES || y >= YRES || wx < 0 || wy < 0 || wx >= XRES || wy >= YRES) continue;
 				if (m.any[Simulation::MarkHole] && m.a[Simulation::MarkHole][size_t(j) * m.w + i]) continue; // below
-				if (!(occupied[size_t(y) * XRES + x] & wallBit)) continue;
+				if (!(occupied[size_t(wy) * XRES + wx] & wallBit) || OwnerAt(wx, wy) != id) continue; // hidden behind another window
 				uint32_t r = 0, g = 0, b = 0, a = 0; // premultiplied, painted over each other in order
 				for (int kind = 0; kind < Simulation::MarkHole; kind++)
 				{
@@ -513,30 +628,41 @@ void OverlayDrawMarks(const Simulation *sim, uint32_t *argb, int stride, const u
 					b = (c & 0xFF) * sa / 255 + b * (255 - sa) / 255;
 					a = sa + a * (255 - sa) / 255;
 				}
-				if (a) argb[size_t(y) * stride + x] = a << 24 | r << 16 | g << 8 | b;
+				if (a) // over what is there (premultiplied)
+				{
+					auto &p = argb[size_t(y) * stride + x];
+					auto over = [&](uint32_t s, int sh) { return std::min(255u, s + ((p >> sh) & 0xFF) * (255 - a) / 255) << sh; };
+					p = over(a, 24) | over(r, 16) | over(g, 8) | over(b, 0);
+				}
 			}
 		if (!m.any[Simulation::MarkHole] || !overlayFeel.destructible) continue;
 		// Holes: what is behind the window shows through (what falls through them is drawn over it), ringed by what
 		// made them: acid a corroded yellow-green, a blast charred black with a glowing edge.
 		auto &hole = m.a[Simulation::MarkHole];
+		int z = ZOf(id);
 		for (int j = 0; j < m.h; j++)
 			for (int i = 0; i < m.w; i++)
 			{
 				uint8_t how = hole[size_t(j) * m.w + i];
 				int x = m.x + i, y = m.y + j;
 				if (!how || x < 0 || y < 0 || x >= XRES || y >= YRES) continue;
+				int wx = std::clamp(m.wx + i, 0, XRES - 1), wy = std::clamp(m.wy + j, 0, YRES - 1);
+				if (int oz = owner.size() ? int(owner[size_t(wy) * XRES + wx]) - 1 : -1; z < 0 || (oz >= 0 && oz < z)) continue; // a window in front covers this hole
 				auto &p = argb[size_t(y) * stride + x];
-				if (uint32_t k = uint32_t((1 - std::clamp(overlayFeel.holeOpacity, 0.f, 1.f)) * 255); k && !(p >> 24)) // premultiplied
+				// what is behind, under whatever is drawn here (particles, a glow, the marks of the window behind)
+				if (uint32_t k = uint32_t((1 - std::clamp(overlayFeel.holeOpacity, 0.f, 1.f)) * 255), a = p >> 24; k && a < 255)
 				{
-					uint32_t c = backdrop ? backdrop[size_t(y) * XRES + x] : 0x1A1A1A;
-					p = k << 24 | ((c >> 16 & 0xFF) * k / 255) << 16 | ((c >> 8 & 0xFF) * k / 255) << 8 | (c & 0xFF) * k / 255;
+					uint32_t c = backdrop ? backdrop[size_t(y) * XRES + x] : 0x1A1A1A, f = k * (255 - a) / 255;
+					auto under = [&](int sh) { return std::min(255u, ((p >> sh) & 0xFF) + ((c >> sh) & 0xFF) * f / 255) << sh; };
+					p = (a + f) << 24 | under(16) | under(8) | under(0);
 				}
 				for (int dy = -2; dy <= 2; dy++)
 					for (int dx = -2; dx <= 2; dx++)
 					{
 						int u = i + dx, v = j + dy, d = std::max(std::abs(dx), std::abs(dy));
 						if (!d || u < 0 || v < 0 || u >= m.w || v >= m.h || hole[size_t(v) * m.w + u] || x + dx < 0 || y + dy < 0 || x + dx >= XRES || y + dy >= YRES) continue;
-						if (!(occupied[size_t(y + dy) * XRES + x + dx] & wallBit)) continue;
+						int ux = std::clamp(wx + dx, 0, XRES - 1), uy = std::clamp(wy + dy, 0, YRES - 1);
+						if (!(occupied[size_t(uy) * XRES + ux] & wallBit) || OwnerAt(ux, uy) != id) continue;
 						uint32_t rim = how >= 200 ? (d == 1 ? 0xF0C8E040 : 0xA0708A20)  // acid
 						                          : (d == 1 ? 0xF0E0661A : 0xE0140A06); // blast: ember, then char
 						auto &q = argb[size_t(y + dy) * stride + x + dx];

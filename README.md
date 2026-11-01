@@ -37,18 +37,20 @@ What's new
   out that fly off in the window's colour, DEST and black holes chew through, and you see what's really behind
   through the holes. Explosions can even shake your real windows (its own slider, off by default). Only the overlay
   is broken: clearing the sim mends everything, and the **Windows heal** slider (More fun) lets holes grow back by themselves.
+  **Windows crack first** makes glass crack on the first hit and break on the next. Stacked windows break one at a
+  time: a hole in the front window shows the window behind, which still stops sand until it breaks too.
 - **Fun switches** (Simulation window, all off by default): stick figure pets that wander your windows and
-  taskbar; snow, rain with lightning, or leaves by the season, drifting in the wind; pets run from fire, come over to a slow mouse pointer, scatter from a fast one and hop to greet you when
+  taskbar; snow, rain with lightning, leaves by the season, hail or low fog, drifting in the wind; pets run from fire, come over to a slow mouse pointer, scatter from a fast one and hop to greet you when
   you come back; the Recycle Bin eats sand that lands on it; sand hops to the beat
   of whatever your PC plays; the mouse pointer as a broom; closing a window throws its pile off; pumpkins on Halloween, jelly hearts on Valentine's Day and
   fireworks after midnight on New Year's; an hourglass on the taskbar that runs out in the minutes you set; a ball dropped on any app that flashes for
   your attention; fireflies in the evening (the pets chase them) and birds in the morning; a sparkle trail behind the
   mouse pointer; confetti when you wiggle it; busy apps warm what sits on their windows, so snow melts on a working game but stays on an idle
-  app; new windows shake sand loose; pets build sandcastles from big sand piles; morning birds land and rest (for as long as you set); shooting stars that come down and knock chunks out of windows. The **More fun** group has a slider for each of these (far left is off): pets
+  app; new windows shake sand loose; pets build sandcastles from big sand piles; morning birds land and rest (for as long as you set); shooting stars that come down and knock chunks out of windows; meteor showers on their real nights (Perseids, Geminids and the rest); pets that drop through holes in windows and stop to look out of them. The **More fun** group has a slider for each of these (far left is off): pets
   nap in the hours you pick (little z's float up), gather in the middle when you're away and hop for as long as you
   like when you come back; snowmen on deep snow (how many, how deep); dragging a window up fast throws what sits on
   it (how hard); paper planes (how often, how fast); a faint, see-through rainbow after the rain, sometimes a double one (how long, how bright, how often double); pets fetch a
-  ball and kick it back toward the mouse pointer (how far they'll run, how hard they kick); shooting stars at night
+  ball and kick it back toward the mouse pointer (how far they'll run, how hard they kick); shooting stars at night, big meteors that leave a crater
   (how many an hour); rain that lies as puddles (how long); a fast mouse swipe that blows sand and smoke (how hard);
   and a volcano by the
   clock that smokes when your PC is busy and erupts lava when it's busier (the CPU level that wakes it, how high

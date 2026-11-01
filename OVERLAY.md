@@ -442,6 +442,31 @@ On/off things are Fun toggles; things with an amount are More fun sliders.
 - [x] Birds rest for (slider 2-60 s, pref BirdRest -> sim->birdRest): rest is 0.5x-1.5x of it. Tested: 2 s -> at
   most 177 ticks, 30 s -> up to 1979.
 - [x] Release v0.7.7 (2026-11-01).
+- [x] Windows crack first (toggle, pref Crack; MarkCrack drawn under holes): with Destructible on, a hit on whole glass
+  draws 5-8 jagged cracks; a hit on 3+ crack pixels (cracks from the last 45 ticks count as the same blast) breaks
+  it. Cracks fade with healing. Tested on a fake wall: hit 1 -> 84 crack px, 0 hole; hit 2 -> 431 hole px.
+- [x] Pets explore holes (toggle, pref PetHoles -> sim->petHoles, Simulation::HoleAt): pets drop through holes 1 in 3
+  times at a ledge, and stop 2-5 s to look out of one they stand in. Tested: in the hole 6/16 checks vs 2/16 off.
+- [x] Meteor showers (toggle, pref Showers): on the peak nights (+-1 day) of the Quadrantids, Lyrids, Eta Aquariids,
+  Perseids, Orionids, Leonids and Geminids, shooting stars come 10x as often (at least 60 an hour).
+- [x] Big meteors (slider 0-10 an hour, pref Meteors; 3x on shower nights): a thick glowing streak that crashes:
+  OverlayImpact size 3, a crater (R 15: middle killed, rim thrown out), sparks and smoke, a big chunk with
+  Destructible. Tested: crater took 480 -> 393 sand.
+- [x] Weather kinds Hail (SNOW at -20 C, falling fast, chips windows with Destructible) and Fog (FOG low down, a
+  quarter as many). Tested: hail 1959 pellets in 5 s; fog stays in the bottom third (y 446-715 of 720).
+- [x] Hole bugs (user 11-01): stacked windows now keep their own holes (OverlayApplyWalls owner pass: a pixel is wall
+  if any covering window is whole there; a hit holes the window that shows there, then the one behind); rims and
+  marks only where their window shows; the backdrop goes under see-through particles too (gas, glow) instead of
+  letting the real window show; windows behind skip their own holes and their invisible resize border (was a black
+  outline); holes follow a dragged window every frame drawn (FollowMarks), not just every tick. Tested on two fake
+  walls: one hit opened 469 px with nothing behind, 49 with a window behind.
+- [x] Memory (user 11-01 "10 GB?"): measured 50 s of landing stars and big meteors on real windows: ours flat at
+  ~700 MB, no other process grew. Shots now reuse one bitmap, shoot each window once, twice a second, and let it
+  go when no hole is left; mark layers are made only when a window gets that kind.
+- [ ] Speed: the overlay is CPU-bound at ~20-25 fps on a 5120x1440 screen (sim 2560x720), so holes follow a drag at
+  that rate. Measured per frame: present ~40 ms, of it OverlayApplyWalls ~18 ms (owner pass ~4, the pressure-chunk
+  scan + impacts the rest). Next: profile properly, then cut whole-screen passes per frame.
+- [x] Release v0.7.8 (2026-11-01).
 
 ## Ideas
 

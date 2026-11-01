@@ -146,6 +146,7 @@ public:
 	int petGreet = 0; // pets hop until this tick: the user is back
 	bool petNap = false;    // pets stand still asleep (the overlay draws their z's)
 	bool petGather = false; // the user is away: pets make for the middle of the screen
+	bool petHoles = false;  // pets drop through holes in windows and stop to look out of them
 	int birdRest = 600; // ticks a landed bird rests, about
 	float petFetchRange = 0, petKick = 1; // pets run after balls this far (0: no fetch) and kick them back this hard
 	struct { bool on = false; int type = 0, body = 0; float x = 0, y = 0; } grab; // a BALL or JOIN body held by the mouse
@@ -198,13 +199,20 @@ public:
 	// pixel by pixel. Nothing moves or is drawn into it; unlike walls it never deletes what's already there.
 	std::vector<uint8_t> pixelWalls;
 	// Marks particles left on those windows, by window (OverlayWall::id): per kind, 0-255 per window pixel from its
-	// top-left (x, y: where that is now, in sim pixels). Cleared with the sim.
-	enum WindowMark { MarkWater, MarkFrost, MarkAcid, MarkSoot, MarkHole, MarkKinds }; // drawn in this order (holes: 255 = eaten away)
-	struct WindowMarks { int x = 0, y = 0, w = 0, h = 0; std::array<std::vector<uint8_t>, MarkKinds> a; std::array<bool, MarkKinds> any{}; };
+	// top-left (x, y: where that is now, in sim pixels, followed every frame; wx, wy: where the sim's walls had it on
+	// the last tick). Cleared with the sim.
+	enum WindowMark { MarkWater, MarkFrost, MarkAcid, MarkSoot, MarkCrack, MarkHole, MarkKinds }; // drawn in this order (holes: 255 = eaten away)
+	struct WindowMarks { int x = 0, y = 0, w = 0, h = 0, wx = 0, wy = 0; std::array<std::vector<uint8_t>, MarkKinds> a; std::array<bool, MarkKinds> any{}; };
 	std::map<uintptr_t, WindowMarks> windowMarks;
 	bool PixelWall(int x, int y) const
 	{
 		return !pixelWalls.empty() && pixelWalls[size_t(y) * XRES + x];
+	}
+	bool HoleAt(int x, int y) const // a hole broken in a window or icon there
+	{
+		for (auto &[id, m] : windowMarks)
+			if (m.any[MarkHole] && x >= m.x && y >= m.y && x < m.x + m.w && y < m.y + m.h && m.a[MarkHole][size_t(y - m.y) * m.w + (x - m.x)]) return true;
+		return false;
 	}
 	int gravityMode = GRAV_VERTICAL;
 	float customGravityX = 0;

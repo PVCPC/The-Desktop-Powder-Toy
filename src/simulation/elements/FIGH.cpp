@@ -134,6 +134,13 @@ static int PetComm(Simulation *sim, playerst *figh, int f)
 	{
 		return 0;
 	}
+	// standing in a hole broken in a window: stop and look out of it a few seconds (then not again for a while)
+	static int peek[MAX_FIGHTERS], peekCool[MAX_FIGHTERS];
+	if (sim->petHoles && flee[f] <= 0)
+	{
+		if (--peekCool[f] <= 0 && sim->HoleAt(cx, cy)) peek[f] = sim->rng.between(120, 300), peekCool[f] = 900;
+		if (peek[f] > 0 && peek[f]--) return 0;
+	}
 	if (sim->petGather && flee[f] <= 0)
 	{
 		left[f] = 30;
@@ -151,7 +158,7 @@ static int PetComm(Simulation *sim, playerst *figh, int f)
 	}
 	bool goLeft = dir[f] == 1;
 	int fx = goLeft ? int(figh->legs[4]) - 6 : int(figh->legs[12]) + 6, fy = int(goLeft ? figh->legs[5] : figh->legs[13]);
-	if (sim->eval_move(PT_FIGH, fx, fy + 6, nullptr) && sim->eval_move(PT_FIGH, fx, fy + 14, nullptr) && flee[f] <= 0 && !sim->rng.chance(1, 30))
+	if (sim->eval_move(PT_FIGH, fx, fy + 6, nullptr) && sim->eval_move(PT_FIGH, fx, fy + 14, nullptr) && flee[f] <= 0 && !sim->rng.chance(1, 30) && !(sim->petHoles && sim->HoleAt(fx, fy + 6) && sim->rng.chance(1, 3)))
 	{
 		dir[f] = goLeft ? 2 : 1;
 		return 0;

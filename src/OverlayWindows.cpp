@@ -107,7 +107,7 @@ namespace
 		float weatherIdle = 0, weatherLast = 90; // weather only after this many minutes idle (0: always); seconds a piece stays
 		float hot = 0;                           // busy apps' windows warm what sits on them, 0-3
 		float hourglass = 0;                     // minutes the taskbar hourglass runs (0: none)
-		int weatherKind = 0;                    // 0 by the season, 1 snow, 2 rain, 3 leaves
+		int weatherKind = 0;                    // 0 by the season, 1 snow, 2 rain, 3 leaves, 4 hail, 5 fog
 		float napFrom = 0, napUntil = 7;         // pets nap from/until this hour (napFrom 0: never; 24 = midnight)
 		float gather = 0, welcome = 2;           // pets gather after this many minutes away (0: never); hop this many s back
 		float snowmen = 0, snowDepth = 20;       // at most this many snowmen, on snow at least this deep (px)
@@ -122,6 +122,8 @@ namespace
 		float stars = 0, puddles = 0, wind = 0;  // shooting stars an hour at night; s rain lies as puddles; mouse wind
 		bool starsLand = false;                  // now and then a shooting star comes down and hits something
 		float birdRest = 10;                     // s a landed bird rests (about)
+		bool petHoles = false, showers = false;  // pets use holes in windows; meteor showers on their nights
+		float meteors = 0;                       // big meteors an hour at night
 		std::vector<HWND> flashed; // windows that flashed their taskbar button (a new message) since the last tick
 	} fun;
 	// A Fun slider row; unit: 0 %, 1 count, 2 minutes, 3 seconds (10 s steps), 4 clock hour, 5 px, 6 seconds
@@ -149,6 +151,7 @@ namespace
 		{ L"Mouse wind", L"Swipe the mouse pointer fast across the desktop and it blows the sand, snow and smoke near it (how hard)", &fun.wind, 0, 3, "Wind", 0 },
 		{ L"Birds rest for", L"About how long a bird that landed (Birds land and rest) sits before it flies on", &fun.birdRest, 2, 60, "BirdRest", 6 },
 		{ L"Windows heal", L"Holes and chunks broken out of windows and icons (Destructible) grow back in from their edges, a big hole in about this long", &overlayFeel.heal, 0, 10, "Heal", 2 },
+		{ L"Big meteors", L"At night, about this many big glowing meteors an hour crash down: a crater in the sand, and with Destructible on a big chunk out of a window (3 times as many on meteor shower nights)", &fun.meteors, 0, 10, "Meteors", 7 },
 	};
 	// paper planes in flight or landed (sim pixels; landed: ticks since), and when the rainbow goes (GetTickCount64)
 	struct PaperPlane { float x, y, vx, vy; int landed; };
@@ -2646,7 +2649,7 @@ namespace
 			}
 			y += S(26) * int(std::size(feel)) + S(94);
 
-			top = Group(x, y, w, S(26) * 20 + S(8), L"Fun");
+			top = Group(x, y, w, S(26) * 24 + S(8), L"Fun");
 			struct FunToggle { const wchar_t *name, *tip; bool *v; const char *pref; };
 			FunToggle funToggles[] = {
 				{ L"Recycle Bin eats sand", L"Sand that lands on the Recycle Bin icon disappears into it (with icons as walls)", &fun.bin, "Bin" },
@@ -2661,6 +2664,9 @@ namespace
 				{ L"Pets build sandcastles", L"A pet next to a big enough sand pile now and then builds a little castle from it; it crumbles back into sand after 5 minutes", &fun.castles, "Castles" },
 				{ L"Birds land and rest", L"The morning birds (Day and night) now and then land on a window, icon or pile and rest a few seconds", &fun.perch, "Perch" },
 				{ L"Shooting stars land", L"Now and then a shooting star comes all the way down and hits a window or a pile with a burst of sparks; with Destructible on it knocks a chunk out of the window", &fun.starsLand, "StarsLand" },
+				{ L"Windows crack first", L"With Destructible on, a hit on whole glass only cracks it; another hit on the cracks breaks it out. Cracks fade as windows heal", &overlayFeel.crack, "Crack" },
+				{ L"Pets explore holes", L"Pets drop through holes broken in windows instead of turning back, and stop to look out of a hole they stand in", &fun.petHoles, "PetHoles" },
+				{ L"Meteor showers", L"On the real shower nights (Quadrantids, Lyrids, Eta Aquariids, Perseids, Orionids, Leonids, Geminids) shooting stars come ten times as often, at least 60 an hour", &fun.showers, "Showers" },
 			};
 			for (int i = 0; i < int(std::size(funToggles)); i++)
 			{
@@ -2703,16 +2709,17 @@ namespace
 				sy += S(26);
 			}
 			Caption(x + S(12), sy, L"Weather is");
-			const wchar_t *kinds[] = { L"By season", L"Snow", L"Rain", L"Leaves" };
+			const wchar_t *kinds[] = { L"By season", L"Snow", L"Rain", L"Leaves", L"Hail", L"Fog" };
 			int kx = x + S(160);
-			for (int i = 0; i < 4; i++)
+			for (int i = 0; i < 6; i++)
 			{
+				if (i == 4) kx = x + S(160), sy += S(26); // second row
 				kx += Toggle(kx, sy, kinds[i], fun.weatherKind == i, true, [i] {
 					fun.weatherKind = i;
 					GlobalPrefs::Ref().Set("Overlay.Fun.WeatherKind", i);
 				}) + S(18);
 			}
-			y += S(26) * 20 + S(16);
+			y += S(26) * 24 + S(16);
 
 			top = Group(x, y, w, S(26) * int(std::size(moreFun)) + S(8), L"More fun");
 			for (int i = 0; i < int(std::size(moreFun)); i++)
@@ -4813,7 +4820,7 @@ void OverlayWindows::Init(void *mainHwnd)
 		*v = prefs.Get(ByteString("Overlay.Feel.") + name, *v);
 	for (auto [v, name] : { std::pair{ &fun.pets, "Pets" }, { &fun.weather, "Weather" }, { &fun.music, "Music" }, { &fun.weatherIdle, "WeatherIdle" }, { &fun.weatherLast, "WeatherLast" }, { &fun.hot, "Hot" }, { &fun.hourglass, "Hourglass" } })
 		*v = prefs.Get(ByteString("Overlay.Fun.") + name, *v);
-	for (auto [v, name] : { std::pair{ &fun.bin, "Bin" }, { &fun.broom, "Broom" }, { &fun.closeToss, "CloseToss" }, { &fun.openShake, "OpenShake" }, { &fun.holidays, "Holidays" }, { &fun.notify, "Notify" }, { &fun.dayNight, "DayNight" }, { &fun.trail, "Trail" }, { &fun.confetti, "Confetti" }, { &fun.castles, "Castles" }, { &fun.perch, "Perch" }, { &fun.starsLand, "StarsLand" } })
+	for (auto [v, name] : { std::pair{ &fun.bin, "Bin" }, { &fun.broom, "Broom" }, { &fun.closeToss, "CloseToss" }, { &fun.openShake, "OpenShake" }, { &fun.holidays, "Holidays" }, { &fun.notify, "Notify" }, { &fun.dayNight, "DayNight" }, { &fun.trail, "Trail" }, { &fun.confetti, "Confetti" }, { &fun.castles, "Castles" }, { &fun.perch, "Perch" }, { &fun.starsLand, "StarsLand" }, { &overlayFeel.crack, "Crack" }, { &fun.petHoles, "PetHoles" }, { &fun.showers, "Showers" } })
 		*v = prefs.Get(ByteString("Overlay.Fun.") + name, *v);
 	fun.weatherKind = prefs.Get("Overlay.Fun.WeatherKind", 0);
 	for (auto &f : moreFun)
@@ -4834,6 +4841,7 @@ void OverlayWindows::Init(void *mainHwnd)
 
 static void TickRecording();
 static void TickWindowWalls();
+static void FollowMarks(Simulation *sim);
 
 void OverlayWindows::Tick()
 {
@@ -5149,15 +5157,25 @@ namespace
 
 static void ShotWorker()
 {
+	HBITMAP bmp = nullptr;
+	void *bits = nullptr;
+	int bmpW = 0, bmpH = 0;
 	for (;;)
 	{
-		std::this_thread::sleep_for(std::chrono::milliseconds(250));
+		std::this_thread::sleep_for(std::chrono::milliseconds(500));
 		std::vector<HWND> want;
 		RECT sr;
 		{
 			std::lock_guard lock(shotLock);
 			want = shotWanted;
 			sr = shotScreen;
+		}
+		std::sort(want.begin(), want.end());
+		want.erase(std::unique(want.begin(), want.end()), want.end()); // under several holed windows: shot once
+		if (want.empty()) // nothing holed: let the big bitmap go
+		{
+			if (bmp) DeleteObject(bmp), bmp = nullptr, bmpW = bmpH = 0;
+			continue;
 		}
 		int sw = sr.right - sr.left, sh = sr.bottom - sr.top;
 		std::map<HWND, Shot> got;
@@ -5167,10 +5185,15 @@ static void ShotWorker()
 			if (sw <= 0 || sh <= 0 || !GetWindowRect(hwnd, &r) || r.right <= r.left || r.bottom <= r.top) continue;
 			int ww = r.right - r.left, wh = r.bottom - r.top;
 			HDC screen = GetDC(nullptr), dc = CreateCompatibleDC(screen);
-			BITMAPINFO bi{};
-			bi.bmiHeader = { sizeof(BITMAPINFOHEADER), ww, -wh, 1, 32, BI_RGB };
-			void *bits = nullptr;
-			HBITMAP bmp = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+			if (!bmp || bmpW < ww || bmpH < wh) // one bitmap, as big as the biggest window so far (not one per window per shot)
+			{
+				if (bmp) DeleteObject(bmp);
+				bmpW = std::max(bmpW, ww), bmpH = std::max(bmpH, wh);
+				BITMAPINFO bi{};
+				bi.bmiHeader = { sizeof(BITMAPINFOHEADER), bmpW, -bmpH, 1, 32, BI_RGB };
+				bmp = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+				if (!bmp) bmpW = bmpH = 0;
+			}
 			if (bmp)
 			{
 				auto old = SelectObject(dc, bmp);
@@ -5182,12 +5205,11 @@ static void ShotWorker()
 						for (int x = 0; x < s.w; x++)
 						{
 							int ix = std::min(ww - 1, int((x + 0.5) * sw / WINDOWW)), iy = std::min(wh - 1, int((y + 0.5) * sh / WINDOWH));
-							s.px[size_t(y) * s.w + x] = ((uint32_t *)bits)[size_t(iy) * ww + ix] & 0xFFFFFF;
+							s.px[size_t(y) * s.w + x] = ((uint32_t *)bits)[size_t(iy) * bmpW + ix] & 0xFFFFFF;
 						}
 					got[hwnd] = std::move(s);
 				}
 				SelectObject(dc, old);
-				DeleteObject(bmp);
 			}
 			DeleteDC(dc);
 			ReleaseDC(nullptr, screen);
@@ -5214,7 +5236,7 @@ static const uint32_t *HoleBehind(const Simulation *sim, RECT sr)
 		HWND top = HWND(id);
 		if (!m.any[Simulation::MarkHole] || !wallRects.count(top)) continue; // icons: just the wallpaper
 		auto &hole = m.a[Simulation::MarkHole];
-		struct Under { int x0, y0; const Shot *shot; };
+		struct Under { int x0, y0; const Shot *shot; uintptr_t id; bool desk; RECT seen; }; // seen: its visible frame, sim px
 		std::vector<Under> under;
 		for (HWND h = GetWindow(top, GW_HWNDNEXT); h && under.size() < 12; h = GetWindow(h, GW_HWNDNEXT))
 		{
@@ -5223,15 +5245,19 @@ static const uint32_t *HoleBehind(const Simulation *sim, RECT sr)
 			wchar_t cls[32];
 			GetClassNameW(h, cls, 32);
 			RECT r;
-			if (h == mainWindow || !IsWindowVisible(h) || IsIconic(h) || cloaked || !wcscmp(cls, L"Progman") || !wcscmp(cls, L"WorkerW") ||
-			    !GetWindowRect(h, &r))
+			bool desk = !wcscmp(cls, L"Progman") || !wcscmp(cls, L"WorkerW"); // the desktop: icons, and a live wallpaper app's window
+			if (h == mainWindow || !IsWindowVisible(h) || IsIconic(h) || cloaked || !GetWindowRect(h, &r))
 				continue;
 			int x0 = px(r.left - sr.left, WINDOWW, sw), y0 = px(r.top - sr.top, WINDOWH, sh);
 			int x1 = px(r.right - sr.left, WINDOWW, sw), y1 = px(r.bottom - sr.top, WINDOWH, sh);
 			if (x1 <= m.x || y1 <= m.y || x0 >= m.x + m.w || y0 >= m.y + m.h) continue;
 			want.push_back(h);
 			auto it = shots.find(h);
-			if (it != shots.end()) under.push_back({ x0, y0, &it->second });
+			// the shot takes in the invisible resize borders round the frame, black: not what is seen there
+			RECT f = r;
+			if (!desk) DwmGetWindowAttribute(h, DWMWA_EXTENDED_FRAME_BOUNDS, &f, sizeof(f));
+			RECT seen{ px(f.left - sr.left, WINDOWW, sw), px(f.top - sr.top, WINDOWH, sh), px(f.right - sr.left, WINDOWW, sw), px(f.bottom - sr.top, WINDOWH, sh) };
+			if (it != shots.end()) under.push_back({ x0, y0, &it->second, uintptr_t(h), desk, seen });
 		}
 		for (int j = 0; j < m.h; j++)
 			for (int i = 0; i < m.w; i++)
@@ -5242,7 +5268,16 @@ static const uint32_t *HoleBehind(const Simulation *sim, RECT sr)
 				{
 					int sx = x - u.x0, sy = y - u.y0;
 					if (sx < 0 || sy < 0 || sx >= u.shot->w || sy >= u.shot->h) continue;
-					behind[size_t(y) * XRES + x] = u.shot->px[size_t(sy) * u.shot->w + sx];
+					if (x < u.seen.left || y < u.seen.top || x >= u.seen.right || y >= u.seen.bottom) continue;
+					if (auto o = sim->windowMarks.find(u.id); o != sim->windowMarks.end() && o->second.any[Simulation::MarkHole]) // broken through here too
+					{
+						auto &om = o->second;
+						int ox = x - om.x, oy = y - om.y;
+						if (ox >= 0 && oy >= 0 && ox < om.w && oy < om.h && om.a[Simulation::MarkHole][size_t(oy) * om.w + ox]) continue;
+					}
+					uint32_t c = u.shot->px[size_t(sy) * u.shot->w + sx];
+					if (u.desk && !c) continue; // the desktop window drew nothing here: the wallpaper file below
+					behind[size_t(y) * XRES + x] = c;
 					break;
 				}
 			}
@@ -5293,6 +5328,7 @@ void OverlayWindows::ApplySimMasks(uint32_t *argb, int w, const uint8_t *occupie
 		}
 		for (int i = 0; i < zn; i++) row[zx0 + i] = saved[i] | 0xFF000000;
 	}
+	FollowMarks(sim);
 	const uint32_t *backdrop = nullptr;
 	if (std::any_of(sim->windowMarks.begin(), sim->windowMarks.end(), [](auto &m) { return m.second.any[Simulation::MarkHole]; }))
 	{
@@ -5701,16 +5737,20 @@ static void TickFun(Simulation *sim)
 		int count = int(n) + (sim->rng.uniform01() < n - int(n));
 		for (int k = 0; k < count; k++)
 		{
-			int type = kind == 1 ? PT_SNOW : kind == 2 ? PT_WATR : PT_SAWD;
-			int i = sim->create_part(-1, sim->rng.between(CELL, XRES - CELL - 1), CELL, type); // the outer cell kills particles
+			int type = kind == 1 || kind == 4 ? PT_SNOW : kind == 2 ? PT_WATR : kind == 5 ? PT_FOG : PT_SAWD;
+			if (kind == 5 && k % 4) continue; // fog: fewer, it lingers
+			int y0 = kind == 5 ? sim->rng.between(YRES * 2 / 3, YRES - CELL - 1) : CELL; // fog forms low down
+			int i = sim->create_part(-1, sim->rng.between(CELL, XRES - CELL - 1), y0, type); // the outer cell kills particles
 			if (i < 0) continue;
 			auto &p = sim->parts[i];
 			if (kind == 1) p.temp = 263.15f, p.vx = sim->rng.uniform01() - 0.5f;
 			if (kind == 2) p.vy = 3;
 			if (kind == 3) p.dcolour = autumn[sim->rng.between(0, 4)], p.vx = (sim->rng.uniform01() - 0.5f) * 2;
 			if (kind == 3 && dusk) p.dcolour = 0xFF000000 | ((p.dcolour >> 1) & 0x7F7F7F); // leaves after dark
+			if (kind == 4) p.temp = 253.15f, p.vy = 4 + 2 * sim->rng.uniform01(), p.dcolour = overlayHailColour;
 			float life = std::max(10.f, fun.weatherLast) * 60 * (0.6f + 0.8f * sim->rng.uniform01()); // spread: they thin out
 			if (kind == 2) life = std::min(life, 300.f); // rain soaks away quickly
+			if (kind == 5) life = std::min(life, 1200.f), p.temp = 288.15f, p.life = int(life) + 60; // fog: no rime while it lasts
 			fallen.push_back({ i, type, sim->currentTick + int(life) });
 		}
 		if (kind == 2) rainLast = sim->currentTick;
@@ -5887,7 +5927,7 @@ static void TickFun(Simulation *sim)
 		}
 	}
 	lastX = sim->petPointer.x;
-	sim->petFetchRange = fun.fetch, sim->petKick = fun.kick, sim->birdRest = int(fun.birdRest * 60);
+	sim->petFetchRange = fun.fetch, sim->petKick = fun.kick, sim->birdRest = int(fun.birdRest * 60), sim->petHoles = fun.petHoles;
 	// Rainbow: rain that fell half a minute or more, then stopped for two seconds
 	if (rainLast == sim->currentTick)
 	{
@@ -6051,6 +6091,25 @@ static void TickFun(Simulation *sim)
 		}
 	}
 	if (castles && sim->currentTick % 18000 == 0) castles = 0; // ponytail: a rough count; they crumble after 5 min anyway
+}
+
+// Every frame drawn (the screen's rate, above the sim's): a dragged window's holes and marks follow it, not just
+// every tick
+static void FollowMarks(Simulation *sim)
+{
+	RECT sr;
+	GetWindowRect(mainWindow, &sr);
+	int sw = sr.right - sr.left, sh = sr.bottom - sr.top;
+	if (sw <= 0 || sh <= 0) return;
+	auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); }; // as below
+	for (auto &[id, m] : sim->windowMarks)
+	{
+		RECT r;
+		if (!wallRects.count(HWND(id)) || DwmGetWindowAttribute(HWND(id), DWMWA_EXTENDED_FRAME_BOUNDS, &r, sizeof(r)) != S_OK) continue;
+		int x0 = std::max(0, px(r.left - sr.left, WINDOWW, sw)), y0 = std::max(0, px(r.top - sr.top, WINDOWH, sh));
+		int x1 = std::min(XRES, px(r.right - sr.left, WINDOWW, sw)), y1 = std::min(YRES, px(r.bottom - sr.top, WINDOWH, sh));
+		if (x1 - x0 == m.w && y1 - y0 == m.h) m.x = x0, m.y = y0; // resized: the next tick sorts it out
+	}
 }
 
 static void TickWindowWalls()
@@ -6520,24 +6579,37 @@ void OverlayWindows::DrawExtras(uint32_t *argb, int w, int h)
 	}
 	// shooting stars: at night, now and then a bright head with a fading tail streaks down across the open desktop
 	{
-		struct Star { float x, y, dx, dy; ULONGLONG born; bool land; float hit = -1; ULONGLONG hitAt = 0; }; // land: comes down until it hits something
+		// big: a meteor (slower, glowing orange, a smoke tail; it always comes down and crashes)
+		struct Star { float x, y, dx, dy; ULONGLONG born; bool land, big; float hit = -1; ULONGLONG hitAt = 0; }; // land: comes down until it hits something
 		static std::vector<Star> stars;
-		static ULONGLONG nextStar = 0;
+		static ULONGLONG nextStar = 0, nextMeteor = 0;
 		auto now = GetTickCount64();
 		bool night = funHour >= 20 || funHour < 5;
-		if (fun.stars < 1 || !night) nextStar = 0;
-		else if (!nextStar) nextStar = now + ULONGLONG(3600000.0 / fun.stars * (0.3 + 1.4 * sim->rng.uniform01()));
-		else if (now >= nextStar)
+		// a meteor shower night: the peaks (month, day) of the yearly showers, and the day either side
+		bool shower = false;
+		if (fun.showers && night)
 		{
-			nextStar = 0;
+			time_t tt = time(nullptr) - (funHour < 5 ? 86400 : 0); // after midnight it is still the night before
+			tm local;
+			localtime_s(&local, &tt);
+			for (auto [mo, d] : { std::pair{ 1, 3 }, { 4, 22 }, { 5, 6 }, { 8, 12 }, { 10, 21 }, { 11, 17 }, { 12, 14 } })
+				shower |= local.tm_mon + 1 == mo && std::abs(local.tm_mday - d) <= 1;
+		}
+		float perHour = shower ? std::max(fun.stars, 6.f) * 10 : fun.stars, meteorsPerHour = fun.meteors * (shower ? 3 : 1);
+		auto spawn = [&](bool land, bool big) {
 			auto play = sim->PlayRect();
 			float dir = sim->rng.chance(1, 2) ? 1.f : -1.f, len = play.size.X * (0.15f + 0.15f * sim->rng.uniform01());
-			bool land = fun.starsLand && sim->rng.chance(1, 3);
-			stars.push_back({ play.pos.X + play.size.X * (0.15f + 0.7f * sim->rng.uniform01()), play.pos.Y + play.size.Y * 0.4f * sim->rng.uniform01(), dir * len, len * (land ? 0.8f : 0.35f), now, land });
-		}
+			stars.push_back({ play.pos.X + play.size.X * (0.15f + 0.7f * sim->rng.uniform01()), play.pos.Y + play.size.Y * 0.4f * sim->rng.uniform01(), dir * len, len * (big ? 0.9f : land ? 0.8f : 0.35f), now, land, big });
+		};
+		if (perHour < 1 || !night) nextStar = 0;
+		else if (!nextStar) nextStar = now + ULONGLONG(3600000.0 / perHour * (0.3 + 1.4 * sim->rng.uniform01()));
+		else if (now >= nextStar) nextStar = 0, spawn(fun.starsLand && sim->rng.chance(1, 3), false);
+		if (meteorsPerHour < 1 || !night) nextMeteor = 0;
+		else if (!nextMeteor) nextMeteor = now + ULONGLONG(3600000.0 / meteorsPerHour * (0.3 + 1.4 * sim->rng.uniform01()));
+		else if (now >= nextMeteor) nextMeteor = 0, spawn(true, true);
 		for (auto &st : stars)
 		{
-			float t = (now - st.born) / 900.f, fade = st.land ? 1 : t > 0.7f ? (1 - t) / 0.3f : 1;
+			float span = st.big ? 1600.f : 900.f, t = (now - st.born) / span, fade = st.land ? 1 : t > 0.7f ? (1 - t) / 0.3f : 1;
 			float len = std::hypot(st.dx, st.dy), ux = st.dx / len, uy = st.dy / len;
 			if (st.land && st.hit < 0)
 				for (float d = 0; d <= len * t; d += 1) // the first window, particle or screen edge on its way down
@@ -6547,17 +6619,21 @@ void OverlayWindows::DrawExtras(uint32_t *argb, int w, int h)
 					if (out || (d > 30 && (sim->PixelWall(x, y) || sim->pmap[y][x]))) // (not what it started over)
 					{
 						st.hit = d, st.hitAt = now;
-						if (!out) overlayImpacts.push_back({ x, y });
+						if (!out) overlayImpacts.push_back({ x, y, st.big ? 3.f : 1.f });
 						break;
 					}
 				}
 			if (st.hit >= 0) t = st.hit / len, fade = std::max(0.f, 1 - (now - st.hitAt) / 400.f); // it hit: the tail fades
-			float hx = st.x + st.dx * t, hy = st.y + st.dy * t, tail = std::min(len * t, 90.f);
+			float maxTail = st.big ? 160.f : 90.f, hx = st.x + st.dx * t, hy = st.y + st.dy * t, tail = std::min(len * t, maxTail);
 			for (int k = 0; k < int(tail); k++) // head first, the tail falls behind and fades
 			{
-				int x = int(hx - ux * k), y = int(hy - uy * k);
-				if (x >= 0 && y >= 0 && x < std::min(w, XRES) && y < std::min(h, YRES) && !(argb[y * w + x] >> 24) && !sim->PixelWall(x, y))
-					put(x, y, k < 3 ? 0xFFFFFF : 0xCFE0FF, fade * (1 - k / 90.f));
+				uint32_t c = !st.big ? (k < 3 ? 0xFFFFFF : 0xCFE0FF) : k < 4 ? 0xFFF4D0 : k < 30 ? 0xFFB040 : k < 70 ? 0xE05A20 : 0x6A6460; // a meteor: white-hot, fire, then smoke
+				for (int o = 0; o < (st.big && k < 90 ? 3 : 1); o++) // a meteor is 3 px thick
+				{
+					int x = int(hx - ux * k - uy * (o - (st.big ? 1 : 0))), y = int(hy - uy * k + ux * (o - (st.big ? 1 : 0)));
+					if (x >= 0 && y >= 0 && x < std::min(w, XRES) && y < std::min(h, YRES) && !(argb[y * w + x] >> 24) && !sim->PixelWall(x, y))
+						put(x, y, c, fade * (1 - k / maxTail) * (o == 1 || !st.big ? 1 : 0.5f));
+				}
 			}
 		}
 		std::erase_if(stars, [now](auto &st) { return now - st.born >= (st.land ? 9000u : 900u) || (st.hitAt && now - st.hitAt >= 400); });
