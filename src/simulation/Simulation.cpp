@@ -1045,6 +1045,7 @@ void Parts::Reset()
 void Simulation::clear_sim(void)
 {
 	windowMarks.clear();
+	walledArea = CELLS.OriginRect();
 	for (auto i = 0; i < parts.active; i++)
 	{
 		if (parts[i].type)
@@ -3947,6 +3948,13 @@ void Simulation::UpdateGravityMask()
 // Loop edges wrap inside the area (LoopWrap); the walls outside it only matter for solid edges.
 void Simulation::ApplyPlayArea()
 {
+	// the area grew (a bigger window): the edge walls it put up where the area now reaches come down
+	if (walledArea != playArea)
+	{
+		for (auto c : playArea)
+			if (!walledArea.Contains(c) && bmap[c.Y][c.X] == WL_WALL) bmap[c.Y][c.X] = 0;
+		walledArea = playArea;
+	}
 	if (playArea == CELLS.OriginRect())
 	{
 		return;
