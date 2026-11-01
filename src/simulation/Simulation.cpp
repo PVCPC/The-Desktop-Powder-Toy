@@ -2346,16 +2346,17 @@ static bool ParallelSafe(int t)
 	return !elements[t].Update || (safe[t] && elements[t].Update == GetElements()[t].Update);
 }
 
-// The sim in 32-pixel blocks, run in nine passes (every third block across and down), so blocks running together are
-// two blocks (64 pixels) apart. A plain particle (no update function or ChangeType of its own, or one of the
-// ParallelSafe ones; not energy, not in a wall cell, slow enough) can't reach further than that in a tick: its move
-// (velocity up to 20) plus a liquid's sideways search (30) plus heat and air (a cell). Those run in their blocks on all
-// cores, in index order within a block; everything else runs after, one at a time, in index order, as before.
+// The sim in 32-pixel blocks, run in 25 passes (every fifth block across and down), so blocks running together are
+// four blocks (128 pixels) apart. A plain particle (no update function or ChangeType of its own, or one of the
+// ParallelSafe ones; not energy, not in a wall cell, slow enough) can't reach further than about 53 pixels from its
+// block in a tick: its move (velocity up to 20) plus a liquid's sideways search (30) plus heat and air (a cell), and
+// two blocks' particles must not meet in the gap between them. Those run in their blocks on all cores, in index order
+// within a block; everything else runs after, one at a time, in index order, as before.
 void SimulationImpl::UpdateParticlesParallel()
 {
 	auto &sd = SimulationData::CRef();
 	auto &elements = sd.elements;
-	constexpr int B = 32, reach = 20, chunk = 4096;
+	constexpr int B = 32, stride = 5, reach = 20, chunk = 4096;
 	int bw = (XRES + B - 1) / B, bh = (YRES + B - 1) / B, active = parts.active;
 	// the block each particle runs in (-1: after, one at a time), worked out on all cores
 	static std::vector<int> block;
@@ -2386,11 +2387,11 @@ void SimulationImpl::UpdateParticlesParallel()
 	std::vector<unsigned int> seeds(blocks.size());
 	for (auto &s : seeds) s = rng.gen();
 	parallelPhase = true;
-	for (int pass = 0; pass < 9; pass++)
+	for (int pass = 0; pass < stride * stride; pass++)
 	{
 		std::vector<int> run;
-		for (int by = pass / 3; by < bh; by += 3)
-			for (int bx = pass % 3; bx < bw; bx += 3)
+		for (int by = pass / stride; by < bh; by += stride)
+			for (int bx = pass % stride; bx < bw; bx += stride)
 				if (!blocks[size_t(by) * bw + bx].empty()) run.push_back(by * bw + bx);
 		OverlayParallel(int(run.size()), [&](int k) {
 			RNG own;
@@ -3453,13 +3454,15 @@ void SimulationImpl::MovementPhase(int i, Neighbourhood neighbourhood)
 void Simulation::RecalcFreeParticles(bool do_life_dec)
 {
 	FrameTime::Span span(frameTime, "Simulation::RecalcFreeParticles");
+	auto &sd = SimulationData::CRef();
+	auto &elements = sd.elements;
+	if (RecalcFreeParticlesParallel(do_life_dec))
+		return;
 	pmap.Clear();
 	pmap_count.Clear();
 	photons.Clear();
 
 	NUM_PARTS = 0;
-	auto &sd = SimulationData::CRef();
-	auto &elements = sd.elements;
 	//the particle loop that resets the pmap/photon maps every frame, to update them.
 	for (int i = 0; i < parts.active; i++)
 	{
@@ -3524,6 +3527,116 @@ void Simulation::RecalcFreeParticles(bool do_life_dec)
 	parts.Flatten();
 	if (elementRecount)
 		elementRecount = false;
+}
+
+// RecalcFreeParticles on all cores (with multicore physics) with exactly its results: each particle's life and death on its own, then the maps a
+// row at a time with that row's particles in index order (as the loop meets them), then the deaths in index order.
+// Not while counts are being rebuilt or an element whose death runs code of its own (soap, stickmen...) is around.
+bool Simulation::RecalcFreeParticlesParallel(bool do_life_dec)
+{
+	auto &elements = SimulationData::CRef().elements;
+	if (elementRecount || !parallelUpdate || ensureDeterminism) // one core: the update after reads the particles faster
+		return false;                                            // from the cache this loop warmed
+	for (int t = 1; t < PT_NUM; t++)
+		if (elementCount[t] && elements[t].ChangeType)
+			return false;
+	constexpr int chunk = 4096;
+	int active = parts.active, chunks = (active + chunk - 1) / chunk;
+	static std::vector<uint8_t> dies;
+	static std::vector<int> onRow, rowStart, order, alive;
+	dies.assign(active, 0);
+	onRow.assign(size_t(chunks) * YRES, 0); // per chunk and row: how many land there, then where they go in order
+	alive.assign(chunks, 0);
+	auto inside = [&](const Particle &p, int &x, int &y) {
+		x = int(p.x + 0.5f);
+		y = int(p.y + 0.5f);
+		return x >= 0 && y >= 0 && x < XRES && y < YRES;
+	};
+	OverlayParallel(chunks, [&](int c) {
+		for (int i = c * chunk; i < std::min(active, (c + 1) * chunk); i++)
+		{
+			auto &p = parts[i];
+			int t = p.type, x, y;
+			if (!t)
+				continue;
+			bool inBounds = inside(p, x, y);
+			if (inBounds)
+				onRow[size_t(c) * YRES + y]++;
+			alive[c]++;
+			if (!do_life_dec)
+				continue;
+			if (t < 0 || t >= PT_NUM || !elements[t].Enabled)
+			{
+				dies[i] = 1;
+				continue;
+			}
+			auto props = elements[t].Properties;
+			bool stasis = inBounds && bmap[y / CELL][x / CELL] == WL_STASIS && emap[y / CELL][x / CELL] < 8;
+			if (p.life > 0 && (props & PROP_LIFE_DEC) && !stasis)
+			{
+				p.life--;
+				if (p.life <= 0 && (props & (PROP_LIFE_KILL_DEC | PROP_LIFE_KILL)))
+					dies[i] = 1;
+			}
+			else if (p.life <= 0 && (props & PROP_LIFE_KILL) && !stasis)
+				dies[i] = 1;
+		}
+	});
+	rowStart.resize(YRES + 1);
+	int k = 0;
+	for (int y = 0; y < YRES; y++)
+	{
+		rowStart[y] = k;
+		for (int c = 0; c < chunks; c++)
+		{
+			int n = onRow[size_t(c) * YRES + y];
+			onRow[size_t(c) * YRES + y] = k;
+			k += n;
+		}
+	}
+	rowStart[YRES] = k;
+	order.resize(k);
+	OverlayParallel(chunks, [&](int c) {
+		for (int i = c * chunk; i < std::min(active, (c + 1) * chunk); i++)
+		{
+			int x, y;
+			if (parts[i].type && inside(parts[i], x, y))
+				order[onRow[size_t(c) * YRES + y]++] = i;
+		}
+	});
+	OverlayParallel(YRES, [&](int y) {
+		std::fill_n(&pmap[y][0], XRES, 0);
+		std::fill_n(&pmap_count[y][0], XRES, 0);
+		std::fill_n(&photons[y][0], XRES, 0);
+		for (int k = rowStart[y]; k < rowStart[y + 1]; k++)
+		{
+			int i = order[k], t = parts[i].type, x = int(parts[i].x + 0.5f);
+			if (elements[t].Properties & TYPE_ENERGY)
+				photons[y][x] = PMAP(i, t);
+			else
+			{
+				if (!pmap[y][x] || (t != PT_INVIS && t != PT_FILT))
+					pmap[y][x] = PMAP(i, t);
+				if (t != PT_THDR && t != PT_EMBR && t != PT_FIGH && t != PT_PLSM)
+					pmap_count[y][x]++;
+			}
+			if (dies[i]) // what kill_part does to the maps
+			{
+				if (pmap[y][x] && ID(pmap[y][x]) == i)
+					pmap[y][x] = 0;
+				else if (photons[y][x] && ID(photons[y][x]) == i)
+					photons[y][x] = 0;
+			}
+		}
+	});
+	NUM_PARTS = 0;
+	for (int n : alive)
+		NUM_PARTS += n;
+	for (int i = 0; i < active; i++)
+		if (dies[i])
+			kill_part(i);
+	parts.Flatten();
+	return true;
 }
 
 void Parts::Flatten()

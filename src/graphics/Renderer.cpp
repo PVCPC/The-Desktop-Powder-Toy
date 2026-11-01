@@ -1360,22 +1360,33 @@ void Renderer::render_fire()
 {
 	if(!(renderMode & FIREMODE))
 		return;
-	int i,j,x,y,r,g,b,a;
+	// Each cell's glow is added (capped at 255) over the 12x12 pixels round it, which gives the same pixels in any
+	// order, so it is drawn a row of cells at a time on all cores: a row gets the glow of the cells above, on and below it
+	OverlayParallel(YCELLS, [&](int row) {
+		for (int j = std::max(0, row - 1); j <= std::min(YCELLS - 1, row + 1); j++)
+			for (int i = 0; i < XCELLS; i++)
+			{
+				int r = fire_r[j][i], g = fire_g[j][i], b = fire_b[j][i];
+				if (!(r || g || b))
+					continue;
+				for (int y = (row - j) * CELL; y < (row - j + 1) * CELL; y++)
+					for (int x = -CELL; x < 2 * CELL; x++)
+					{
+						int a = fire_alpha[y + CELL][x + CELL];
+						if (findingElement)
+							a /= 2;
+						AddFirePixel({ i * CELL + x, j * CELL + y }, RGB(r, g, b), a);
+					}
+			}
+	});
+	// then the fire fades and spreads, in order (each cell reads the neighbours already done)
+	int i,j,x,y,r,g,b;
 	for (j=0; j<YCELLS; j++)
 		for (i=0; i<XCELLS; i++)
 		{
 			r = fire_r[j][i];
 			g = fire_g[j][i];
 			b = fire_b[j][i];
-			if (r || g || b)
-				for (y=-CELL; y<2*CELL; y++)
-					for (x=-CELL; x<2*CELL; x++)
-					{
-						a = fire_alpha[y+CELL][x+CELL];
-						if (findingElement)
-							a /= 2;
-						AddFirePixel({ i*CELL+x, j*CELL+y }, RGB(r, g, b), a);
-					}
 			r *= 8;
 			g *= 8;
 			b *= 8;

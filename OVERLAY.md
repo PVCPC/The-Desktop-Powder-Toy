@@ -482,6 +482,15 @@ On/off things are Fun toggles; things with an amount are More fun sliders.
   kill lock). Results per element within a seed's own spread (fire/wood: two one-core seeds differ 17%, multi vs one
   2%). "Multicore physics" toggle (Simulation.Multicore, Running group); ensureDeterminism forces one core, which
   reproduces the one-core checksum exactly. TPT's renderer thread on the overlay: no gain, left off.
+- [x] 0.8.1 (user: "the same results as single core, just more performance"): a fire scene was drawing-bound, not
+  sim-bound: render_fire ~100 ms/frame at 2560x720 (each fire cell adds over 12x12 px, one core). Now rows of cells on
+  all cores (capped adds give the same pixels in any order; checked 0 differing pixels vs the old loop every frame), fade
+  pass still in order. Fire scene one core 10 -> 13, multicore 12.6 -> 34 ticks/s. RecalcFreeParticlesParallel: exact
+  (per-row replay of the pmap writes in index order, deaths after in index order; not with ChangeType elements around
+  or a recount) - only with multicore physics: on one core it measured 7% slower (cache), so one core keeps the loop.
+  Multicore blocks now 25 passes / 128 px apart: a block's particles reach ~53 px (velocity 20 + liquid search 30), so
+  two blocks 64 px apart could both move into one gap pixel. Bit-identical multicore physics is impossible (one shared
+  RNG stream drawn in index order); exact mode = toggle off.
 - [ ] Next for ~5x, all elements kept: (A) per-block particle slots so create/kill needs no lock; (B) RecalcFreeParticles
   on all cores (~5 ms); (C) review the rest one by one (PLNT, VINE, SPRK...); (D) sleeping regions, as a toggle.
 

@@ -282,6 +282,7 @@ public:
 	virtual void UpdateParticles(int start, int end) = 0; // Dispatches an update to the range [start, end).
 	void SimulateGoL();
 	void RecalcFreeParticles(bool do_life_dec);
+	bool RecalcFreeParticlesParallel(bool do_life_dec);
 	void CheckStacking();
 	void BeforeSim(bool willUpdate);
 	void AfterSim();
