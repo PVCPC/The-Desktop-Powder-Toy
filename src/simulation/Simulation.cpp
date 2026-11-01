@@ -4190,11 +4190,6 @@ Simulation::~Simulation() = default;
 
 Simulation::Simulation()
 {
-	// pmap packs the particle index above PMAPBITS: XRES * YRES must fit (the division avoids overflow).
-	if (uint32_t(XRES) > (UINT32_C(1) << (31 - PMAPBITS)) / uint32_t(YRES))
-	{
-		throw std::runtime_error("simulation too large for pmap");
-	}
 	std::fill(elementCount, elementCount+PT_NUM, 0);
 	elementRecount = true;
 

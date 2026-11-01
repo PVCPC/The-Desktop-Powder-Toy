@@ -62,6 +62,7 @@ constexpr int OLD_PT_WIND = 147;
 
 // Change this to change the amount of bits used to store type in pmap (and a few elements such as PIPE and CRAY)
 constexpr int PMAPBITS = 9;
+static_assert(MAX_NPART <= 1 << (31 - PMAPBITS));
 constexpr int PMAPMASK = ((1 << PMAPBITS) - 1);
 constexpr int ID(int r)
 {

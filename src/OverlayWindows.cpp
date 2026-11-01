@@ -3484,12 +3484,12 @@ namespace
 			int sx = x + S(200);
 			for (int sc = 1; sc <= 6; sc++)
 			{
-				auto [cells, real] = OverlaySimSize(sc);
-				if (real != sc) continue; // too big a sim at this size; the next one up is the same
+				auto cells = OverlaySimSize(sc).first;
 				wchar_t label[32];
 				swprintf(label, 32, L"%d\u00D7", sc);
-				wchar_t tip[96];
-				swprintf(tip, 96, L"%dx%d sim pixels (restarts TPT; the scene comes along, clipped if it doesn't fit)", cells.X * CELL, cells.Y * CELL);
+				wchar_t tip[160];
+				swprintf(tip, 160, L"%dx%d sim pixels (restarts TPT; the scene comes along, clipped if it doesn't fit)%s", cells.X * CELL, cells.Y * CELL,
+				         cells.X * cells.Y * CELL * CELL > MAX_NPART ? L"; at most 4.2 million particles" : L"");
 				sx += Toggle(sx, top + S(28), label, ui::Engine::Ref().windowFrameOps.scale == sc, true, [sc] { Restart(sc, overlayWindowed); }, tip) + S(18);
 			}
 			wchar_t scale[32];

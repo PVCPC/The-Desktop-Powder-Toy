@@ -21,6 +21,9 @@ inline int YCELLS = CELLS.Y;
 inline int NCELL  = XCELLS * YCELLS;
 inline int XRES   = RES.X;
 inline int YRES   = RES.Y;
+// At most this many particles: pmap holds a particle's index above PMAPBITS (9) bits of type. A bigger sim just
+// stops making new particles when it is full, like Powder Game.
+constexpr int MAX_NPART = 1 << 22;
 inline int NPART  = XRES * YRES;
 
 inline int XCNTR = XRES / 2;
@@ -40,7 +43,7 @@ inline void SetSimSize(Vec2<int> cells)
 	NCELL = XCELLS * YCELLS;
 	XRES = RES.X;
 	YRES = RES.Y;
-	NPART = XRES * YRES;
+	NPART = std::min(XRES * YRES, MAX_NPART);
 	XCNTR = XRES / 2;
 	YCNTR = YRES / 2;
 	WINDOW = RES + Vec2(BARSIZE, MENUSIZE);
