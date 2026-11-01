@@ -110,6 +110,12 @@ namespace
 		int weatherKind = 0;                    // 0 by the season, 1 snow, 2 rain, 3 leaves
 		float napFrom = 0, napUntil = 7;         // pets nap from/until this hour (napFrom 0: never; 24 = midnight)
 		float gather = 0, welcome = 2;           // pets gather after this many minutes away (0: never); hop this many s back
+		float snowmen = 0, snowDepth = 20;       // at most this many snowmen, on snow at least this deep (px)
+		float lift = 0;                          // how hard a window dragged up throws what sits on it
+		float planes = 0, planeSpeed = 1;        // a paper plane every this many minutes (0: none), how fast
+		float rainbow = 0, rainbowGlow = 0.6f;   // seconds a rainbow shows after rain (0: never), how strong
+		float fetch = 0, kick = 1;               // pets fetch balls this far away (px, 0: no), kick strength
+		float volcano = 0, volcanoForce = 1;     // CPU use (0-1) that wakes the taskbar volcano (0: none), lava force
 		bool bin = false, broom = false, closeToss = false, openShake = false, holidays = false, notify = false, dayNight = false, trail = false, confetti = false;
 		std::vector<HWND> flashed; // windows that flashed their taskbar button (a new message) since the last tick
 	} fun;
@@ -121,7 +127,22 @@ namespace
 		{ L"Pets wake at", L"The hour the pets stop napping", &fun.napUntil, 1, 12, "NapUntil", 4 },
 		{ L"Pets gather after", L"Leave the PC alone this many minutes and the pets gather in the middle of the screen", &fun.gather, 0, 30, "Gather", 2 },
 		{ L"Welcome back hop", L"How long the pets hop for joy when you come back after a minute or more away", &fun.welcome, 0, 10, "Welcome", 6 },
+		{ L"Snowmen", L"Where snow lies deep enough, up to this many snowmen appear (made of ice: they melt when it warms up)", &fun.snowmen, 0, 5, "Snowmen", 1 },
+		{ L"Snowman needs", L"How deep the snow must be before a snowman appears on it", &fun.snowDepth, 6, 40, "SnowDepth", 5 },
+		{ L"Window lift", L"Drag a window up fast and whatever sits on it is thrown into the air (how hard)", &fun.lift, 0, 3, "Lift", 0 },
+		{ L"Paper planes", L"Every this many minutes a pet (or the edge of the screen) throws a paper plane that glides until it lands", &fun.planes, 0, 30, "Planes", 2 },
+		{ L"Plane speed", L"How fast the paper planes fly", &fun.planeSpeed, 0.25f, 3, "PlaneSpeed", 0 },
+		{ L"Rainbow after rain", L"When the rain (Weather) has fallen half a minute or more and stops, a rainbow shows for this many seconds", &fun.rainbow, 0, 120, "Rainbow", 6 },
+		{ L"Rainbow brightness", L"How strong the rainbow's colours are", &fun.rainbowGlow, 0.1f, 1, "RainbowGlow", 0 },
+		{ L"Pets fetch", L"Pets run after a ball up to this far away and kick it back toward the mouse pointer", &fun.fetch, 0, 400, "Fetch", 5 },
+		{ L"Fetch kick", L"How hard the pets kick the ball back", &fun.kick, 0.25f, 3, "Kick", 0 },
+		{ L"Volcano wakes at", L"A little volcano by the clock smokes once the PC's total CPU use passes this, and erupts lava at 20% more", &fun.volcano, 0, 1, "Volcano", 0 },
+		{ L"Volcano force", L"How high the volcano throws its lava", &fun.volcanoForce, 0.25f, 3, "VolcanoForce", 0 },
 	};
+	// paper planes in flight or landed (sim pixels; landed: ticks since), and when the rainbow goes (GetTickCount64)
+	struct PaperPlane { float x, y, vx, vy; int landed; };
+	std::vector<PaperPlane> paperPlanes;
+	ULONGLONG rainbowUntil = 0;
 	HWND mainWindow = nullptr;    // TPT's own window
 	std::string recording;        // Overlay.Keys.<name> being recorded in the Overlay tab, or empty
 	std::function<void()> later; // run on the next tick, outside any window's message handling
@@ -2650,7 +2671,7 @@ namespace
 				else if (f.unit == 2) swprintf(val, 16, *f.v >= 1 ? L"%d min" : L"off", int(*f.v));
 				else if (f.unit == 3) swprintf(val, 16, L"%d s", int(*f.v));
 				else if (f.unit == 4) swprintf(val, 16, *f.v >= 1 ? L"%d:00" : L"off", int(*f.v) % 24);
-				else if (f.unit == 5) swprintf(val, 16, L"%d px", int(*f.v));
+				else if (f.unit == 5) swprintf(val, 16, *f.v >= 1 ? L"%d px" : L"off", int(*f.v));
 				else if (f.unit == 6) swprintf(val, 16, *f.v >= 1 ? L"%d s" : L"off", int(*f.v));
 				else swprintf(val, 16, *f.v > 0 ? L"%d%%" : L"off", int(std::lround(*f.v * 100)));
 				Caption(x + w - S(60), ry, val);
@@ -5586,6 +5607,7 @@ static void TickFun(Simulation *sim)
 
 	// Weather from the top edge; each flake, drop or leaf goes after a while (snow even once melted)
 	static std::deque<std::tuple<int, int, int>> fallen; // particle, type, the tick it goes
+	static int rainLast = -1, rainSince = -1; // the last tick rain fell, and since when it has been falling
 	LASTINPUTINFO input{ sizeof(input) };
 	// back after a minute or more away: the pets hop to greet you
 	static bool away = false;
@@ -5674,6 +5696,7 @@ static void TickFun(Simulation *sim)
 			if (kind == 2) life = std::min(life, 300.f); // rain soaks away quickly
 			fallen.push_back({ i, type, sim->currentTick + int(life) });
 		}
+		if (kind == 2) rainLast = sim->currentTick;
 		if (kind == 2 && sim->rng.uniform01() < fun.weather / 1200) // a storm: now and then a bolt from the top
 			sim->create_part(-1, sim->rng.between(XRES / 20, XRES * 19 / 20), CELL, PT_LIGH, 20);
 	}
@@ -5830,6 +5853,88 @@ static void TickFun(Simulation *sim)
 		}
 	}
 	lastX = sim->petPointer.x;
+	sim->petFetchRange = fun.fetch, sim->petKick = fun.kick;
+	// Rainbow: rain that fell half a minute or more, then stopped for two seconds
+	if (rainLast == sim->currentTick)
+	{
+		if (rainSince < 0) rainSince = sim->currentTick;
+	}
+	else if (rainSince >= 0 && sim->currentTick - rainLast > 120)
+	{
+		if (rainLast - rainSince >= 1800 && fun.rainbow >= 1) rainbowUntil = GetTickCount64() + ULONGLONG(fun.rainbow * 1000);
+		rainSince = -1;
+	}
+	// Snowmen (ice, snow-white) on snow at least snowDepth deep, checked every 5 s
+	static std::vector<std::pair<int, int>> snowmen; // bottom middle
+	std::erase_if(snowmen, [sim](auto &s) { int r = sim->pmap[s.second - 5][s.first]; return !r || TYP(r) != PT_ICEI; });
+	if (fun.snowmen >= 1 && sim->currentTick % 300 == 0 && int(snowmen.size()) < int(fun.snowmen))
+		for (int tries = 0; tries < 20; tries++)
+		{
+			auto play = sim->PlayRect();
+			int x = sim->rng.between(std::max(CELL, play.pos.X) + 8, std::min(XRES - CELL, play.pos.X + play.size.X) - 9);
+			int y = std::max(CELL, play.pos.Y);
+			while (y < YRES - CELL && !sim->pmap[y][x] && !sim->PixelWall(x, y)) y++;
+			int depth = 0;
+			while (y + depth < YRES && sim->pmap[y + depth][x] && TYP(sim->pmap[y + depth][x]) == PT_SNOW) depth++;
+			if (depth < int(fun.snowDepth) || y < CELL + 26) continue;
+			bool room = true;
+			for (int yy = y - 24; yy < y && room; yy++)
+				for (int xx = x - 6; xx <= x + 6 && room; xx++) room = !sim->pmap[yy][xx] && !sim->PixelWall(xx, yy);
+			if (!room) continue;
+			auto put = [&](int px, int py, int type, uint32_t colour) {
+				if (sim->pmap[py][px]) return;
+				if (int i = sim->create_part(-1, px, py, type); i >= 0) sim->parts[i].temp = 263.15f, sim->parts[i].dcolour = colour;
+			};
+			// the face and buttons first (the balls fill round them): coal eyes, a carrot nose (wood), coal buttons
+			put(x - 1, y - 20, PT_COAL, 0xFF202020), put(x + 1, y - 20, PT_COAL, 0xFF202020);
+			for (int k = 1; k <= 3; k++) put(x + k, y - 19, PT_WOOD, 0xFFFF7A1A);
+			put(x, y - 12, PT_COAL, 0xFF202020), put(x, y - 14, PT_COAL, 0xFF202020);
+			for (auto [r, my] : { std::pair{ 5, y - 5 }, { 4, y - 13 }, { 3, y - 19 } })
+				for (int dy = -r; dy <= r; dy++)
+					for (int dx = -r; dx <= r; dx++)
+						if (dx * dx + dy * dy <= r * r + r) put(x + dx, my + dy, PT_ICEI, 0xFFF4F8FF);
+			snowmen.push_back({ x, y });
+			break;
+		}
+	// Paper planes: thrown now and then from a pet (else an edge), glide down slowly, land, and fade after 10 s
+	static ULONGLONG nextPlane = 0;
+	if (fun.planes < 1) nextPlane = 0;
+	else if (!nextPlane) nextPlane = GetTickCount64() + ULONGLONG(fun.planes * 60000);
+	else if (GetTickCount64() >= nextPlane && paperPlanes.size() < 8)
+	{
+		nextPlane = GetTickCount64() + ULONGLONG(fun.planes * 60000);
+		bool right = sim->rng.chance(1, 2);
+		PaperPlane pl{ right ? float(CELL + 2) : float(XRES - CELL - 3), float(YRES / 4), 0, -0.5f, -1 };
+		for (int f = 0; f < MAX_FIGHTERS; f++)
+			if (sim->fighters[f].spwn)
+			{
+				pl.x = (sim->fighters[f].legs[4] + sim->fighters[f].legs[12]) / 2, pl.y = sim->fighters[f].legs[5] - 18;
+				right = pl.x < XRES / 2;
+				break;
+			}
+		pl.vx = (right ? 1.5f : -1.5f) * fun.planeSpeed;
+		paperPlanes.push_back(pl);
+	}
+	for (auto &pl : paperPlanes)
+	{
+		if (pl.landed >= 0)
+		{
+			pl.landed++;
+			continue;
+		}
+		float sink = 0.25f * fun.planeSpeed;
+		pl.vy += (sink - pl.vy) * 0.02f;
+		if (std::abs(pl.vx) > 0.6f * fun.planeSpeed) pl.vx *= 0.999f;
+		int nx = int(pl.x + pl.vx), ny = int(pl.y + pl.vy);
+		if (nx < CELL || ny < CELL || nx >= XRES - CELL || ny >= YRES - CELL)
+		{
+			pl.landed = 600; // off the edge: gone
+			continue;
+		}
+		if (sim->pmap[ny + 1][nx] || sim->PixelWall(nx, ny + 1) || sim->pmap[ny][nx] || sim->PixelWall(nx, ny)) pl.landed = 0;
+		else pl.x += pl.vx, pl.y += pl.vy;
+	}
+	std::erase_if(paperPlanes, [](auto &pl) { return pl.landed >= 600; });
 }
 
 static void TickWindowWalls()
@@ -5972,6 +6077,26 @@ static void TickWindowWalls()
 		for (auto &[hwnd, r] : now)
 			if (fun.openShake && !wallRects.count(hwnd)) toss(r, false);
 	}
+	// Window lift: a window dragged up fast throws what sits on it
+	if (fun.lift > 0)
+	{
+		auto &els = SimulationData::CRef().elements;
+		auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); };
+		for (auto &[hwnd, r] : now)
+			if (auto it = wallRects.find(hwnd); it != wallRects.end())
+				if (int dy = px(r.top - it->second.top, WINDOWH, sh); dy <= -3)
+				{
+					int x0 = px(r.left - sr.left, WINDOWW, sw), x1 = px(r.right - sr.left, WINDOWW, sw), y0 = px(r.top - sr.top, WINDOWH, sh);
+					for (int y = std::max(0, y0 - 80); y < std::min(YRES, y0); y++)
+						for (int x = std::max(0, x0); x < std::min(XRES, x1); x++)
+							if (int q = sim->pmap[y][x]; q && (els[TYP(q)].Properties & (TYPE_PART | TYPE_LIQUID)))
+							{
+								auto &p = sim->parts[ID(q)];
+								p.vy = std::min(p.vy, dy * fun.lift * 0.5f);
+								p.vx += (sim->rng.uniform01() - 0.5f) * 2 * fun.lift;
+							}
+				}
+	}
 	wallRects = std::move(now);
 	// Busy apps run hot: what sits on a window's top warms toward 20 C + 100 C per core its app keeps busy (at 100%)
 	static std::map<HWND, float> busy; // cores in use, sampled every half second
@@ -6091,6 +6216,56 @@ static void TickWindowWalls()
 				if (x * x + y * y <= 10) sim->create_part(-1, cx + x, cy + y, PT_BALL);
 	}
 	fun.flashed.clear();
+	// The volcano: a stone cone on the taskbar left of the hourglass; it smokes while the PC's total CPU use is past the
+	// slider, and throws lava while it is 20% past it. Rebuilt where broken, like the hourglass
+	static float cpu = 0;
+	static ULONGLONG lastIdle = 0, lastTotal = 0;
+	if (fun.volcano > 0 && sim->currentTick % 30 == 0)
+	{
+		FILETIME fi, fk, fu;
+		if (GetSystemTimes(&fi, &fk, &fu))
+		{
+			auto u64 = [](FILETIME t) { return (ULONGLONG(t.dwHighDateTime) << 32) | t.dwLowDateTime; };
+			ULONGLONG idleT = u64(fi), total = u64(fk) + u64(fu); // kernel time includes the idle time
+			if (lastTotal && total > lastTotal) cpu = 1 - float(idleT - lastIdle) / float(total - lastTotal);
+			lastIdle = idleT, lastTotal = total;
+		}
+	}
+	if (fun.volcano > 0)
+	{
+		RECT tr;
+		HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr);
+		if (tray && GetWindowRect(tray, &tr))
+		{
+			auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); };
+			int cx = px(tr.right - sr.left, WINDOWW, sw) - 100, by = px(tr.top - sr.top, WINDOWH, sh) - 1;
+			if (cx > 20 && by > 30 && by < YRES)
+			{
+				for (int r = 0; r < 14; r++) // rows up from the base; the top two leave a crater
+					for (int x = cx - 15 + r; x <= cx + 15 - r; x++)
+						if (int y = by - r; !(r >= 12 && std::abs(x - cx) <= 1) && !sim->pmap[y][x] && !sim->PixelWall(x, y))
+							if (int i = sim->create_part(-1, x, y, PT_STNE); i >= 0) sim->parts[i].dcolour = 0xFF6B4A35;
+				int top = by - 13;
+				if (cpu >= fun.volcano && sim->rng.chance(1, 6) && !sim->pmap[top - 2][cx])
+					if (int i = sim->create_part(-1, cx, top - 2, PT_SMKE); i >= 0) sim->parts[i].vy = -1;
+				// thrown lava (or the stone it cools into) goes after 8 s, so the taskbar doesn't fill up
+				static std::deque<std::pair<int, ULONGLONG>> thrown;
+				while (!thrown.empty() && GetTickCount64() >= thrown.front().second)
+				{
+					int i = thrown.front().first, ty = sim->parts[i].type;
+					thrown.pop_front();
+					if (ty == PT_LAVA || ty == PT_STNE) sim->kill_part(i);
+				}
+				if (cpu >= std::min(1.f, fun.volcano + 0.2f) && sim->rng.chance(1, 3) && !sim->pmap[top - 3][cx])
+					if (int i = sim->create_part(-1, cx, top - 3, PT_LAVA); i >= 0)
+					{
+						thrown.push_back({ i, GetTickCount64() + 8000 });
+						sim->parts[i].vy = -(2 + 2 * sim->rng.uniform01()) * fun.volcanoForce;
+						sim->parts[i].vx = (sim->rng.uniform01() - 0.5f) * 2 * fun.volcanoForce;
+					}
+			}
+		}
+	}
 	static POINT broomAt{ -1, -1 };
 	if (broom)
 	{
@@ -6197,6 +6372,34 @@ void OverlayWindows::DrawExtras(uint32_t *argb, int w, int h)
 		auto mix = [&](int s) { return uint32_t(((rgb >> s) & 0xFF) * a + ((p >> s) & 0xFF) * (1 - a)) << s; };
 		p = mix(0) | mix(8) | mix(16) | (uint32_t(255 * a + (p >> 24) * (1 - a)) << 24);
 	};
+	// the rainbow: seven bands on a wide arc, only where nothing else is drawn (behind it all); fades in and out
+	if (auto now = GetTickCount64(); now < rainbowUntil)
+	{
+		float left = (rainbowUntil - now) / 1000.f;
+		float a = fun.rainbowGlow * 0.6f * std::min({ 1.f, (fun.rainbow - left) / 3, left / 3 });
+		static const uint32_t bands[] = { 0xFF2020, 0xFF8C00, 0xFFE000, 0x30C030, 0x2080FF, 0x4B30C0, 0x9040E0 };
+		auto play = sim->PlayRect();
+		int ph = play.size.Y, th = std::max(1, ph / 240), cx = play.pos.X + play.size.X / 2, cy = play.pos.Y + ph + ph / 5, outer = cy - play.pos.Y - ph / 4;
+		for (int k = 0; k < 7 * th; k++)
+		{
+			int r = outer - k, n = int(3.2f * r);
+			for (int i = 0; i <= n; i++)
+			{
+				float t = float(M_PI) * (1 + float(i) / n);
+				int x = cx + int(r * std::cos(t)), y = cy + int(r * std::sin(t));
+				if (x >= 0 && y >= 0 && x < std::min(w, XRES) && y < std::min(h, YRES) && !(argb[y * w + x] >> 24) && !sim->PixelWall(x, y)) put(x, y, bands[k / th], a);
+			}
+		}
+	}
+	// paper planes: a white dart with a grey fold, nose first; landed ones fade over their last 2 s
+	for (auto &pl : paperPlanes)
+	{
+		int d = pl.vx >= 0 ? 1 : -1, x = int(pl.x), y = int(pl.y);
+		float a = pl.landed > 480 ? (600 - pl.landed) / 120.f : 1;
+		for (int i = 0; i < 7; i++) put(x - d * i, y, 0xB8B8C4, a);
+		for (int i = 2; i < 7; i++) put(x - d * i, y - 1, 0xF4F4F4, a);
+		for (int i = 4; i < 7; i++) put(x - d * i, y - 2, 0xF4F4F4, a);
+	}
 	// napping pets: three small z's drifting up from each one's head and fading
 	if (sim->petNap)
 	{

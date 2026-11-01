@@ -133,8 +133,11 @@ static void Step(Simulation *sim, int id, Ball &b)
 			for (int x = std::max(0, int(b.cx - b.radius) - 5); x <= std::min(XRES - 1, int(b.cx + b.radius) + 5); x++)
 				if (int r = sim->pmap[y][x]; r && (TYP(r) == PT_FIGH || TYP(r) == PT_STKM || TYP(r) == PT_STKM2))
 				{
-					b.vx = (b.cx >= x ? 1 : -1) * (2.5f + 2 * sim->rng.uniform01()) * std::min(1.f, 8 / b.radius);
-					b.vy = std::min(b.vy, -1.5f);
+					float away = b.cx >= x ? 1.f : -1.f, power = 1;
+					if (sim->petFetchRange >= 1 && TYP(r) == PT_FIGH && sim->petPointer.x >= 0) // fetch: back to the pointer
+						away = sim->petPointer.x >= b.cx ? 1.f : -1.f, power = sim->petKick;
+					b.vx = away * (2.5f + 2 * sim->rng.uniform01()) * std::min(1.f, 8 / b.radius) * power;
+					b.vy = std::min(b.vy, -1.5f * power);
 					y = YRES;
 					break;
 				}

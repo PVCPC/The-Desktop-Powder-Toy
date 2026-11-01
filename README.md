@@ -43,9 +43,14 @@ What's new
   of whatever your PC plays; the mouse pointer as a broom; closing a window throws its pile off; pumpkins on Halloween, jelly hearts on Valentine's Day and
   fireworks after midnight on New Year's; an hourglass on the taskbar that runs out in the minutes you set; a ball dropped on any app that flashes for
   your attention; fireflies in the evening (the pets chase them) and birds in the morning; a sparkle trail behind the
-  mouse pointer; confetti when you wiggle it; new windows; busy apps warm what sits on their windows, so snow melts on a working game but stays on an idle
-  app; new windows
-  shake sand loose.
+  mouse pointer; confetti when you wiggle it; busy apps warm what sits on their windows, so snow melts on a working game but stays on an idle
+  app; new windows shake sand loose. The **More fun** group has a slider for each of these (far left is off): pets
+  nap in the hours you pick (little z's float up), gather in the middle when you're away and hop for as long as you
+  like when you come back; snowmen on deep snow (how many, how deep); dragging a window up fast throws what sits on
+  it (how hard); paper planes (how often, how fast); a rainbow after the rain (how long, how bright); pets fetch a
+  ball and kick it back toward the mouse pointer (how far they'll run, how hard they kick); and a volcano by the
+  clock that smokes when your PC is busy and erupts lava when it's busier (the CPU level that wakes it, how high
+  it throws).
 - **New elements** (Special menu): BIRD flies in flocks; FISH swim in schools in any liquid; BALL makes one round
   ball per brush click, the brush's size, that bounces, rolls, knocks other balls and gets kicked about by pets, floats in water and sinks into sand; JOIN holds what you paint in
   one stroke together, so a line from a metal post hangs like a rope, a line between two posts sags like a bridge

@@ -146,6 +146,7 @@ public:
 	int petGreet = 0; // pets hop until this tick: the user is back
 	bool petNap = false;    // pets stand still asleep (the overlay draws their z's)
 	bool petGather = false; // the user is away: pets make for the middle of the screen
+	float petFetchRange = 0, petKick = 1; // pets run after balls this far (0: no fetch) and kick them back this hard
 	struct { bool on = false; int type = 0, body = 0; float x = 0, y = 0; } grab; // a BALL or JOIN body held by the mouse
 	bool parallelUpdate = true;
 	bool parallelPhase = false; // the blocks are running: creating, killing and changing particles take parallelLock

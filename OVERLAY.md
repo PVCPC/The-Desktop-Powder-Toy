@@ -395,12 +395,22 @@ The "More fun" group under Fun, one table (moreFun[]) for the rows and their pre
   and z's float up from them (drawn on the frame, OverlayWindows::DrawExtras). Tested: pet held still.
 - [x] Pets gather: "Pets gather after" (minutes away) -> pets walk to the middle of the play area; "Welcome back hop"
   (0-10 s) sets how long they hop when you return. Tested: pet walked 20 -> 63 (middle 80) and waited.
-- [ ] Snowmen: deep enough snow gets a carrot nose and coal eyes (how many, how deep).
-- [ ] Window lift: a window dragged up fast tosses what sits on it (strength).
-- [ ] Paper planes: a pet now and then throws one that glides across (how often, speed).
-- [ ] Rainbow after rain (how long it stays, how bright).
-- [ ] Pets fetch: a thrown ball gets chased and kicked back toward the pointer (how keen, kick strength).
-- [ ] Taskbar volcano: heavy CPU makes a volcano by the clock smoke, then erupt (CPU level that wakes it, force).
+- [x] Snowmen: "Snowmen" (0-5) / "Snowman needs" (6-40 px of snow): every 5 s, a spot with snow that deep gets three
+  stacked ice balls (snow white, 263 K, so they melt when it warms) with coal eyes and buttons and a wood carrot.
+  Tested: two built on cold snow (173 ice, 4 coal, 3 wood each).
+- [x] Window lift: "Window lift" (0-3): a window whose top moves up 3+ sim px in a tick throws the powder and liquid
+  within 80 px above it (vy = move x strength / 2, a little sideways spread). Normal mode only (TickWindowWalls).
+  Tested with my own form jerked up 80 px: sand on it flew from y 439 to 212 at strength 2.
+- [x] Paper planes: "Paper planes" (every N minutes) / "Plane speed": thrown from the first pet (else a screen edge),
+  glides and sinks slowly, lands on anything solid or a window, fades out after 10 s. Drawn, not particles.
+- [x] Rainbow after rain: "Rainbow after rain" (seconds) / "Rainbow brightness": rain (Weather) that fell 30 s+ and
+  then stops for 2 s shows a 7-band arc sized to the play area, fading in and out, behind everything and not over
+  windows. Checked on a frame dump.
+- [x] Pets fetch: "Pets fetch" (range px) / "Fetch kick": pets run after a BALL in range (not one already within
+  30 px of the pointer); BALL kicks it toward the pointer. Tested: pet ran 75 -> 17, ball kicked 20 -> 126 toward it.
+- [x] Taskbar volcano: "Volcano wakes at" (total CPU, GetSystemTimes every 30 ticks) / "Volcano force": a stone
+  cone 100 px left of the tray end smokes past the level and throws lava 20% past it; thrown lava (or its stone)
+  goes after 8 s. Normal mode only. Tested in a free gap: smoke at idle, lava under 16 busy threads.
 - [ ] Release v0.7.4.
 
 ## Ideas

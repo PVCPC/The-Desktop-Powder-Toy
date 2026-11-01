@@ -110,6 +110,25 @@ static int PetComm(Simulation *sim, playerst *figh, int f)
 			dir[f] = std::abs(fireflyX[f] - cx) < 4 ? 0 : (fireflyX[f] < cx ? 1 : 2);
 			if (!dir[f] && fireflyY[f] < cy - 4 && sim->rng.chance(1, 8)) return 0x04;
 		}
+		// fetch: run after a ball (not one already by the pointer); BALL kicks it back toward the pointer
+		static int ballX[MAX_FIGHTERS], hasBall[MAX_FIGHTERS];
+		if (!seen[f] && sim->petFetchRange >= 1)
+		{
+			if ((sim->currentTick + f) % 20 == 10)
+			{
+				hasBall[f] = 0;
+				int range = int(sim->petFetchRange), best = 1 << 30;
+				for (int y = std::max(0, cy - 30); y < std::min(YRES, cy + 8); y++)
+					for (int x = std::max(0, cx - range); x < std::min(XRES, cx + range); x++)
+						if (int r = sim->pmap[y][x]; r && TYP(r) == PT_BALL && std::abs(x - cx) < best && !(m.x >= 0 && std::abs(x - m.x) < 30))
+							best = std::abs(x - cx), ballX[f] = x, hasBall[f] = 1;
+			}
+			if (hasBall[f])
+			{
+				left[f] = 20;
+				dir[f] = std::abs(ballX[f] - cx) < 3 ? 0 : (ballX[f] < cx ? 1 : 2);
+			}
+		}
 	}
 	if (sim->petNap && flee[f] <= 0)
 	{
