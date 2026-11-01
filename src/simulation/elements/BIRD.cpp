@@ -48,7 +48,8 @@ void Element::Element_BIRD()
 
 static int update(UPDATE_FUNC_ARGS)
 {
-	Flock(sim, parts[i], i, x, y, 1.5f, 1, [sim](int fx, int fy) {
+	bool firefly = parts[i].tmp == 1; // the overlay's evening fireflies: slow loners
+	Flock(sim, parts[i], i, x, y, firefly ? 0.3f : 1.5f, firefly ? 0 : 1, [sim](int fx, int fy) {
 		unsigned r = 0;
 		return sim->eval_move(PT_BIRD, fx, fy, &r) || TYP(r) == PT_BIRD;
 	});

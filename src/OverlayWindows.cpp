@@ -108,7 +108,7 @@ namespace
 		float hot = 0;                           // busy apps' windows warm what sits on them, 0-3
 		float hourglass = 0;                     // minutes the taskbar hourglass runs (0: none)
 		int weatherKind = 0;                    // 0 by the season, 1 snow, 2 rain, 3 leaves
-		bool bin = false, broom = false, closeToss = false, openShake = false, holidays = false, notify = false;
+		bool bin = false, broom = false, closeToss = false, openShake = false, holidays = false, notify = false, dayNight = false;
 		std::vector<HWND> flashed; // windows that flashed their taskbar button (a new message) since the last tick
 	} fun;
 	HWND mainWindow = nullptr;    // TPT's own window
@@ -2601,7 +2601,7 @@ namespace
 			}
 			y += S(26) * int(std::size(feel)) + S(94);
 
-			top = Group(x, y, w, S(26) * 14 + S(8), L"Fun");
+			top = Group(x, y, w, S(26) * 15 + S(8), L"Fun");
 			struct FunToggle { const wchar_t *name, *tip; bool *v; const char *pref; };
 			FunToggle funToggles[] = {
 				{ L"Recycle Bin eats sand", L"Sand that lands on the Recycle Bin icon disappears into it (with icons as walls)", &fun.bin, "Bin" },
@@ -2610,6 +2610,7 @@ namespace
 				{ L"New windows shake sand loose", L"A window that opens bumps the sand above it into the air", &fun.openShake, "OpenShake" },
 				{ L"Holidays", L"Pumpkins roll about on Halloween, jelly hearts fall on Valentine's Day, fireworks go up after midnight on New Year's", &fun.holidays, "Holidays" },
 				{ L"Notifications drop a ball", L"When an app flashes its taskbar button (a new message in Discord, Teams and the like), a ball drops onto its window", &fun.notify, "Notify" },
+				{ L"Day and night", L"By the clock: fireflies come out and fallen leaves go dark in the evening, birds fly over in the morning", &fun.dayNight, "DayNight" },
 			};
 			for (int i = 0; i < int(std::size(funToggles)); i++)
 			{
@@ -2655,7 +2656,7 @@ namespace
 					GlobalPrefs::Ref().Set("Overlay.Fun.WeatherKind", i);
 				}) + S(18);
 			}
-			y += S(26) * 14 + S(16);
+			y += S(26) * 15 + S(16);
 
 			top = Group(x, y, w, S(76), L"Gravity");
 			const wchar_t *gravs[] = { L"Vertical", L"Off", L"Radial", L"Custom" };
@@ -4749,7 +4750,7 @@ void OverlayWindows::Init(void *mainHwnd)
 		*v = prefs.Get(ByteString("Overlay.Feel.") + name, *v);
 	for (auto [v, name] : { std::pair{ &fun.pets, "Pets" }, { &fun.weather, "Weather" }, { &fun.music, "Music" }, { &fun.weatherIdle, "WeatherIdle" }, { &fun.weatherLast, "WeatherLast" }, { &fun.hot, "Hot" }, { &fun.hourglass, "Hourglass" } })
 		*v = prefs.Get(ByteString("Overlay.Fun.") + name, *v);
-	for (auto [v, name] : { std::pair{ &fun.bin, "Bin" }, { &fun.broom, "Broom" }, { &fun.closeToss, "CloseToss" }, { &fun.openShake, "OpenShake" }, { &fun.holidays, "Holidays" }, { &fun.notify, "Notify" } })
+	for (auto [v, name] : { std::pair{ &fun.bin, "Bin" }, { &fun.broom, "Broom" }, { &fun.closeToss, "CloseToss" }, { &fun.openShake, "OpenShake" }, { &fun.holidays, "Holidays" }, { &fun.notify, "Notify" }, { &fun.dayNight, "DayNight" } })
 		*v = prefs.Get(ByteString("Overlay.Fun.") + name, *v);
 	fun.weatherKind = prefs.Get("Overlay.Fun.WeatherKind", 0);
 	// Default UI scale: the larger of Windows' display scaling (TPT is DPI aware) and screen height / 1080, in
@@ -5567,6 +5568,46 @@ static void TickFun(Simulation *sim)
 		if (idleMs >= 60000) away = true;
 		else if (away && idleMs < 1000) away = false, sim->petGreet = sim->currentTick + 120;
 	}
+	// Day and night, by the clock: fireflies from 19:00 to 05:00 (and darker leaves), a flock of birds now and then
+	// from 06:00 to 10:00
+	int hour;
+	{
+		time_t now = time(nullptr);
+		tm local;
+		localtime_s(&local, &now);
+		hour = local.tm_hour;
+	}
+	bool dusk = fun.dayNight && (hour >= 19 || hour < 5);
+	static std::vector<std::pair<int, int>> visitors; // particle, the tick it goes (fireflies: never, while it's dark)
+	std::erase_if(visitors, [&](auto &v) {
+		auto &p = sim->parts[v.first];
+		bool firefly = v.second < 0;
+		if (p.type != PT_BIRD || (p.tmp == 1) != firefly) return true; // gone, or the slot reused
+		if ((firefly && !dusk) || (!firefly && sim->currentTick >= v.second)) return sim->kill_part(v.first), true;
+		if (firefly) p.dcolour = (sim->currentTick + v.first * 37) % 160 < 50 ? 0xFFFFF070 : 0xFF404020; // blink
+		return false;
+	});
+	auto open = [sim](int x, int y) { return !sim->pmap[y][x] && !sim->PixelWall(x, y); }; // not in a window or on anything
+	if (dusk && visitors.size() < 12 && sim->rng.chance(1, 60))
+	{
+		int x = sim->rng.between(XRES / 10, XRES * 9 / 10), y = YRES - sim->rng.between(40, 160);
+		if (open(x, y))
+			if (int i = sim->create_part(-1, x, y, PT_BIRD); i >= 0) sim->parts[i].tmp = 1, visitors.push_back({ i, -1 });
+	}
+	if (fun.dayNight && hour >= 6 && hour < 10 && sim->rng.chance(1, 7200))
+	{
+		// somewhere open in the top half (windows are walls: one spawned inside would be stuck)
+		float vx = sim->rng.chance(1, 2) ? 1.5f : -1.5f;
+		int x0 = 0, y0 = 0;
+		for (int tries = 0, made = 0; tries < 60 && made < 7; tries++)
+		{
+			if (!made) x0 = sim->rng.between(XRES / 10, XRES * 9 / 10), y0 = sim->rng.between(40, YRES / 2);
+			int x = x0 + sim->rng.between(-10, 10), y = y0 + sim->rng.between(-6, 6);
+			if (open(x, y))
+				if (int i = sim->create_part(-1, x, y, PT_BIRD); i >= 0)
+					sim->parts[i].vx = vx, visitors.push_back({ i, sim->currentTick + 3600 }), made++;
+		}
+	}
 	bool idle = fun.weatherIdle < 1 || (GetLastInputInfo(&input) && GetTickCount() - input.dwTime >= DWORD(fun.weatherIdle * 60000));
 	if (fun.weather > 0 && idle)
 	{
@@ -5591,6 +5632,7 @@ static void TickFun(Simulation *sim)
 			if (kind == 1) p.temp = 263.15f, p.vx = sim->rng.uniform01() - 0.5f;
 			if (kind == 2) p.vy = 3;
 			if (kind == 3) p.dcolour = autumn[sim->rng.between(0, 4)], p.vx = (sim->rng.uniform01() - 0.5f) * 2;
+			if (kind == 3 && dusk) p.dcolour = 0xFF000000 | ((p.dcolour >> 1) & 0x7F7F7F); // leaves after dark
 			float life = std::max(10.f, fun.weatherLast) * 60 * (0.6f + 0.8f * sim->rng.uniform01()); // spread: they thin out
 			if (kind == 2) life = std::min(life, 300.f); // rain soaks away quickly
 			fallen.push_back({ i, type, sim->currentTick + int(life) });
