@@ -106,6 +106,7 @@ namespace
 		float pets = 0, weather = 0, music = 0; // pets: how many; weather and music 0-3
 		float weatherIdle = 0, weatherLast = 90; // weather only after this many minutes idle (0: always); seconds a piece stays
 		float hot = 0;                           // busy apps' windows warm what sits on them, 0-3
+		float hourglass = 0;                     // minutes the taskbar hourglass runs (0: none)
 		int weatherKind = 0;                    // 0 by the season, 1 snow, 2 rain, 3 leaves
 		bool bin = false, broom = false, closeToss = false, openShake = false, holidays = false;
 	} fun;
@@ -2599,7 +2600,7 @@ namespace
 			}
 			y += S(26) * int(std::size(feel)) + S(94);
 
-			top = Group(x, y, w, S(26) * 12 + S(8), L"Fun");
+			top = Group(x, y, w, S(26) * 13 + S(8), L"Fun");
 			struct FunToggle { const wchar_t *name, *tip; bool *v; const char *pref; };
 			FunToggle funToggles[] = {
 				{ L"Recycle Bin eats sand", L"Sand that lands on the Recycle Bin icon disappears into it (with icons as walls)", &fun.bin, "Bin" },
@@ -2624,6 +2625,7 @@ namespace
 				{ L"Weather lasts", L"How long each flake, leaf or drop stays before it melts or fades; they thin out one by one", &fun.weatherLast, 10, 600, "WeatherLast", 3 },
 				{ L"Music bounce", L"Sand hops and fire flares to the beat of whatever your PC is playing (only the sound level is read)", &fun.music, 0, 3, "Music", 0 },
 				{ L"Busy apps run hot", L"A window warms whatever sits on it by how hard its app is working: snow melts on a busy game or browser and stays on an idle one", &fun.hot, 0, 3, "Hot", 0 },
+				{ L"Hourglass", L"A glass hourglass on the taskbar whose sand runs out in this many minutes, counted from when you set it; then it starts again", &fun.hourglass, 0, 120, "Hourglass", 2 },
 			};
 			int sy = top + int(std::size(funToggles)) * S(26);
 			for (auto &f : funSliders)
@@ -2651,7 +2653,7 @@ namespace
 					GlobalPrefs::Ref().Set("Overlay.Fun.WeatherKind", i);
 				}) + S(18);
 			}
-			y += S(26) * 12 + S(16);
+			y += S(26) * 13 + S(16);
 
 			top = Group(x, y, w, S(76), L"Gravity");
 			const wchar_t *gravs[] = { L"Vertical", L"Off", L"Radial", L"Custom" };
@@ -4736,7 +4738,7 @@ void OverlayWindows::Init(void *mainHwnd)
 	overlayFeel.shardParticles = prefs.Get("Overlay.Feel.ShardParticles", false);
 	for (auto [v, name] : { std::pair{ &overlayFeel.grip, "Grip" }, { &overlayFeel.fling, "Fling" }, { &overlayFeel.push, "Push" }, { &overlayFeel.wind, "Wind" }, { &overlayFeel.scorch, "Scorch" }, { &overlayFeel.frost, "Frost" }, { &overlayFeel.acid, "Acid" }, { &overlayFeel.water, "Water" }, { &overlayFeel.acidEat, "AcidEat" }, { &overlayFeel.blast, "Blast" }, { &overlayFeel.holeOpacity, "HoleSolid" }, { &overlayFeel.shards, "Shards" }, { &overlayFeel.shardSize, "ShardSize" }, { &overlayFeel.blackHole, "BlackHole" }, { &overlayFeel.shake, "Shake" } })
 		*v = prefs.Get(ByteString("Overlay.Feel.") + name, *v);
-	for (auto [v, name] : { std::pair{ &fun.pets, "Pets" }, { &fun.weather, "Weather" }, { &fun.music, "Music" }, { &fun.weatherIdle, "WeatherIdle" }, { &fun.weatherLast, "WeatherLast" }, { &fun.hot, "Hot" } })
+	for (auto [v, name] : { std::pair{ &fun.pets, "Pets" }, { &fun.weather, "Weather" }, { &fun.music, "Music" }, { &fun.weatherIdle, "WeatherIdle" }, { &fun.weatherLast, "WeatherLast" }, { &fun.hot, "Hot" }, { &fun.hourglass, "Hourglass" } })
 		*v = prefs.Get(ByteString("Overlay.Fun.") + name, *v);
 	for (auto [v, name] : { std::pair{ &fun.bin, "Bin" }, { &fun.broom, "Broom" }, { &fun.closeToss, "CloseToss" }, { &fun.openShake, "OpenShake" }, { &fun.holidays, "Holidays" } })
 		*v = prefs.Get(ByteString("Overlay.Fun.") + name, *v);
@@ -5880,6 +5882,65 @@ static void TickWindowWalls()
 			for (int y = std::max(0, y0 - 3); y < std::min(YRES, y0); y++)
 				for (int x = x0; x < x1; x++)
 					if (int q = sim->pmap[y][x]; q && sim->parts[ID(q)].temp < to) sim->parts[ID(q)].temp += (to - sim->parts[ID(q)].temp) * 0.05f;
+		}
+	}
+	// The hourglass: glass on the taskbar near its right end; sand drops through the (plugged) neck one grain at a time
+	// so the top holds the time left; it refills when it runs out. Rebuilt where anything broke it or the sim was cleared
+	if (fun.hourglass >= 1)
+	{
+		static float minutes = 0;
+		static ULONGLONG start = 0;
+		if (minutes != fun.hourglass) minutes = fun.hourglass, start = GetTickCount64();
+		RECT tr;
+		HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr);
+		if (tray && GetWindowRect(tray, &tr))
+		{
+			auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); };
+			int cx = px(tr.right - sr.left, WINDOWW, sw) - 40, by = px(tr.top - sr.top, WINDOWH, sh) - 1, ty = by - 24;
+			auto half = [](int r) { return r < 12 ? 7 - r * 6 / 11 : 7 - (24 - r) * 6 / 11; }; // inside half-width, row 0-24
+			if (cx > 10 && ty > 10 && by < YRES)
+			{
+				for (int r = -1; r <= 25; r++) // the glass: both sides of every row, the ends, and the plug in the neck
+					for (int x = cx - 9; x <= cx + 9; x++)
+					{
+						int y = ty + r;
+						bool glass = r == -1 || r == 25 || (r == 12 && std::abs(x - cx) <= 1) || (r >= 0 && r <= 24 && std::abs(x - cx) == half(r) + 1);
+						if (glass && !sim->pmap[y][x] && !sim->PixelWall(x, y)) sim->create_part(-1, x, y, PT_GLAS);
+					}
+				// top bulb rows 0-11, bottom 13-24
+				int top = 0, bottom = 0, total = 0;
+				for (int r = 0; r < 12; r++) total += 2 * half(r) + 1;
+				total = total * 3 / 4;
+				for (int r = 0; r <= 24; r++)
+					for (int x = cx - half(r); x <= cx + half(r); x++)
+						if (int q = sim->pmap[ty + r][x]; q && TYP(q) == PT_SAND) (r < 12 ? top : bottom)++;
+				double run = (GetTickCount64() - start) / 60000.0 / minutes;
+				if (run >= 1) start = GetTickCount64(), run = 0; // ran out: turn it over
+				int want = int(std::ceil(total * (1 - run)));
+				auto add = [&](int r0, int r1) { // a grain in the lowest free spot of rows r0-r1
+					for (int r = r1; r >= r0; r--)
+						for (int x = cx - half(r); x <= cx + half(r); x++)
+							if (!sim->pmap[ty + r][x]) return sim->create_part(-1, x, ty + r, PT_SAND) >= 0;
+					return false;
+				};
+				auto take = [&](int r0, int r1) { // the lowest grain of rows r0-r1
+					for (int r = r1; r >= r0; r--)
+						for (int x = cx - half(r); x <= cx + half(r); x++)
+							if (int q = sim->pmap[ty + r][x]; q && TYP(q) == PT_SAND) return sim->kill_part(ID(q)), true;
+					return false;
+				};
+				for (int k = 0; k < 3 && top > want; k++, top--, bottom++) // through the neck, falling from just under it
+				{
+					take(0, 11);
+					if (sim->pmap[ty + 13][cx] || sim->create_part(-1, cx, ty + 13, PT_SAND) < 0) add(13, 24);
+				}
+				for (int k = 0; k < 20 && top < want; k++, top++) // turned over (or cleared): back up top
+				{
+					if (bottom > 0 && take(13, 24)) bottom--;
+					add(0, 11);
+				}
+				for (int k = 0; k < 20 && top + bottom < total; k++, bottom++) add(13, 24);
+			}
 		}
 	}
 	static POINT broomAt{ -1, -1 };

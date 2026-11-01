@@ -363,7 +363,9 @@ tray menu: the tray menu stays native on purpose.
   in sideways so it rolls; 14 Feb = a red jelly (JOIN) heart every 5 s; 1 Jan 00:00-01:00 = lit FIRW fireworks from
   near the bottom. Tested (other dates faked): pumpkins roll ~90 px after landing, hearts stay whole (108 px), fireworks
   burst. Balls: still air now brakes a roll 10x less (wind still pushes as before).
-- [ ] Taskbar hourglass: sand runs out with the hour or a set timer.
+- [x] Taskbar hourglass (2026-10-31, Fun slider "Hourglass", 1-120 min from when it is set): GLAS on the taskbar near its
+  right end; grains drop through the plugged neck so the top holds the time left, then it turns over; rebuilt where
+  broken or cleared. Tested at 1 min: 88 grains drained evenly (74/14 -> 6/82), turned over to 88/0, nothing lost.
 - [ ] Notifications drop something (a ball or leaf) onto that app's window.
 - [ ] Day and night: fireflies and darker leaves in the evening, birds in the morning, by the clock.
 - [ ] Release v0.7.2 once a few of these are in.
