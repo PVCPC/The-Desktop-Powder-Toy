@@ -24,11 +24,15 @@ struct OverlayFeel
 {
 	float grip = 1, fling = 1, push = 1, wind = 1, scorch = 1, frost = 1, acid = 1, water = 1, acidEat = 1, blast = 1, holeOpacity = 0; // holeOpacity: how much of a broken window still shows in its holes
 	float shards = 1, shardSize = 3, blackHole = 1, shake = 0;
+	float heal = 0; // minutes for a big hole to grow back in (0: never)
 	bool destructible = false; // acid and blasts eat holes in windows and icons (overlay only)
 	bool shardTint = true;     // shards take the colour of what broke
 	bool shardParticles = false; // shards are sim particles (broken glass) instead of drawn chunks
 };
 extern OverlayFeel overlayFeel;
+
+// Where shooting stars came down since the last tick (sim pixels): sparks, and a chunk out of a window they hit.
+extern std::vector<std::pair<int, int>> overlayImpacts;
 
 // Reads what's on screen (without the overlay) under a box of sim pixels, 0x00RRGGBB, w * h; false where it can't.
 extern bool (*overlayGrabScreen)(int x0, int y0, int w, int h, uint32_t *out);

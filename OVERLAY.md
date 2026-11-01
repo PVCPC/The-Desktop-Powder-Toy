@@ -432,6 +432,16 @@ On/off things are Fun toggles; things with an amount are More fun sliders.
 - [x] Mouse wind (slider 0-3, pref Wind): a fast mouse swipe (not dragging) blows powder, liquid and gas within
   24 px along with it. Tested: sand pile shifted 3.5 px over 8 s of swipes; none with it off.
 - [x] Release v0.7.6 (2026-11-01).
+- [x] Shooting stars land (toggle, pref StarsLand; user 11-01): 1 in 3 stars falls steeper and keeps going until it
+  hits a window, icon or particle (not in its first 30 px): sparks (EMBR) and a puff of pressure, and with
+  Destructible on a chunk out of the window (overlayImpacts, handled in OverlayApplyWalls). Tested: 21 hits in 20 s
+  in a fast-stars run, sparks made.
+- [x] Windows heal (slider 0-10 min, pref Fun.Heal = overlayFeel.heal): holes grow back in from their edges, one ragged
+  ring every heal/20 of the time; a spot with a particle in it waits. Tested on a fake wall: 430 -> 220 hole pixels in
+  ~30 s at 1 min; unchanged with it off.
+- [x] Birds rest for (slider 2-60 s, pref BirdRest -> sim->birdRest): rest is 0.5x-1.5x of it. Tested: 2 s -> at
+  most 177 ticks, 30 s -> up to 1979.
+- [x] Release v0.7.7 (2026-11-01).
 
 ## Ideas
 

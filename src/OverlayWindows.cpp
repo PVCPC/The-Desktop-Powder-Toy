@@ -120,6 +120,8 @@ namespace
 		bool bin = false, broom = false, closeToss = false, openShake = false, holidays = false, notify = false, dayNight = false, trail = false, confetti = false;
 		bool castles = false, perch = false;     // pets build sandcastles; morning birds land and rest
 		float stars = 0, puddles = 0, wind = 0;  // shooting stars an hour at night; s rain lies as puddles; mouse wind
+		bool starsLand = false;                  // now and then a shooting star comes down and hits something
+		float birdRest = 10;                     // s a landed bird rests (about)
 		std::vector<HWND> flashed; // windows that flashed their taskbar button (a new message) since the last tick
 	} fun;
 	// A Fun slider row; unit: 0 %, 1 count, 2 minutes, 3 seconds (10 s steps), 4 clock hour, 5 px, 6 seconds
@@ -145,6 +147,8 @@ namespace
 		{ L"Shooting stars", L"At night (8 pm to 5 am), about this many shooting stars an hour streak across the empty desktop", &fun.stars, 0, 30, "Stars", 7 },
 		{ L"Puddles last", L"Rain that lands on something lies there as a puddle this many seconds more before it dries up", &fun.puddles, 0, 120, "Puddles", 6 },
 		{ L"Mouse wind", L"Swipe the mouse pointer fast across the desktop and it blows the sand, snow and smoke near it (how hard)", &fun.wind, 0, 3, "Wind", 0 },
+		{ L"Birds rest for", L"About how long a bird that landed (Birds land and rest) sits before it flies on", &fun.birdRest, 2, 60, "BirdRest", 6 },
+		{ L"Windows heal", L"Holes and chunks broken out of windows and icons (Destructible) grow back in from their edges, a big hole in about this long", &overlayFeel.heal, 0, 10, "Heal", 2 },
 	};
 	// paper planes in flight or landed (sim pixels; landed: ticks since), and when the rainbow goes (GetTickCount64)
 	struct PaperPlane { float x, y, vx, vy; int landed; };
@@ -2642,7 +2646,7 @@ namespace
 			}
 			y += S(26) * int(std::size(feel)) + S(94);
 
-			top = Group(x, y, w, S(26) * 19 + S(8), L"Fun");
+			top = Group(x, y, w, S(26) * 20 + S(8), L"Fun");
 			struct FunToggle { const wchar_t *name, *tip; bool *v; const char *pref; };
 			FunToggle funToggles[] = {
 				{ L"Recycle Bin eats sand", L"Sand that lands on the Recycle Bin icon disappears into it (with icons as walls)", &fun.bin, "Bin" },
@@ -2656,6 +2660,7 @@ namespace
 				{ L"Confetti", L"Wiggle the mouse pointer quickly from side to side to throw a burst of confetti", &fun.confetti, "Confetti" },
 				{ L"Pets build sandcastles", L"A pet next to a big enough sand pile now and then builds a little castle from it; it crumbles back into sand after 5 minutes", &fun.castles, "Castles" },
 				{ L"Birds land and rest", L"The morning birds (Day and night) now and then land on a window, icon or pile and rest a few seconds", &fun.perch, "Perch" },
+				{ L"Shooting stars land", L"Now and then a shooting star comes all the way down and hits a window or a pile with a burst of sparks; with Destructible on it knocks a chunk out of the window", &fun.starsLand, "StarsLand" },
 			};
 			for (int i = 0; i < int(std::size(funToggles)); i++)
 			{
@@ -2707,7 +2712,7 @@ namespace
 					GlobalPrefs::Ref().Set("Overlay.Fun.WeatherKind", i);
 				}) + S(18);
 			}
-			y += S(26) * 19 + S(16);
+			y += S(26) * 20 + S(16);
 
 			top = Group(x, y, w, S(26) * int(std::size(moreFun)) + S(8), L"More fun");
 			for (int i = 0; i < int(std::size(moreFun)); i++)
@@ -4808,7 +4813,7 @@ void OverlayWindows::Init(void *mainHwnd)
 		*v = prefs.Get(ByteString("Overlay.Feel.") + name, *v);
 	for (auto [v, name] : { std::pair{ &fun.pets, "Pets" }, { &fun.weather, "Weather" }, { &fun.music, "Music" }, { &fun.weatherIdle, "WeatherIdle" }, { &fun.weatherLast, "WeatherLast" }, { &fun.hot, "Hot" }, { &fun.hourglass, "Hourglass" } })
 		*v = prefs.Get(ByteString("Overlay.Fun.") + name, *v);
-	for (auto [v, name] : { std::pair{ &fun.bin, "Bin" }, { &fun.broom, "Broom" }, { &fun.closeToss, "CloseToss" }, { &fun.openShake, "OpenShake" }, { &fun.holidays, "Holidays" }, { &fun.notify, "Notify" }, { &fun.dayNight, "DayNight" }, { &fun.trail, "Trail" }, { &fun.confetti, "Confetti" }, { &fun.castles, "Castles" }, { &fun.perch, "Perch" } })
+	for (auto [v, name] : { std::pair{ &fun.bin, "Bin" }, { &fun.broom, "Broom" }, { &fun.closeToss, "CloseToss" }, { &fun.openShake, "OpenShake" }, { &fun.holidays, "Holidays" }, { &fun.notify, "Notify" }, { &fun.dayNight, "DayNight" }, { &fun.trail, "Trail" }, { &fun.confetti, "Confetti" }, { &fun.castles, "Castles" }, { &fun.perch, "Perch" }, { &fun.starsLand, "StarsLand" } })
 		*v = prefs.Get(ByteString("Overlay.Fun.") + name, *v);
 	fun.weatherKind = prefs.Get("Overlay.Fun.WeatherKind", 0);
 	for (auto &f : moreFun)
@@ -5882,7 +5887,7 @@ static void TickFun(Simulation *sim)
 		}
 	}
 	lastX = sim->petPointer.x;
-	sim->petFetchRange = fun.fetch, sim->petKick = fun.kick;
+	sim->petFetchRange = fun.fetch, sim->petKick = fun.kick, sim->birdRest = int(fun.birdRest * 60);
 	// Rainbow: rain that fell half a minute or more, then stopped for two seconds
 	if (rainLast == sim->currentTick)
 	{
@@ -6515,7 +6520,7 @@ void OverlayWindows::DrawExtras(uint32_t *argb, int w, int h)
 	}
 	// shooting stars: at night, now and then a bright head with a fading tail streaks down across the open desktop
 	{
-		struct Star { float x, y, dx, dy; ULONGLONG born; };
+		struct Star { float x, y, dx, dy; ULONGLONG born; bool land; float hit = -1; ULONGLONG hitAt = 0; }; // land: comes down until it hits something
 		static std::vector<Star> stars;
 		static ULONGLONG nextStar = 0;
 		auto now = GetTickCount64();
@@ -6527,12 +6532,26 @@ void OverlayWindows::DrawExtras(uint32_t *argb, int w, int h)
 			nextStar = 0;
 			auto play = sim->PlayRect();
 			float dir = sim->rng.chance(1, 2) ? 1.f : -1.f, len = play.size.X * (0.15f + 0.15f * sim->rng.uniform01());
-			stars.push_back({ play.pos.X + play.size.X * (0.15f + 0.7f * sim->rng.uniform01()), play.pos.Y + play.size.Y * 0.4f * sim->rng.uniform01(), dir * len, len * 0.35f, now });
+			bool land = fun.starsLand && sim->rng.chance(1, 3);
+			stars.push_back({ play.pos.X + play.size.X * (0.15f + 0.7f * sim->rng.uniform01()), play.pos.Y + play.size.Y * 0.4f * sim->rng.uniform01(), dir * len, len * (land ? 0.8f : 0.35f), now, land });
 		}
 		for (auto &st : stars)
 		{
-			float t = (now - st.born) / 900.f, fade = t > 0.7f ? (1 - t) / 0.3f : 1;
+			float t = (now - st.born) / 900.f, fade = st.land ? 1 : t > 0.7f ? (1 - t) / 0.3f : 1;
 			float len = std::hypot(st.dx, st.dy), ux = st.dx / len, uy = st.dy / len;
+			if (st.land && st.hit < 0)
+				for (float d = 0; d <= len * t; d += 1) // the first window, particle or screen edge on its way down
+				{
+					int x = int(st.x + ux * d), y = int(st.y + uy * d);
+					bool out = x < 0 || y < 0 || x >= XRES || y >= YRES;
+					if (out || (d > 30 && (sim->PixelWall(x, y) || sim->pmap[y][x]))) // (not what it started over)
+					{
+						st.hit = d, st.hitAt = now;
+						if (!out) overlayImpacts.push_back({ x, y });
+						break;
+					}
+				}
+			if (st.hit >= 0) t = st.hit / len, fade = std::max(0.f, 1 - (now - st.hitAt) / 400.f); // it hit: the tail fades
 			float hx = st.x + st.dx * t, hy = st.y + st.dy * t, tail = std::min(len * t, 90.f);
 			for (int k = 0; k < int(tail); k++) // head first, the tail falls behind and fades
 			{
@@ -6541,7 +6560,7 @@ void OverlayWindows::DrawExtras(uint32_t *argb, int w, int h)
 					put(x, y, k < 3 ? 0xFFFFFF : 0xCFE0FF, fade * (1 - k / 90.f));
 			}
 		}
-		std::erase_if(stars, [now](auto &st) { return now - st.born >= 900; });
+		std::erase_if(stars, [now](auto &st) { return now - st.born >= (st.land ? 9000u : 900u) || (st.hitAt && now - st.hitAt >= 400); });
 	}
 	// paper planes: a white dart with a grey fold, nose first; landed ones fade over their last 2 s
 	for (auto &pl : paperPlanes)

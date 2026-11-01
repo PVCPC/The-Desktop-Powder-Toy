@@ -9,6 +9,7 @@
 #include <map>
 
 OverlayFeel overlayFeel;
+std::vector<std::pair<int, int>> overlayImpacts;
 
 // Chunks of broken window, drawn over the sim: jagged pieces that spin, arc, bounce off windows and fade where they land.
 struct Debris
@@ -59,6 +60,32 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 			for (int x = w.x0; x < w.x1; x++)
 				if (w.solid(x, y)) mask[size_t(y) * XRES + x] = 1;
 		}
+	// Healing: holes grow back in from their edges (out of the window counts as whole), one ragged ring at a time,
+	// 20 rings in the minutes set; a spot with a particle in it waits
+	static int healTick = 0;
+	if (overlayFeel.heal > 0 && ++healTick >= std::max(1, int(overlayFeel.heal * 3600 / 20)))
+	{
+		healTick = 0;
+		for (auto &[id, m] : sim->windowMarks)
+		{
+			auto &h = m.a[Simulation::MarkHole];
+			if (!m.any[Simulation::MarkHole] || h.empty()) continue;
+			auto was = h;
+			bool left = false;
+			for (int j = 0; j < m.h; j++)
+				for (int i = 0; i < m.w; i++)
+				{
+					if (!was[size_t(j) * m.w + i]) continue;
+					auto whole = [&](int a, int b) { return a < 0 || b < 0 || a >= m.w || b >= m.h || !was[size_t(b) * m.w + a]; };
+					int x = m.x + i, y = m.y + j;
+					bool busy = x >= 0 && y >= 0 && x < XRES && y < YRES && sim->pmap[y][x];
+					if (!busy && (whole(i - 1, j) || whole(i + 1, j) || whole(i, j - 1) || whole(i, j + 1)) && sim->rng.uniform01() < 0.6f)
+						h[size_t(j) * m.w + i] = 0;
+					else left = true;
+				}
+			m.any[Simulation::MarkHole] = left;
+		}
+	}
 	// Destructible (off unless switched on): acid and blasts eat holes in windows and icons. Only the sim's walls and
 	// the overlay's paint change, and clearing the sim mends them: the real windows and icons are never touched.
 	using M = Simulation::WindowMark;
@@ -191,6 +218,16 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 				break;
 			}
 		}
+	// shooting stars that came down: a burst of sparks and a puff, and a chunk out of a window they hit
+	for (auto [ix, iy] : overlayImpacts)
+	{
+		if (overlayFeel.destructible && overlayFeel.blast > 0) chunk(ix, iy, 4 * overlayFeel.blast, Blasted);
+		sim->pv[iy / CELL][ix / CELL] += 6;
+		for (int k = 0; k < 14; k++)
+			if (int s = sim->create_part(-1, std::clamp(ix + sim->rng.between(-3, 3), 0, XRES - 1), std::clamp(iy - sim->rng.between(1, 5), 0, YRES - 1), PT_EMBR); s >= 0)
+				sim->parts[s].vx = (sim->rng.uniform01() - 0.5f) * 6, sim->parts[s].vy = -1 - 3 * sim->rng.uniform01();
+	}
+	overlayImpacts.clear();
 	// the chunks fly: gravity, a little air, and they bounce off windows, then lie there and fade
 	for (auto &d : debris)
 	{

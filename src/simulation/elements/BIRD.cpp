@@ -52,7 +52,7 @@ static int update(UPDATE_FUNC_ARGS)
 	if (parts[i].tmp2 < 0)
 	{
 		parts[i].vx *= 0.9f, parts[i].vy = 1;
-		if (!sim->eval_move(PT_BIRD, x, y + 1, nullptr)) parts[i].tmp2 = sim->rng.between(300, 900);
+		if (!sim->eval_move(PT_BIRD, x, y + 1, nullptr)) parts[i].tmp2 = sim->rng.between(std::max(1, sim->birdRest / 2), std::max(1, sim->birdRest * 3 / 2));
 		return 0;
 	}
 	if (parts[i].tmp2 > 0)
