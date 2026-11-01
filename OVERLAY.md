@@ -411,7 +411,7 @@ The "More fun" group under Fun, one table (moreFun[]) for the rows and their pre
 - [x] Taskbar volcano: "Volcano wakes at" (total CPU, GetSystemTimes every 30 ticks) / "Volcano force": a stone
   cone 100 px left of the tray end smokes past the level and throws lava 20% past it; thrown lava (or its stone)
   goes after 8 s. Normal mode only. Tested in a free gap: smoke at idle, lava under 16 busy threads.
-- [ ] Release v0.7.4.
+- [x] Release v0.7.4 (2026-11-01).
 
 ## Ideas
 
