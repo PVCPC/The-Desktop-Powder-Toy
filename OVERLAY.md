@@ -520,9 +520,16 @@ A check when touching it: `unifdef -D_WIN32 -U__APPLE__` old vs new shows exactl
 - **Units:** Win32 coordinates here are pixels, points x backing scale, so canvases are sharp on Retina.
 - **Frames:** a CAMetalLayer and its own thread (`DrawLoop`), Metal's copy of `GpuLoop`. Measured 107-118 presents/s on a
   120 Hz panel with 60 sim ticks/s. The layer is sRGB-tagged, or TPT's colours oversaturate on P3 screens.
-- **Clicks:** as on Windows, it's all in the pixels: empty is alpha 1 while TPT is in front, walls and app windows are
-  alpha 0, so clicks on them go to them. macOS's "click wallpaper to reveal desktop" moves every window aside on a click
-  on bare wallpaper, and the next click only brings them back.
+- **Clicks:** it's all in the pixels, as on Windows, with one change: in Auto, bare desktop is always TPT's, not only while
+  TPT is in front (user 11-01: having to click a particle to get back to drawing). Walls, app windows and icons are alpha 0,
+  so their clicks go to them. Right-click on bare desktop is the secondary tool, and on a window or icon that thing's menu.
+  It also keeps macOS's "click wallpaper to reveal desktop" from firing.
+- **Icons:** walls take the exact pixels of Finder's desktop window (needs Screen Recording), thumbnails included, re-read
+  when an icon moves and every 4 s; without the permission, each file's own icon.
+- **Window corners** are round in the walls, 16 pt on macOS 26, 10 before: past the curve is cleared from the finished
+  mask unless something else stands there.
+- **Signing:** `tools/package-mac.sh` uses a self-signed certificate from `~/.config/desktop-powder-toy/` when there is
+  one, so macOS keeps permissions across updates. No Apple account. Not notarised, so Open Anyway on another Mac.
 - **Look:** defaults to the Mac's own theme, Liquid Glass with Screen Recording, else 11-15. The Windows looks stay choices.
 - **The Dock:** a solid wall in its real rounded shape, with void past its ends: the sim reaches the bottom of the screen,
   behind the Dock. The hourglass and volcano stand on it. Without Accessibility, a flat floor where it starts.
@@ -531,8 +538,9 @@ A check when touching it: `unifdef -D_WIN32 -U__APPLE__` old vs new shows exactl
 - **Scene tiles** are 24 cells, not 255, on both systems: GameSave refuses a save larger than the sim, so 255 lost the scene
   going to a smaller sim.
 
-Different on the Mac: Form and the console are AppKit, drop-downs block the sim while open (AppKit's menus are main thread
-only), and typing sparks start at the window's top edge over the caret, since sparks can't start inside a wall.
+Different on the Mac: Form and the console are AppKit, TPT's drop-downs are a small window of their own (`PopupList`,
+NSMenu would hold the main thread and the sim), and typing sparks start at the window's top edge over the caret, since
+sparks can't start inside a wall.
 
 Not done yet: one screen at a time, not spanning them (a window can't span displays when each has its own Space); Music
 bounce hasn't been run with permission granted; not notarised, by choice, so first launch needs Open Anyway, and macOS may

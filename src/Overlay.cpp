@@ -949,6 +949,7 @@ void OverlayTickUI()
 #elif defined(__APPLE__)
 	for (int key; (key = OverlayMac::TakeHotkey()) >= 0;)
 	{
+		if (OverlayWindows::RecordingKey()) continue; // the keys being recorded must not also fire
 		if (key == 0) OverlaySetInput(OverlayInput((int(input) + 1) % int(OverlayInput::Count)));
 		if (key == 1) OverlaySetInput(input == OverlayInput::PassThrough ? OverlayInput::Auto : OverlayInput::PassThrough);
 		if (key == 2) OverlaySetInput(input == OverlayInput::Locked ? OverlayInput::Auto : OverlayInput::Locked);
@@ -1150,9 +1151,10 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 	TickFullScreen();
 	OverlayTickUI();
 	// Black is alpha 0: see-through, and clicks on it reach the desktop. Catching clicks gives it alpha 1 instead: still
-	// invisible, but it catches them. Auto: empty space catches clicks while TPT is the app in front, and passes them once
-	// another app is. As on Windows.
-	bool catchEmpty = input == OverlayInput::Locked || (input == OverlayInput::Auto && OverlayMac::Active());
+	// invisible, but it catches them. Auto here: bare desktop is always TPT's, and windows and icons always keep theirs
+	// (ApplySimMasks clears them to alpha 0), so nothing has to be clicked to get back to drawing, and a click on bare
+	// wallpaper doesn't set off macOS's "click wallpaper to reveal desktop".
+	bool catchEmpty = input == OverlayInput::Locked || input == OverlayInput::Auto;
 	uint32_t empty = catchEmpty ? 0x01000000 : 0;
 	argb.resize(size_t(w) * h);
 	OverlayBands(h, [&](int y0, int y1) {
@@ -1208,7 +1210,7 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 	// use. Idle, a few frames a second keep up with slow changes and spot the next move, for a fraction of the CPU.
 	static double busyUntil = 0;
 	auto shifts = OverlayWindows::WindowShifts();
-	if (!moving.empty() || catchEmpty || overDrawn || (fade > 0 && fade < 1) || !shifts.empty() || OverlayDebrisFlying())
+	if (!moving.empty() || (catchEmpty && OverlayMac::Active()) || overDrawn || (fade > 0 && fade < 1) || !shifts.empty() || OverlayDebrisFlying())
 		busyUntil = Now() + 1;
 	overlayIdle = Now() >= busyUntil;
 	ui::Engine::Ref().SetDrawingFrequencyLimit(overlayIdle ? DrawLimit(DrawLimitExplicit{ 15 }) : DrawLimit(DrawLimitDisplay{}));

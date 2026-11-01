@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cwchar>
 #include <string>
+#include <tuple>
 
 using WBOOL = int;
 #ifndef __OBJC__
@@ -199,4 +200,7 @@ namespace OverlayMac
 	bool StartsAtLogin();
 	void SetStartsAtLogin(bool on);
 	void OnMain(std::function<void()> f);
+	// A drop-down that doesn't stop anything while it's open: items (text, enabled, checked), at screen points. done(i + 1), or
+	// done(0) for a click elsewhere.
+	void PopupList(const std::vector<std::tuple<std::wstring, bool, bool>> &items, double x, double y, std::function<void(int)> done);
 }

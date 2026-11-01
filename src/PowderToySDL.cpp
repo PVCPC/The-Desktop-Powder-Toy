@@ -339,6 +339,9 @@ void SDLSetScreen()
 		int s = newFrameOpsNorm.scale;
 		SDL_SetWindowMinimumSize(sdl_window, 64 * s, 64 * s);
 		SDL_SetWindowMaximumSize(sdl_window, XRES * s, YRES * s);
+#ifdef __APPLE__
+		SDL_RestoreWindow(sdl_window); // it opens screen-sized, which macOS counts as maximised
+#endif
 		if (!(SDL_GetWindowFlags(sdl_window) & SDL_WINDOW_MAXIMIZED))
 		{
 			SDL_SetWindowSize(sdl_window, std::clamp(prefs.Get("Overlay.WindowedView.W", 612), 64, XRES) * s,

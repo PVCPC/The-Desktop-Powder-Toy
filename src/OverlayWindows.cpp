@@ -4685,11 +4685,15 @@ namespace
 		std::vector<std::tuple<std::wstring, bool, bool>> items;
 		for (auto &it : window->MenuItems) items.push_back({ Wide(it.text), it.enabled, it.checked });
 #ifdef __APPLE__
-		// AppKit's menus belong on the main thread
-		OverlayMac::OnMain([m = menu.get(), items = std::move(items), at] {
-#else
-		menu->thread = std::thread([m = menu.get(), items = std::move(items), at] {
+		// not an NSMenu: those hold the main thread, and with it the sim, until they close
+		{
+			auto *m = menu.get();
+			OverlayMac::PopupList(items, at.x / MacScale(), at.y / MacScale(), [m](int picked) { m->picked = picked; });
+			return;
+		}
 #endif
+#ifdef _WIN32
+		menu->thread = std::thread([m = menu.get(), items = std::move(items), at] {
 			HWND owner = CreateWindowExW(WS_EX_TOOLWINDOW, L"STATIC", L"", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, nullptr, nullptr);
 			HMENU popup = CreatePopupMenu();
 			for (size_t i = 0; i < items.size(); i++)
@@ -4707,6 +4711,7 @@ namespace
 			DestroyWindow(owner);
 			m->picked = cmd;
 		});
+#endif
 	}
 
 	// Called each tick: hands a picked item (or a cancel) back to TPT on its own thread.
@@ -7160,6 +7165,32 @@ static void TickWindowWalls()
 	iconRects = std::move(iconsNow);
 
 	OverlayApplyWalls(sim, wins);
+#ifdef __APPLE__
+	// A Mac window's corners are round: past the curve is open, unless something else stands there. Done on the finished
+	// mask, so the walls' own passes keep their plain boxes.
+	if (sim->pixelWalls.size() == size_t(XRES) * YRES)
+	{
+		static const float cornerPoints = [] { return OverlayMac::SystemMajor() >= 26 ? 16.f : 10.f; }();
+		int r = int(std::lround(cornerPoints * MacScale() * WINDOWW / sw));
+		auto covered = [&](const OverlayWall &self, int x, int y) {
+			for (auto &o : wins)
+				if (&o != &self && x >= o.x0 && x < o.x1 && y >= o.y0 && y < o.y1 && (!o.solid || o.solid(x, y))) return true;
+			return false;
+		};
+		for (auto &w : wins)
+		{
+			if (!wallRects.count(HWND(w.id)) || w.x1 - w.x0 < 2 * r || w.y1 - w.y0 < 2 * r) continue;
+			for (int j = 0; j < r; j++)
+				for (int i = 0; i < r; i++)
+				{
+					float dx = r - i - 0.5f, dy = r - j - 0.5f;
+					if (dx * dx + dy * dy <= float(r * r)) continue;
+					for (auto [x, y] : { std::pair{ w.x0 + i, w.y0 + j }, { w.x1 - 1 - i, w.y0 + j }, { w.x0 + i, w.y1 - 1 - j }, { w.x1 - 1 - i, w.y1 - 1 - j } })
+						if (!covered(w, x, y)) sim->pixelWalls[size_t(y) * XRES + x] = 0;
+				}
+		}
+	}
+#endif
 
 	// Explosions shake the real windows they hit (off unless the Shake slider is up): a jolt that dies away, then the
 	// window goes back exactly where it was. Not maximised or full-screen ones, and a window you grab stops shaking.

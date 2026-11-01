@@ -17,6 +17,7 @@ namespace OverlayMac
 	double BackingScale();           // pixels per point
 	void InitMenu();                 // keeps macOS from napping the app: all overlay:window wants of the above
 	void EarlySetup();               // before SDL starts
+	int SystemMajor();               // macOS's major version
 	void FocusOverlay();             // the keyboard goes back to TPT
 	void Shutdown();                 // stops this file's threads: before exit, while what they read still exists
 	void SetScreen(int index);       // which screen the overlay lives on, before anything asks its size
@@ -69,6 +70,7 @@ namespace OverlayMac
 	double IdleSeconds(bool keysOnly = false); // since the last input
 	bool ButtonDown(int button);               // 0 left, 1 right
 	bool ControlDown();
+	bool KeyDown(int vk);                      // a Windows virtual key: letters, digits, F keys, Esc, modifiers
 	float CpuLoad();                  // the whole Mac, 0-1, since the last call
 	double ProcessCpuSeconds(int pid); // CPU time this process has used; < 0 if it can't be read
 	float AudioPeak();                // what's playing, 0-1 (macOS 14.2+; only the level is read)

@@ -30,7 +30,24 @@ for icon in exe cps; do
 	cp "resources/generated_icons/icon_${icon}.png" "$set/icon_128x128.png"
 	iconutil -c icns "$set" -o "$app/Contents/Resources/icon_$icon.icns"
 done
-codesign --force --sign - --timestamp=none "$app"
+# A stable signature, if this Mac has one set up (no Apple account needed): macOS then keeps Accessibility and Screen
+# Recording across updates. Ad hoc otherwise, where every build counts as a new app.
+keychain="$HOME/.config/desktop-powder-toy/signing.keychain-db"
+if [[ -f $keychain ]]; then
+	security unlock-keychain -p "" "$keychain"
+	identity=$(security find-identity -p codesigning "$keychain" | sed -n 's/.*1) \([0-9A-F]*\).*/\1/p' | head -1)
+	# codesign only looks in the search list: on it just for this, then the list goes back as it was
+	saved=$(security list-keychains -d user | tr -d '"')
+	# shellcheck disable=SC2086
+	security list-keychains -d user -s $saved "$keychain"
+	status=0
+	codesign --force --sign "$identity" --timestamp=none "$app" || status=$?
+	# shellcheck disable=SC2086
+	security list-keychains -d user -s $saved
+	[[ $status == 0 ]]
+else
+	codesign --force --sign - --timestamp=none "$app"
+fi
 cp LICENSE "$out/The-Desktop-Powder-Toy/LICENSE.txt"
 cat > "$out/The-Desktop-Powder-Toy/README.txt" <<EOF
 The Desktop Powder Toy $version for macOS 11 or later, native on Apple Silicon (M1 and newer)

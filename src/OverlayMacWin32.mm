@@ -1058,3 +1058,81 @@ void OverlayMac::OnMain(std::function<void()> f)
 		delete copy;
 	});
 }
+
+@interface TDPTPopup : NSObject
+- (void)pick:(NSButton *)sender;
+@end
+namespace
+{
+	NSWindow *popup;
+	id popupGlobal, popupLocal;
+	std::function<void(int)> popupDone;
+	TDPTPopup *popupTarget;
+
+	void ClosePopup(int picked)
+	{
+		if (!popup) return;
+		[popup orderOut:nil];
+		[popup release];
+		popup = nil;
+		[NSEvent removeMonitor:popupGlobal];
+		[NSEvent removeMonitor:popupLocal];
+		auto done = std::move(popupDone);
+		popupDone = nullptr;
+		if (done) done(picked);
+	}
+}
+@implementation TDPTPopup
+- (void)pick:(NSButton *)sender { ClosePopup(int(sender.tag)); }
+@end
+
+void OverlayMac::PopupList(const std::vector<std::tuple<std::wstring, bool, bool>> &items, double x, double y, std::function<void(int)> done)
+{
+	@autoreleasepool
+	{
+		ClosePopup(0);
+		popupTarget = popupTarget ?: [[TDPTPopup alloc] init];
+		constexpr double rowHeight = 24, width = 220;
+		double total = rowHeight * items.size() + 8, height = std::min(total, 520.0), ph = PrimaryHeight();
+		popup = [[NSWindow alloc] initWithContentRect:NSMakeRect(x, ph - y - height, width, height) styleMask:NSWindowStyleMaskBorderless backing:NSBackingStoreBuffered defer:NO];
+		popup.releasedWhenClosed = NO;
+		popup.level = NSPopUpMenuWindowLevel;
+		popup.opaque = NO;
+		popup.backgroundColor = NSColor.clearColor;
+		popup.hasShadow = YES;
+		NSVisualEffectView *glass = [[[NSVisualEffectView alloc] initWithFrame:NSMakeRect(0, 0, width, height)] autorelease];
+		glass.material = NSVisualEffectMaterialMenu;
+		glass.state = NSVisualEffectStateActive;
+		glass.wantsLayer = YES;
+		glass.layer.cornerRadius = 10;
+		glass.layer.masksToBounds = YES;
+		popup.contentView = glass;
+		NSView *list = [[[NSView alloc] initWithFrame:NSMakeRect(0, 0, width, total)] autorelease];
+		for (size_t i = 0; i < items.size(); i++)
+		{
+			auto &[text, enabled, checked] = items[i];
+			NSButton *row = [NSButton buttonWithTitle:[(checked ? @"\u2713 " : @"    ") stringByAppendingString:NS(text.c_str())] target:popupTarget action:@selector(pick:)];
+			row.frame = NSMakeRect(6, total - 4 - rowHeight * (i + 1), width - 12, rowHeight);
+			row.bordered = NO;
+			row.alignment = NSTextAlignmentLeft;
+			row.tag = NSInteger(i + 1);
+			row.enabled = enabled;
+			[list addSubview:row];
+		}
+		NSScrollView *scroll = [[[NSScrollView alloc] initWithFrame:glass.bounds] autorelease];
+		scroll.drawsBackground = NO;
+		scroll.hasVerticalScroller = total > height;
+		scroll.documentView = list;
+		[list scrollPoint:NSMakePoint(0, total - height)];
+		[glass addSubview:scroll];
+		popupDone = std::move(done);
+		// a click anywhere else closes it, as a menu's does; not by the key window, so nothing has to give up the keyboard
+		NSEventMask mask = NSEventMaskLeftMouseDown | NSEventMaskRightMouseDown | NSEventMaskOtherMouseDown;
+		popupGlobal = [NSEvent addGlobalMonitorForEventsMatchingMask:mask handler:^(NSEvent *) { ClosePopup(0); }];
+		popupLocal = [NSEvent addLocalMonitorForEventsMatchingMask:mask handler:^NSEvent *(NSEvent *e) {
+			if (e.window != popup) dispatch_async(dispatch_get_main_queue(), ^{ ClosePopup(0); });
+			return e;
+		}];
+		[popup orderFrontRegardless];
+	}
+}

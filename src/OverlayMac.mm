@@ -529,6 +529,11 @@ double OverlayMac::BackingScale()
 	return scale;
 }
 
+int OverlayMac::SystemMajor()
+{
+	return int(NSProcessInfo.processInfo.operatingSystemVersion.majorVersion);
+}
+
 void OverlayMac::EarlySetup()
 {
 	// no window restoration: there's nothing to restore, and after a crash macOS would hold up the next start asking about it
@@ -573,6 +578,24 @@ float OverlayMac::CpuLoad()
 	if (lastTotal && total > lastTotal) load = 1 - float(idle - lastIdle) / float(total - lastTotal);
 	lastIdle = idle, lastTotal = total;
 	return load;
+}
+
+static int KeyCode(const std::string &key);
+
+bool OverlayMac::KeyDown(int vk)
+{
+	auto flags = NSEvent.modifierFlags;
+	switch (vk)
+	{
+	case 0x10: return flags & NSEventModifierFlagShift;
+	case 0x11: return flags & NSEventModifierFlagControl;
+	case 0x12: return flags & NSEventModifierFlagOption;
+	case 0x5B: case 0x5C: return flags & NSEventModifierFlagCommand;
+	case 0x1B: return CGEventSourceKeyState(kCGEventSourceStateCombinedSessionState, kVK_Escape);
+	}
+	std::string name = vk >= 0x70 && vk <= 0x87 ? "F" + std::to_string(vk - 0x6F) : std::string(1, char(vk));
+	int code = KeyCode(name);
+	return code >= 0 && CGEventSourceKeyState(kCGEventSourceStateCombinedSessionState, CGKeyCode(code));
 }
 
 double OverlayMac::ProcessCpuSeconds(int pid)
@@ -704,8 +727,46 @@ namespace
 		return cache[key] = shape;
 	}
 
+	// The icons as the desktop really draws them, thumbnails included: Finder's desktop window, whose pixels are clear
+	// between them. Read when an icon moved or came or went, and every few seconds for thumbnails that change.
+	struct DesktopPicture
+	{
+		int w = 0, h = 0;
+		std::vector<uint32_t> px;
+	};
+	bool ReadDesktopPicture(DesktopPicture &out)
+	{
+		if (!CGPreflightScreenCaptureAccess()) return false;
+		CGWindowID desktop = 0;
+		CFArrayRef list = CGWindowListCopyWindowInfo(kCGWindowListOptionAll, kCGNullWindowID);
+		if (!list) return false;
+		for (NSDictionary *d in (NSArray *)list)
+			if ([d[(id)kCGWindowLayer] intValue] == kCGDesktopIconWindowLevel && [d[(id)kCGWindowOwnerName] isEqual:@"Finder"]) desktop = [d[(id)kCGWindowNumber] unsignedIntValue];
+		CFRelease(list);
+		if (!desktop) return false;
+		CGImageRef image = CGWindowListCreateImage(CGRectNull, kCGWindowListOptionIncludingWindow, desktop, kCGWindowImageBoundsIgnoreFraming | kCGWindowImageBestResolution);
+		if (!image) return false;
+		out.w = int(CGImageGetWidth(image)), out.h = int(CGImageGetHeight(image));
+		out.px.assign(size_t(out.w) * out.h, 0);
+		CGColorSpaceRef rgb = CGColorSpaceCreateDeviceRGB();
+		CGContextRef cg = CGBitmapContextCreate(out.px.data(), out.w, out.h, 8, size_t(out.w) * 4, rgb, kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst);
+		CGColorSpaceRelease(rgb);
+		if (cg)
+		{
+			CGContextSetBlendMode(cg, kCGBlendModeCopy);
+			CGContextDrawImage(cg, CGRectMake(0, 0, out.w, out.h), image);
+			CGContextRelease(cg);
+		}
+		CGImageRelease(image);
+		return cg != nullptr;
+	}
+
 	void ReadIcons(int finderPid)
 	{
+		static DesktopPicture picture;
+		static double pictureAt = 0;
+		static std::map<uint64_t, std::pair<double, double>> where; // the picture's idea of where each icon is
+		static std::map<uint64_t, std::shared_ptr<const std::vector<uint8_t>>> real;
 		std::vector<OverlayMac::Icon> out;
 		AXUIElementRef app = AXUIElementCreateApplication(finderPid);
 		AXUIElementSetMessagingTimeout(app, 0.5f);
@@ -744,6 +805,39 @@ namespace
 			}
 		if (kids) CFRelease(kids);
 		CFRelease(app);
+		bool stale = OverlayMac::Now() - pictureAt > 4;
+		for (auto &i : out)
+		{
+			auto it = where.find(i.id);
+			stale = stale || it == where.end() || it->second.first != i.l || it->second.second != i.t;
+		}
+		if (stale)
+		{
+			pictureAt = OverlayMac::Now();
+			where.clear(), real.clear();
+			if (ReadDesktopPicture(picture))
+			{
+				double s = OverlayMac::BackingScale(), top = NSScreen.screens.firstObject.frame.size.height - (NSScreen.screens.firstObject.frame.origin.y + NSScreen.screens.firstObject.frame.size.height);
+				for (auto &i : out)
+				{
+					int n = i.size, x0 = int(i.l * s), y0 = int((i.t - top) * s);
+					auto shape = std::make_shared<std::vector<uint8_t>>(size_t(n) * n, 0);
+					size_t solid = 0;
+					for (int y = 0; y < n; y++)
+						for (int x = 0; x < n; x++)
+						{
+							int px = x0 + x, py = y0 + y;
+							if (px < 0 || py < 0 || px >= picture.w || py >= picture.h || picture.px[size_t(py) * picture.w + px] >> 24 < 128) continue;
+							(*shape)[size_t(y) * n + x] = 1;
+							solid++;
+						}
+					where[i.id] = { i.l, i.t };
+					if (solid) real[i.id] = shape; // nothing there yet (it's still drawing): the file's own icon till the next read
+				}
+			}
+		}
+		for (auto &i : out)
+			if (auto it = real.find(i.id); it != real.end()) i.shape = it->second;
 		std::lock_guard lock(axLock);
 		axIcons = std::move(out);
 	}
@@ -1095,8 +1189,14 @@ namespace
 		return noErr;
 	}
 
-	// The virtual key of a letter, digit or F1-F20 on a US layout (Carbon has no table for them); -1 if none.
-	int KeyCode(const std::string &key)
+	NSPanel *toastPanel;
+	NSTextField *toastText;
+	int toastGeneration = 0;
+}
+
+// The virtual key of a letter, digit or F1-F20 on a US layout (Carbon has no table for them); -1 if none.
+static int KeyCode(const std::string &key)
+{
 	{
 		static const std::map<std::string, int> keys = {
 			{ "A", kVK_ANSI_A }, { "B", kVK_ANSI_B }, { "C", kVK_ANSI_C }, { "D", kVK_ANSI_D }, { "E", kVK_ANSI_E }, { "F", kVK_ANSI_F }, { "G", kVK_ANSI_G },
@@ -1111,10 +1211,6 @@ namespace
 		auto it = keys.find(key);
 		return it == keys.end() ? -1 : it->second;
 	}
-
-	NSPanel *toastPanel;
-	NSTextField *toastText;
-	int toastGeneration = 0;
 }
 
 void OverlayMac::SetHotkeys(const std::vector<std::string> &list)

@@ -44,7 +44,7 @@ inline int localtime_s(tm *out, const time_t *t) { return localtime_r(t, out) ? 
 enum { VK_LBUTTON = 1, VK_RBUTTON = 2, VK_CONTROL = 0x11 };
 inline short GetAsyncKeyState(int key)
 {
-	bool down = key == VK_LBUTTON ? OverlayMac::ButtonDown(0) : key == VK_RBUTTON ? OverlayMac::ButtonDown(1) : OverlayMac::ControlDown();
+	bool down = key == VK_LBUTTON ? OverlayMac::ButtonDown(0) : key == VK_RBUTTON ? OverlayMac::ButtonDown(1) : OverlayMac::KeyDown(key);
 	return down ? short(0x8000) : 0;
 }
 
