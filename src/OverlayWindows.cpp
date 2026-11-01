@@ -2574,14 +2574,19 @@ namespace
 			PushButton(x + S(12) + 2 * (pw + S(6)), by, pw, L"Centre", [=] { set(RectSized((CELLS - a.size) / 2, a.size)); }, L"Move the area to the middle");
 			y += S(126);
 
-			top = Group(x, y, w, S(60), L"Running");
+			top = Group(x, y, w, S(88), L"Running");
 			bool paused = gc.GetPaused();
 			int bw4 = (w - S(24) - 3 * S(6)) / 4;
 			PushButton(x + S(12), top, bw4, paused ? L"Resume" : L"Pause", [] { auto &g = GameController::Ref(); g.SetPaused(!g.GetPaused()); }, L"Space", paused);
 			PushButton(x + S(12) + bw4 + S(6), top, bw4, L"Step", [] { GameController::Ref().FrameStep(); }, L"One frame (F)");
 			PushButton(x + S(12) + 2 * (bw4 + S(6)), top, bw4, L"Reload", [] { GameController::Ref().ReloadSim(); }, L"Back to the last loaded save (F5)");
 			PushButton(x + S(12) + 3 * (bw4 + S(6)), top, bw4, L"Clear", [] { GameController::Ref().ClearSim(); }, L"Empty the sim");
-			y += S(68);
+			Toggle(x + S(12), top + S(36), L"Multicore physics", model->GetSimulation()->parallelUpdate, false, [] {
+				auto *sim = GameController::Ref().GetModel()->GetSimulation();
+				sim->parallelUpdate = !sim->parallelUpdate;
+				GlobalPrefs::Ref().Set("Simulation.Multicore", sim->parallelUpdate);
+			}, L"Most elements update on all CPU cores: several times faster in big scenes. Off: one core, TPT's exact order");
+			y += S(96);
 
 			top = Group(x, y, w, S(100), L"Edges");
 			Toggle(x + S(12), top + S(24), L"Open windows are walls (sand piles on title bars)", windowWalls, false, [] {
@@ -5307,13 +5312,14 @@ void OverlayWindows::ApplySimMasks(uint32_t *argb, int w, const uint8_t *occupie
 	bool zoomOn = model->GetZoomEnabled();
 	// a row at a time (the play area and zoom box are spans of it), so the inner loop is plain enough to vectorise
 	auto ab = area.BottomRight(), zb = zoom.BottomRight();
-	for (int y = 0; y < YRES; y++)
+	OverlayBands(YRES, [&](int y0, int y1) {
+	std::vector<uint32_t> saved;
+	for (int y = y0; y < y1; y++)
 	{
 		auto *row = argb + size_t(y) * w;
 		auto *occ = occupied + size_t(y) * XRES;
 		bool inZoom = zoomOn && y >= zoom.pos.Y && y <= zb.Y;
 		int zx0 = inZoom ? std::clamp(zoom.pos.X, 0, XRES) : 0, zx1 = inZoom ? std::clamp(zb.X + 1, 0, XRES) : 0;
-		static std::vector<uint32_t> saved;
 		int zn = std::max(0, zx1 - zx0);
 		saved.assign(row + zx0, row + zx0 + zn); // the magnifier is drawn as it is
 		if (y < area.pos.Y || y > ab.Y)
@@ -5333,6 +5339,7 @@ void OverlayWindows::ApplySimMasks(uint32_t *argb, int w, const uint8_t *occupie
 		}
 		for (int i = 0; i < zn; i++) row[zx0 + i] = saved[i] | 0xFF000000;
 	}
+	});
 	const uint32_t *backdrop = nullptr;
 	if (std::any_of(sim->windowMarks.begin(), sim->windowMarks.end(), [](auto &m) { return m.second.any[Simulation::MarkHole]; }))
 	{

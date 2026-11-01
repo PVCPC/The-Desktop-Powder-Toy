@@ -2313,7 +2313,7 @@ SimulationImpl::Neighbourhood SimulationImpl::GetNeighbourhood(int i) const
 void SimulationImpl::UpdateParticles(int start, int end)
 {
 	//the main particle loop function, goes over all particles.
-	if (parallelUpdate && start == 0 && end >= NPART && !legacy_enable && !water_equal_test)
+	if (parallelUpdate && start == 0 && end >= NPART && !legacy_enable && !water_equal_test && !ensureDeterminism)
 	{
 		UpdateParticlesParallel();
 		return;
@@ -2324,11 +2324,33 @@ void SimulationImpl::UpdateParticles(int start, int end)
 	}
 }
 
+// Elements whose own update function only reaches a few pixels (2-3) and no shared state but the locked create/kill/
+// change-type calls, the air and the RNG, so they can run in the parallel blocks like plain particles (checked by
+// reading each one: no statics, no far loops or jumps, no links to other particles by index, no global sim state).
+// Not one a script has given its own update function.
+static bool ParallelSafe(int t)
+{
+	static auto safe = [] {
+		std::array<bool, PT_NUM> s{};
+		for (int e : {
+		PT_ACID, PT_AMTR, PT_ANAR, PT_BASE, PT_BMTL, PT_BOYL, PT_BREC, PT_BRMT, PT_BTRY, PT_CAUS, PT_CLST, PT_CO2,
+		PT_CRMC, PT_DLAY, PT_EMBR, PT_FOG, PT_FRZW, PT_FRZZ, PT_FSEP, PT_FUSE, PT_GEL, PT_GLAS, PT_GLOW, PT_GOO, PT_H2,
+		PT_ICEI, PT_IGNT, PT_INVIS, PT_IRON, PT_ISOZ, PT_ISZS, PT_LCRY, PT_MORT, PT_NBLE, PT_PLUT, PT_PSNS, PT_PTCT,
+		PT_PUMP, PT_PVOD, PT_RIME, PT_RSST, PT_SHLD1, PT_SHLD2, PT_SHLD3, PT_SHLD4, PT_SNOW, PT_SWCH, PT_VINE, PT_WIRE,
+		PT_WOOD, PT_WATR, PT_DSTW, PT_SLTW, PT_WTRV, PT_CBNW, PT_YEST, PT_URAN, PT_FIRE, PT_LAVA, PT_PLSM, PT_COAL,
+		PT_BCOL
+		}) s[e] = true;
+		return s;
+	}();
+	auto &elements = SimulationData::CRef().elements;
+	return !elements[t].Update || (safe[t] && elements[t].Update == GetElements()[t].Update);
+}
+
 // The sim in 32-pixel blocks, run in nine passes (every third block across and down), so blocks running together are
-// two blocks (64 pixels) apart. A plain particle (no update function or ChangeType of its own, not energy, not in a wall
-// cell, slow enough) can't reach further than that in a tick: its move (velocity up to 20) plus a liquid's sideways
-// search (30) plus heat and air (a cell). Those run in their blocks on all cores, in index order within a block;
-// everything else runs after, one at a time, in index order, as before.
+// two blocks (64 pixels) apart. A plain particle (no update function or ChangeType of its own, or one of the
+// ParallelSafe ones; not energy, not in a wall cell, slow enough) can't reach further than that in a tick: its move
+// (velocity up to 20) plus a liquid's sideways search (30) plus heat and air (a cell). Those run in their blocks on all
+// cores, in index order within a block; everything else runs after, one at a time, in index order, as before.
 void SimulationImpl::UpdateParticlesParallel()
 {
 	auto &sd = SimulationData::CRef();
@@ -2343,7 +2365,7 @@ void SimulationImpl::UpdateParticlesParallel()
 		{
 			auto &p = parts[i];
 			int t = p.type;
-			if (!t || elements[t].Update || elements[t].ChangeType || (elements[t].Properties & TYPE_ENERGY)) continue;
+			if (!t || !ParallelSafe(t) || elements[t].ChangeType || (elements[t].Properties & TYPE_ENERGY)) continue;
 			int x = int(p.x + 0.5f), y = int(p.y + 0.5f);
 			if (x < CELL || y < CELL || x >= XRES - CELL || y >= YRES - CELL || bmap[y / CELL][x / CELL]) continue;
 			float gx = 0, gy = 0;
@@ -2477,7 +2499,7 @@ void SimulationImpl::UpdateParticle(int i, bool parallel)
 
 	// on a parallel block, a particle that just turned into something with its own update (which may reach far) waits
 	// for the next tick to run it
-	if (parallel && transitionOccurred && elements[t].Update)
+	if (parallel && transitionOccurred && !ParallelSafe(t))
 		return;
 
 	//call the particle update function, if there is one

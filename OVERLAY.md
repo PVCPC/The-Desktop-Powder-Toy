@@ -473,9 +473,17 @@ On/off things are Fun toggles; things with an amount are More fun sliders.
   removed (the slide replaces it).
 - [x] "Hide window borders at holes" (Overlay.Feel.HoleBorder, default on): hole pixels on a window's edge also
   cover 1-2 px outward where no window is, hiding DWM's dark border line there.
-- [ ] Heavy scenes (~200k particles of water/fire/plant): 11-15 ticks/s, the sim's own particle update ~37 ms of a
-  ~59 ms frame (FrameTime spans). TPT's renderer thread on the overlay measured no gain (11-14 both ways), so left
-  off. Next would be a multithreaded UpdateParticles: big, risks element behaviour; only if asked.
+- [x] Heavy scenes (user 11-01 "5x"): benchmark = seeded 2560x720 plain-window scene (water/sand/plant/fire, ~280k
+  particles), checksum of every particle after 600 ticks. Compiler: LTO, /arch:AVX2, PGO all within noise (AVX2 also
+  changes results) - dropped. Overlay passes 10 -> 6 ms (OverlayBands from 600 rows, marks rows on all cores, the
+  drawing thread holds the hand-over lock only to swap). ParallelSafe: 62 elements whose update only reaches 2-3 px
+  and no shared state (audited: statics, far loops, links by index, global sim state; not if a script replaced the
+  update) join the parallel blocks: one core 12 -> 31-33 ticks/s; lava/ice 10.5 -> 17; acid/wood/fire 10 -> 13 (create/
+  kill lock). Results per element within a seed's own spread (fire/wood: two one-core seeds differ 17%, multi vs one
+  2%). "Multicore physics" toggle (Simulation.Multicore, Running group); ensureDeterminism forces one core, which
+  reproduces the one-core checksum exactly. TPT's renderer thread on the overlay: no gain, left off.
+- [ ] Next for ~5x, all elements kept: (A) per-block particle slots so create/kill needs no lock; (B) RecalcFreeParticles
+  on all cores (~5 ms); (C) review the rest one by one (PLNT, VINE, SPRK...); (D) sleeping regions, as a toggle.
 
 ## Ideas
 

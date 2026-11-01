@@ -7,13 +7,13 @@
 #include "common/Vec2.h"
 #include "common/Parallel.h"
 
-// f(y0, y1) for rows [0, h): in 32 bands on all cores when there are many; a smaller frame costs the thread pool more
-// than it saves (1704x480: a quarter of a core)
+// f(y0, y1) for rows [0, h): in 32 bands on all cores when there are many; a small frame costs the thread pool more
+// than it saves (1704x480: a quarter of a core), a 2560x720 one is a few ms a frame quicker
 template<class F>
 void OverlayBands(int h, F f)
 {
 	constexpr int bands = 32;
-	if (h < 1000) return f(0, h);
+	if (h < 600) return f(0, h);
 	OverlayParallel(bands, [&](int b) { f(h * b / bands, h * (b + 1) / bands); });
 }
 

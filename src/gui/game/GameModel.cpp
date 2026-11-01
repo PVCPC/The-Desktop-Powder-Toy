@@ -115,6 +115,7 @@ GameModel::GameModel(GameView *newView):
 	threadedRendering = prefs.Get("Renderer.SeparateThread", true);
 
 	//Load config into simulation
+	sim->parallelUpdate = prefs.Get("Simulation.Multicore", true);
 	edgeMode = prefs.Get("Simulation.EdgeMode", NUM_EDGEMODES, EDGE_VOID);
 	sim->SetEdgeMode(edgeMode);
 	ambientAirTemp = float(R_TEMP) + 273.15f;

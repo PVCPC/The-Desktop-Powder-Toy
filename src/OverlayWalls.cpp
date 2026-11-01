@@ -7,6 +7,7 @@
 #include <array>
 #include <cmath>
 #include <map>
+#include "common/Parallel.h"
 
 OverlayFeel overlayFeel;
 std::vector<OverlayImpact> overlayImpacts;
@@ -609,7 +610,9 @@ void OverlayDrawMarks(const Simulation *sim, uint32_t *argb, int stride, const u
 	for (auto &[id, m] : sim->windowMarks)
 	{
 		if (std::none_of(m.any.begin(), m.any.end(), [](bool b) { return b; })) continue;
-		for (int j = 0; j < m.h; j++)
+		// each pixel is one window's (OwnerAt), so rows of a big window go on all cores
+		auto rows = [&](int j0, int j1) {
+		for (int j = j0; j < j1; j++)
 			for (int i = 0; i < m.w; i++)
 			{
 				int x = m.x + i, y = m.y + j;
@@ -635,6 +638,9 @@ void OverlayDrawMarks(const Simulation *sim, uint32_t *argb, int stride, const u
 					p = over(a, 24) | over(r, 16) | over(g, 8) | over(b, 0);
 				}
 			}
+		};
+		if (size_t(m.w) * m.h < 100000) rows(0, m.h);
+		else OverlayParallel((m.h + 31) / 32, [&](int k) { rows(k * 32, std::min(m.h, k * 32 + 32)); });
 		if (!m.any[Simulation::MarkHole] || !overlayFeel.destructible) continue;
 		// Holes: what is behind the window shows through (what falls through them is drawn over it), ringed by what
 		// made them: acid a corroded yellow-green, a blast charred black with a glowing edge.

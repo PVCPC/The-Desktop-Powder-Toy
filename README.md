@@ -33,6 +33,9 @@ What's new
   pile shears (the bottom grips the window, the layers above slip and slide off) and liquids slosh;
   fire and lava scorch windows, ice frosts them, acid pits them and water streaks them; desktop icons carry their
   pile when you drop them; your mouse blows sand like a breeze. Sliders in the Simulation tab tune all of it.
+- **Multicore physics** (on by default, Simulation tab): most elements, water, fire, lava, ice and acid included, update
+  on all your CPU cores, two to three times faster in big scenes. Switch it off for one core and TPT's exact order
+  (saves that ask for determinism always get that).
 - **Destructible windows** (a switch, off by default): acid eats holes in windows and icons, explosions blow chunks
   out that fly off in the window's colour, DEST and black holes chew through, and you see what's really behind
   through the holes. Explosions can even shake your real windows (its own slider, off by default). Only the overlay

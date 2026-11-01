@@ -180,8 +180,9 @@ namespace
 		ID3D11Texture2D *frame = nullptr;
 		ID3D11ShaderResourceView *frameView = nullptr;
 		int w = 0, h = 0, ww = 0, wh = 0, partsCap = 0;
-		// handed to the drawing thread (GpuLoop), under `lock` like everything above
-		std::mutex lock;
+		// handed to the drawing thread (GpuLoop) under `lock`, held just long enough to pass them; the D3D objects above
+		// are under `draw`, which the main thread only takes to remake them (a resize)
+		std::mutex lock, draw;
 		std::vector<uint32_t> pending; // the newest frame
 		bool fresh = false, drawing = false, shifted = false;
 		std::vector<Mover> movers;
@@ -328,20 +329,20 @@ float4 PartPs(V i) : SV_Target { return i.col; }
 		auto &g = *gp;
 		IDXGIOutput *out = nullptr;
 		std::vector<Part> parts;
+		std::vector<uint32_t> frame; // the newest frame, swapped out of pending
 		for (;;)
 		{
 			if (out) out->WaitForVBlank();
 			else Sleep(4);
 			auto shifts = OverlayWindows::WindowShifts();
 			if (shifts.size() > 16) shifts.resize(16); // ponytail: 16 moving at once; more just don't slide till the next frame
-			std::lock_guard lock(g.lock);
-			if (!out && g.chain) g.chain->GetContainingOutput(&out);
-			if (!g.chain || !g.target || !g.frame || g.pending.size() != size_t(g.w) * g.h) continue;
+			std::unique_lock lock(g.lock);
+			bool fresh = g.fresh;
+			if (fresh) std::swap(g.pending, frame), g.fresh = false;
 			float t = float(std::clamp((Now() - g.frameAt) / g.period, 0.0, 1.0));
 			bool sliding = !g.movers.empty() && g.lastT < 1;
-			if (!g.fresh && shifts.empty() && !g.shifted && !sliding) continue;
+			if (!fresh && shifts.empty() && !g.shifted && !sliding) continue;
 			g.shifted = !shifts.empty(), g.lastT = t;
-			if (g.fresh) g.context->UpdateSubresource(g.frame, 0, nullptr, g.pending.data(), g.w * 4, 0), g.fresh = false;
 			parts.clear();
 			for (auto &m : g.movers)
 			{
@@ -351,6 +352,11 @@ float4 PartPs(V i) : SV_Target { return i.col; }
 						if (s.id == m.ride) y += s.dy;
 				parts.push_back({ m.x + m.vx * t, y, m.colour });
 			}
+			lock.unlock(); // the main thread can hand over the next frame while this one is drawn
+			std::lock_guard draw(g.draw);
+			if (!out && g.chain) g.chain->GetContainingOutput(&out);
+			if (!g.chain || !g.target || !g.frame) continue;
+			if (fresh && frame.size() == size_t(g.w) * g.h) g.context->UpdateSubresource(g.frame, 0, nullptr, frame.data(), g.w * 4, 0);
 			if (int(parts.size()) > g.partsCap)
 			{
 				if (g.parts) g.parts->Release(), g.parts = nullptr;
@@ -462,7 +468,8 @@ float4 PartPs(V i) : SV_Target { return i.col; }
 			ApplyHitTest();
 		}
 
-		std::lock_guard lock(g.lock); // the drawing thread uses all that follows
+		std::unique_lock draw(g.draw, std::defer_lock); // remade below: not while the drawing thread draws with them
+		if (!g.chain || ww != g.ww || wh != g.wh || !g.frame || w != g.w || h != g.h) draw.lock();
 		if (!g.chain || ww != g.ww || wh != g.wh)
 		{
 			if (g.target) g.target->Release(), g.target = nullptr;
@@ -543,7 +550,11 @@ float4 PartPs(V i) : SV_Target { return i.col; }
 			px = empty;
 		}
 		// to the drawing thread, which puts it on the screen at its next refresh
-		g.pending.assign(argb, argb + size_t(w) * h);
+		if (draw.owns_lock()) draw.unlock();
+		static std::vector<uint32_t> spare;
+		spare.assign(argb, argb + size_t(w) * h);
+		std::lock_guard lock(g.lock);
+		std::swap(g.pending, spare);
 		g.fresh = true;
 		g.movers = std::move(movers);
 		g.frameAt = frameAt, g.period = framePeriod;
