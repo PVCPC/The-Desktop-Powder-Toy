@@ -318,6 +318,18 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 			}
 			sim->pmap[ty][tx] = p.r;
 		}
+		// pets stand on their legs, out of reach of the scan above: one whose feet are on the old top edge rides along
+		if (!w.solid && std::abs(mx) <= 40 && std::abs(my) <= 40)
+			for (int i = 0; i <= sim->parts.active; i++)
+			{
+				auto &p = sim->parts[i];
+				if (p.type != PT_FIGH) continue;
+				auto &f = sim->fighters[(unsigned char)p.tmp];
+				float feet = std::max(f.legs[5], f.legs[13]), fx = (f.legs[4] + f.legs[12]) / 2;
+				if (fx < w.x0 - mx || fx >= w.x1 - mx || feet < w.y0 - my - 4 || feet > w.y0 - my + 1) continue;
+				p.x += mx, p.y += my;
+				for (int k = 0; k < 16; k += 2) f.legs[k] += mx, f.legs[k + 1] += my;
+			}
 	}
 	lastMoves = std::move(moves);
 	// a window that sat still at the same size since the last tick has nothing new under it to shove

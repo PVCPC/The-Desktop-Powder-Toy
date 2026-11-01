@@ -104,6 +104,7 @@ namespace
 	struct
 	{
 		float pets = 0, weather = 0, music = 0; // pets: how many; weather and music 0-3
+		float weatherIdle = 0, weatherLast = 90; // weather only after this many minutes idle (0: always); seconds a piece stays
 		int weatherKind = 0;                    // 0 by the season, 1 snow, 2 rain, 3 leaves
 		bool bin = false, broom = false, closeToss = false, openShake = false;
 	} fun;
@@ -2597,7 +2598,7 @@ namespace
 			}
 			y += S(26) * int(std::size(feel)) + S(94);
 
-			top = Group(x, y, w, S(26) * 8 + S(8), L"Fun");
+			top = Group(x, y, w, S(26) * 10 + S(8), L"Fun");
 			struct FunToggle { const wchar_t *name, *tip; bool *v; const char *pref; };
 			FunToggle funToggles[] = {
 				{ L"Recycle Bin eats sand", L"Sand that lands on the Recycle Bin icon disappears into it (with icons as walls)", &fun.bin, "Bin" },
@@ -2613,22 +2614,26 @@ namespace
 					GlobalPrefs::Ref().Set(ByteString("Overlay.Fun.") + f.pref, *f.v);
 				}, f.tip);
 			}
-			struct FunSlider { const wchar_t *name, *tip; float *v; float hi; const char *pref; bool count; };
+			struct FunSlider { const wchar_t *name, *tip; float *v; float lo, hi; const char *pref; int unit; }; // unit: 0 %, 1 count, 2 minutes, 3 seconds
 			FunSlider funSliders[] = {
-				{ L"Pets", L"Stick figures that wander your windows and taskbar (how many). Fire and long falls can kill them; new ones drop in", &fun.pets, 10, "Pets", true },
-				{ L"Weather", L"Snow, rain (with lightning) or leaves falling from the top of the screen (how heavy). It melts or fades after a while", &fun.weather, 3, "Weather", false },
-				{ L"Music bounce", L"Sand hops and fire flares to the beat of whatever your PC is playing (only the sound level is read)", &fun.music, 3, "Music", false },
+				{ L"Pets", L"Stick figures that wander your windows and taskbar (how many). Fire and long falls can kill them; new ones drop in", &fun.pets, 0, 10, "Pets", 1 },
+				{ L"Weather", L"Snow, rain (with lightning) or leaves falling from the top of the screen (how heavy). It melts or fades after a while", &fun.weather, 0, 3, "Weather", 0 },
+				{ L"Weather waits", L"Weather only starts once you have left the PC alone this many minutes, and stops when you come back (off: always)", &fun.weatherIdle, 0, 30, "WeatherIdle", 2 },
+				{ L"Weather lasts", L"How long each flake, leaf or drop stays before it melts or fades; they thin out one by one", &fun.weatherLast, 10, 600, "WeatherLast", 3 },
+				{ L"Music bounce", L"Sand hops and fire flares to the beat of whatever your PC is playing (only the sound level is read)", &fun.music, 0, 3, "Music", 0 },
 			};
 			int sy = top + int(std::size(funToggles)) * S(26);
 			for (auto &f : funSliders)
 			{
 				Caption(x + S(12), sy, f.name);
 				wchar_t val[16];
-				if (f.count) swprintf(val, 16, *f.v >= 1 ? L"%d" : L"off", int(*f.v));
+				if (f.unit == 1) swprintf(val, 16, *f.v >= 1 ? L"%d" : L"off", int(*f.v));
+				else if (f.unit == 2) swprintf(val, 16, *f.v >= 1 ? L"%d min" : L"off", int(*f.v));
+				else if (f.unit == 3) swprintf(val, 16, L"%d s", int(*f.v));
 				else swprintf(val, 16, *f.v > 0 ? L"%d%%" : L"off", int(std::lround(*f.v * 100)));
 				Caption(x + w - S(60), sy, val);
-				Slider(x + S(160), sy, w - S(232), *f.v, 0, f.hi, [f](float v) {
-					*f.v = f.count ? std::round(v) : std::round(v * 20) / 20;
+				Slider(x + S(160), sy, w - S(232), *f.v, f.lo, f.hi, [f](float v) {
+					*f.v = f.unit == 3 ? std::round(v / 10) * 10 : f.unit ? std::round(v) : std::round(v * 20) / 20;
 					GlobalPrefs::Ref().Set(ByteString("Overlay.Fun.") + f.pref, *f.v);
 				}, f.tip);
 				sy += S(26);
@@ -2643,7 +2648,7 @@ namespace
 					GlobalPrefs::Ref().Set("Overlay.Fun.WeatherKind", i);
 				}) + S(18);
 			}
-			y += S(26) * 8 + S(16);
+			y += S(26) * 10 + S(16);
 
 			top = Group(x, y, w, S(76), L"Gravity");
 			const wchar_t *gravs[] = { L"Vertical", L"Off", L"Radial", L"Custom" };
@@ -4728,7 +4733,7 @@ void OverlayWindows::Init(void *mainHwnd)
 	overlayFeel.shardParticles = prefs.Get("Overlay.Feel.ShardParticles", false);
 	for (auto [v, name] : { std::pair{ &overlayFeel.grip, "Grip" }, { &overlayFeel.fling, "Fling" }, { &overlayFeel.push, "Push" }, { &overlayFeel.wind, "Wind" }, { &overlayFeel.scorch, "Scorch" }, { &overlayFeel.frost, "Frost" }, { &overlayFeel.acid, "Acid" }, { &overlayFeel.water, "Water" }, { &overlayFeel.acidEat, "AcidEat" }, { &overlayFeel.blast, "Blast" }, { &overlayFeel.holeOpacity, "HoleSolid" }, { &overlayFeel.shards, "Shards" }, { &overlayFeel.shardSize, "ShardSize" }, { &overlayFeel.blackHole, "BlackHole" }, { &overlayFeel.shake, "Shake" } })
 		*v = prefs.Get(ByteString("Overlay.Feel.") + name, *v);
-	for (auto [v, name] : { std::pair{ &fun.pets, "Pets" }, { &fun.weather, "Weather" }, { &fun.music, "Music" } })
+	for (auto [v, name] : { std::pair{ &fun.pets, "Pets" }, { &fun.weather, "Weather" }, { &fun.music, "Music" }, { &fun.weatherIdle, "WeatherIdle" }, { &fun.weatherLast, "WeatherLast" } })
 		*v = prefs.Get(ByteString("Overlay.Fun.") + name, *v);
 	for (auto [v, name] : { std::pair{ &fun.bin, "Bin" }, { &fun.broom, "Broom" }, { &fun.closeToss, "CloseToss" }, { &fun.openShake, "OpenShake" } })
 		*v = prefs.Get(ByteString("Overlay.Fun.") + name, *v);
@@ -5539,7 +5544,9 @@ static void TickFun(Simulation *sim)
 
 	// Weather from the top edge; each flake, drop or leaf goes after a while (snow even once melted)
 	static std::deque<std::tuple<int, int, int>> fallen; // particle, type, the tick it goes
-	if (fun.weather > 0)
+	LASTINPUTINFO input{ sizeof(input) };
+	bool idle = fun.weatherIdle < 1 || (GetLastInputInfo(&input) && GetTickCount() - input.dwTime >= DWORD(fun.weatherIdle * 60000));
+	if (fun.weather > 0 && idle)
 	{
 		int kind = fun.weatherKind;
 		if (!kind)
@@ -5562,7 +5569,9 @@ static void TickFun(Simulation *sim)
 			if (kind == 1) p.temp = 263.15f, p.vx = sim->rng.uniform01() - 0.5f;
 			if (kind == 2) p.vy = 3;
 			if (kind == 3) p.dcolour = autumn[sim->rng.between(0, 4)], p.vx = (sim->rng.uniform01() - 0.5f) * 2;
-			fallen.push_back({ i, type, sim->currentTick + (kind == 1 ? 5400 : kind == 2 ? 300 : 3600) });
+			float life = std::max(10.f, fun.weatherLast) * 60 * (0.6f + 0.8f * sim->rng.uniform01()); // spread: they thin out
+			if (kind == 2) life = std::min(life, 300.f); // rain soaks away quickly
+			fallen.push_back({ i, type, sim->currentTick + int(life) });
 		}
 		if (kind == 2 && sim->rng.uniform01() < fun.weather / 1200) // a storm: now and then a bolt from the top
 			sim->create_part(-1, sim->rng.between(XRES / 20, XRES * 19 / 20), CELL, PT_LIGH, 20);
@@ -5603,12 +5612,12 @@ static void TickFun(Simulation *sim)
 		}
 		static float level = 0;
 		static int since = 0;
-		bool beat = ++since > 8 && peak > 0.05f && peak > level * 1.4f;
+		bool beat = ++since > 6 && peak > 0.03f && peak > level * 1.15f;
 		level = level * 0.9f + peak * 0.1f;
 		if (beat)
 		{
 			since = 0;
-			float hop = fun.music * peak, chance = std::min(1.f, hop * 0.8f);
+			float hop = fun.music * (0.4f + peak), chance = std::min(1.f, 0.3f + hop * 0.5f);
 			for (int i = 0; i < std::min(NPART, sim->parts.active + 1); i++)
 			{
 				auto &p = sim->parts[i];
@@ -5618,7 +5627,7 @@ static void TickFun(Simulation *sim)
 				}
 				else if (p.type && (elements[p.type].Properties & (TYPE_PART | TYPE_LIQUID)) && std::abs(p.vy) < 0.3f && sim->rng.uniform01() < chance)
 				{
-					p.vy -= 1 + 3 * hop;
+					p.vy -= 1.5f + 3 * hop;
 					p.vx += (sim->rng.uniform01() - 0.5f) * hop * 2;
 				}
 			}
@@ -5770,9 +5779,17 @@ static void TickWindowWalls()
 	if (broom)
 	{
 		auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); };
-		int cx = px(at.x - sr.left, WINDOWW, sw), cy = px(at.y - sr.top, WINDOWH, sh), b = 4;
-		OverlayWall w{ std::max(0, cx - b), std::max(0, cy - b), std::min(XRES, cx + b), std::min(YRES, cy + b),
-		               broomAt.x >= 0 ? cx - broomAt.x : 0, broomAt.x >= 0 ? cy - broomAt.y : 0, {} };
+		int cx = px(at.x - sr.left, WINDOWW, sw), cy = px(at.y - sr.top, WINDOWH, sh), b = 5;
+		int ox = broomAt.x >= 0 ? broomAt.x : cx, oy = broomAt.x >= 0 ? broomAt.y : cy;
+		// the whole path since the last tick is solid (a fast flick would otherwise jump over the sand in between), so
+		// what it sweeps over is pushed out ahead of it
+		OverlayWall w{ std::max(0, std::min(ox, cx) - b), std::max(0, std::min(oy, cy) - b), std::min(XRES, std::max(ox, cx) + b + 1),
+		               std::min(YRES, std::max(oy, cy) + b + 1), cx - ox, cy - oy, [=](int x, int y) {
+			               float dx = float(cx - ox), dy = float(cy - oy), l = dx * dx + dy * dy;
+			               float t = l > 0 ? std::clamp(((x - ox) * dx + (y - oy) * dy) / l, 0.f, 1.f) : 0;
+			               float ex = x - ox - t * dx, ey = y - oy - t * dy;
+			               return ex * ex + ey * ey <= float(b * b);
+		               } };
 		w.id = 2; // not a window handle
 		broomAt = { cx, cy };
 		if (w.x1 > w.x0 && w.y1 > w.y0) wins.push_back(w);
