@@ -534,6 +534,53 @@ int OverlayMac::SystemMajor()
 	return int(NSProcessInfo.processInfo.operatingSystemVersion.majorVersion);
 }
 
+static CFMachPortRef dockTap;
+static std::atomic<bool> holding{ false }; // a press the Dock didn't get: the system doesn't count it as held
+
+static CGEventRef OnDockClick(CGEventTapProxy, CGEventType type, CGEventRef event, void *)
+{
+	if (type == kCGEventTapDisabledByTimeout || type == kCGEventTapDisabledByUserInput)
+	{
+		if (dockTap) CGEventTapEnable(dockTap, true);
+		return event;
+	}
+	if (type == kCGEventLeftMouseDown)
+	{
+		double l, t, r, b;
+		CGPoint p = CGEventGetLocation(event);
+		holding = (CGEventGetFlags(event) & kCGEventFlagMaskControl) && OverlayMac::DockFrame(l, t, r, b) && p.x >= l && p.x < r && p.y >= t && p.y < b;
+		return holding ? nullptr : event;
+	}
+	if (!holding) return event;
+	if (type == kCGEventLeftMouseUp) holding = false;
+	return nullptr;
+}
+
+static bool DockHeld()
+{
+	return holding;
+}
+
+void OverlayMac::HoldDockClicks(bool on)
+{
+	if (on == (dockTap != nullptr) || (on && !AXIsProcessTrusted())) return;
+	static CFRunLoopSourceRef source;
+	if (!on)
+	{
+		CFRunLoopRemoveSource(CFRunLoopGetMain(), source, kCFRunLoopCommonModes);
+		CFRelease(source);
+		CFMachPortInvalidate(dockTap);
+		CFRelease(dockTap);
+		dockTap = nullptr;
+		return;
+	}
+	CGEventMask mask = CGEventMaskBit(kCGEventLeftMouseDown) | CGEventMaskBit(kCGEventLeftMouseDragged) | CGEventMaskBit(kCGEventLeftMouseUp);
+	dockTap = CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap, kCGEventTapOptionDefault, mask, OnDockClick, nullptr);
+	if (!dockTap) return;
+	source = CFMachPortCreateRunLoopSource(nullptr, dockTap, 0);
+	CFRunLoopAddSource(CFRunLoopGetMain(), source, kCFRunLoopCommonModes);
+}
+
 void OverlayMac::EarlySetup()
 {
 	// no window restoration: there's nothing to restore, and after a crash macOS would hold up the next start asking about it
@@ -556,9 +603,11 @@ double OverlayMac::IdleSeconds(bool keysOnly)
 	return CGEventSourceSecondsSinceLastEventType(kCGEventSourceStateCombinedSessionState, keysOnly ? kCGEventKeyDown : kCGAnyInputEventType);
 }
 
+static bool DockHeld();
+
 bool OverlayMac::ButtonDown(int button)
 {
-	return NSEvent.pressedMouseButtons & (NSUInteger(1) << button);
+	return (NSEvent.pressedMouseButtons & (NSUInteger(1) << button)) || (button == 0 && DockHeld());
 }
 
 bool OverlayMac::ControlDown()

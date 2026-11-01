@@ -538,6 +538,9 @@ A check when touching it: `unifdef -D_WIN32 -U__APPLE__` old vs new shows exactl
 - **Scene tiles** are 24 cells, not 255, on both systems: GameSave refuses a save larger than the sim, so 255 lost the scene
   going to a smaller sim.
 
+- **Throw from the Dock:** while it's on, an event tap keeps Ctrl-presses on Dock icons from reaching the Dock, or it would
+  open the icon's menu and letting go over that would pick an item (needs Accessibility).
+
 Different on the Mac: Form and the console are AppKit, TPT's drop-downs are a small window of their own (`PopupList`,
 NSMenu would hold the main thread and the sim), and typing sparks start at the window's top edge over the caret, since
 sparks can't start inside a wall.

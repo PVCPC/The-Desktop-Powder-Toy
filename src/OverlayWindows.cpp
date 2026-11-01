@@ -3476,7 +3476,12 @@ namespace
 				return Platform::WinWiden(prefs.Get(ByteString("Overlay.Keys.") + name, ByteString(fallback)));
 			};
 			int top = Group(x, y, w, S(100), L"Clicks go to");
-			const wchar_t *modes[] = { L"Auto: TPT while it's in front, the desktop once another app is", L"Pass-through: the sim takes no clicks (side windows still do)", L"Locked: everything to TPT" };
+#ifdef __APPLE__
+			const wchar_t *autoLabel = L"Auto: empty desktop is TPT's, windows and icons keep their clicks";
+#else
+			const wchar_t *autoLabel = L"Auto: TPT while it's in front, the desktop once another app is";
+#endif
+			const wchar_t *modes[] = { autoLabel, L"Pass-through: the sim takes no clicks (side windows still do)", L"Locked: everything to TPT" };
 			for (int i = 0; i < int(OverlayInput::Count); i++)
 			{
 				Toggle(x + S(12), top + i * S(24), modes[i], int(OverlayGetInput()) == i, true, [i] { OverlaySetInput(OverlayInput(i)); });
@@ -4803,7 +4808,12 @@ namespace
 				GetMonitorInfoW(MonitorFromPoint(at, MONITOR_DEFAULTTONEAREST), &mi);
 				auto work = mi.rcWork;
 				int chromeW = 2 * host->border, chromeH = host->titleH + host->border;
-				host->scale = std::max(1, std::min({ engine.GetScale(), int(work.right - work.left - chromeW) / std::max(1, hosted.size.X),
+#ifdef __APPLE__
+				int dialogScale = engine.GetScale() * int(std::lround(MacScale())); // TPT's scale is in points, these windows are in pixels
+#else
+				int dialogScale = engine.GetScale();
+#endif
+				host->scale = std::max(1, std::min({ dialogScale, int(work.right - work.left - chromeW) / std::max(1, hosted.size.X),
 				                                      int(work.bottom - work.top - chromeH) / std::max(1, hosted.size.Y) }));
 				int w = hosted.size.X * host->scale + chromeW, h = hosted.size.Y * host->scale + chromeH;
 				int x = at.x - host->border, y = at.y - host->titleH;
@@ -5193,6 +5203,7 @@ void OverlayWindows::Tick()
 #ifdef __APPLE__
 	ReleaseStuckButtons();
 	TickMacDock(GameController::Ref().GetModel()->GetSimulation());
+	OverlayMac::HoldDockClicks(fun.taskThrow && !overlayWindowed);
 	OverlayMac::WantDesktop(!overlayWindowed && iconWalls && OverlayGetLayer() != OverlayLayer::BehindIcons, !overlayWindowed && (windowWalls || fun.bin || fun.notify || fun.taskPop || fun.taskThrow), !overlayWindowed && fun.typing);
 #endif
 	TickWindowWalls();

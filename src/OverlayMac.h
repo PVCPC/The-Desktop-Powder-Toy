@@ -17,6 +17,8 @@ namespace OverlayMac
 	double BackingScale();           // pixels per point
 	void InitMenu();                 // keeps macOS from napping the app: all overlay:window wants of the above
 	void EarlySetup();               // before SDL starts
+	// While on, Ctrl-presses on the Dock don't reach it: they'd open an icon's menu, and letting go over it would pick from it
+	void HoldDockClicks(bool on);
 	int SystemMajor();               // macOS's major version
 	void FocusOverlay();             // the keyboard goes back to TPT
 	void Shutdown();                 // stops this file's threads: before exit, while what they read still exists
