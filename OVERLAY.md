@@ -491,6 +491,10 @@ On/off things are Fun toggles; things with an amount are More fun sliders.
   Multicore blocks now 25 passes / 128 px apart: a block's particles reach ~53 px (velocity 20 + liquid search 30), so
   two blocks 64 px apart could both move into one gap pixel. Bit-identical multicore physics is impossible (one shared
   RNG stream drawn in index order); exact mode = toggle off.
+- [x] 0.8.2: Multicore physics OFF by default (user). 0.8.3: one-core profile (xperf, build-prof with -Ddebug=true):
+  heat 15%, element updates 13%, UpdateParticle 10%, movement 9%, Recalc 6%. Inlining is no lever (LTO gave nothing).
+  9950X3D: the sim thread on the V-Cache die ran 12.3 -> 14.5 ticks/s (exact checksum), so Windows.cpp SetupCrt pins
+  the main thread to the cores with the biggest L3 when L3 sizes differ (no-op elsewhere). Multicore 33 -> 35.6.
 - [ ] Next for ~5x, all elements kept: (A) per-block particle slots so create/kill needs no lock; (B) RecalcFreeParticles
   on all cores (~5 ms); (C) review the rest one by one (PLNT, VINE, SPRK...); (D) sleeping regions, as a toggle.
 
