@@ -108,7 +108,8 @@ namespace
 		float hot = 0;                           // busy apps' windows warm what sits on them, 0-3
 		float hourglass = 0;                     // minutes the taskbar hourglass runs (0: none)
 		int weatherKind = 0;                    // 0 by the season, 1 snow, 2 rain, 3 leaves
-		bool bin = false, broom = false, closeToss = false, openShake = false, holidays = false;
+		bool bin = false, broom = false, closeToss = false, openShake = false, holidays = false, notify = false;
+		std::vector<HWND> flashed; // windows that flashed their taskbar button (a new message) since the last tick
 	} fun;
 	HWND mainWindow = nullptr;    // TPT's own window
 	std::string recording;        // Overlay.Keys.<name> being recorded in the Overlay tab, or empty
@@ -2600,7 +2601,7 @@ namespace
 			}
 			y += S(26) * int(std::size(feel)) + S(94);
 
-			top = Group(x, y, w, S(26) * 13 + S(8), L"Fun");
+			top = Group(x, y, w, S(26) * 14 + S(8), L"Fun");
 			struct FunToggle { const wchar_t *name, *tip; bool *v; const char *pref; };
 			FunToggle funToggles[] = {
 				{ L"Recycle Bin eats sand", L"Sand that lands on the Recycle Bin icon disappears into it (with icons as walls)", &fun.bin, "Bin" },
@@ -2608,6 +2609,7 @@ namespace
 				{ L"Closing a window throws its sand", L"Close or minimise a window and the pile on it is tossed off", &fun.closeToss, "CloseToss" },
 				{ L"New windows shake sand loose", L"A window that opens bumps the sand above it into the air", &fun.openShake, "OpenShake" },
 				{ L"Holidays", L"Pumpkins roll about on Halloween, jelly hearts fall on Valentine's Day, fireworks go up after midnight on New Year's", &fun.holidays, "Holidays" },
+				{ L"Notifications drop a ball", L"When an app flashes its taskbar button (a new message in Discord, Teams and the like), a ball drops onto its window", &fun.notify, "Notify" },
 			};
 			for (int i = 0; i < int(std::size(funToggles)); i++)
 			{
@@ -2653,7 +2655,7 @@ namespace
 					GlobalPrefs::Ref().Set("Overlay.Fun.WeatherKind", i);
 				}) + S(18);
 			}
-			y += S(26) * 13 + S(16);
+			y += S(26) * 14 + S(16);
 
 			top = Group(x, y, w, S(76), L"Gravity");
 			const wchar_t *gravs[] = { L"Vertical", L"Off", L"Radial", L"Custom" };
@@ -4616,6 +4618,12 @@ namespace
 			Shell_NotifyIconW(NIM_ADD, &tray); // Explorer restarted and lost the icon
 			return 0;
 		}
+		static const UINT shellHook = RegisterWindowMessageW(L"SHELLHOOK");
+		if (msg == shellHook)
+		{
+			if (wp == HSHELL_FLASH && fun.notify) fun.flashed.push_back(HWND(lp));
+			return 0;
+		}
 		if (msg == WM_ENDSESSION && wp)
 		{
 			SaveSceneTiles(); // shutting down or signing out: TPT gets no quit of its own
@@ -4710,6 +4718,7 @@ namespace
 		}
 		wcscpy_s(tray.szTip, L"The Powder Toy (overlay)");
 		Shell_NotifyIconW(NIM_ADD, &tray);
+		RegisterShellHookWindow(tray.hWnd); // taskbar buttons flashing (Notifications drop a ball)
 		std::atexit([] { Shell_NotifyIconW(NIM_DELETE, &tray); });
 		// On a crash too. A forced kill (Task Manager's End task) can't be caught: Windows clears that icon on hover.
 		static LPTOP_LEVEL_EXCEPTION_FILTER previous = SetUnhandledExceptionFilter([](EXCEPTION_POINTERS *e) -> LONG {
@@ -4740,7 +4749,7 @@ void OverlayWindows::Init(void *mainHwnd)
 		*v = prefs.Get(ByteString("Overlay.Feel.") + name, *v);
 	for (auto [v, name] : { std::pair{ &fun.pets, "Pets" }, { &fun.weather, "Weather" }, { &fun.music, "Music" }, { &fun.weatherIdle, "WeatherIdle" }, { &fun.weatherLast, "WeatherLast" }, { &fun.hot, "Hot" }, { &fun.hourglass, "Hourglass" } })
 		*v = prefs.Get(ByteString("Overlay.Fun.") + name, *v);
-	for (auto [v, name] : { std::pair{ &fun.bin, "Bin" }, { &fun.broom, "Broom" }, { &fun.closeToss, "CloseToss" }, { &fun.openShake, "OpenShake" }, { &fun.holidays, "Holidays" } })
+	for (auto [v, name] : { std::pair{ &fun.bin, "Bin" }, { &fun.broom, "Broom" }, { &fun.closeToss, "CloseToss" }, { &fun.openShake, "OpenShake" }, { &fun.holidays, "Holidays" }, { &fun.notify, "Notify" } })
 		*v = prefs.Get(ByteString("Overlay.Fun.") + name, *v);
 	fun.weatherKind = prefs.Get("Overlay.Fun.WeatherKind", 0);
 	// Default UI scale: the larger of Windows' display scaling (TPT is DPI aware) and screen height / 1080, in
@@ -5943,6 +5952,21 @@ static void TickWindowWalls()
 			}
 		}
 	}
+	// Notifications: a window that flashed its taskbar button gets a ball dropped on it (one per window every 3 s)
+	static std::map<HWND, ULONGLONG> dropped;
+	for (HWND hwnd : fun.flashed)
+	{
+		auto it = wallRects.find(hwnd);
+		if (it == wallRects.end() || GetTickCount64() - dropped[hwnd] < 3000) continue;
+		dropped[hwnd] = GetTickCount64();
+		auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); };
+		auto &r = it->second;
+		int cx = px((r.left + r.right) / 2 - sr.left, WINDOWW, sw), cy = std::max(12, px(r.top - sr.top, WINDOWH, sh) - 20);
+		for (int y = -3; y <= 3; y++)
+			for (int x = -3; x <= 3; x++)
+				if (x * x + y * y <= 10) sim->create_part(-1, cx + x, cy + y, PT_BALL);
+	}
+	fun.flashed.clear();
 	static POINT broomAt{ -1, -1 };
 	if (broom)
 	{

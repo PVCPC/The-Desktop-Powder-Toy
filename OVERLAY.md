@@ -366,7 +366,9 @@ tray menu: the tray menu stays native on purpose.
 - [x] Taskbar hourglass (2026-10-31, Fun slider "Hourglass", 1-120 min from when it is set): GLAS on the taskbar near its
   right end; grains drop through the plugged neck so the top holds the time left, then it turns over; rebuilt where
   broken or cleared. Tested at 1 min: 88 grains drained evenly (74/14 -> 6/82), turned over to 88/0, nothing lost.
-- [ ] Notifications drop something (a ball or leaf) onto that app's window.
+- [x] Notifications (2026-10-31, Fun toggle "Notifications drop a ball"): the tray window is a shell hook window;
+  HSHELL_FLASH (an app flashing its taskbar button) drops a small ball onto that window, at most one per window per
+  3 s. Tested with my own form flashing twice: balls landed on it and stayed.
 - [ ] Day and night: fireflies and darker leaves in the evening, birds in the morning, by the clock.
 - [ ] Release v0.7.2 once a few of these are in.
 
