@@ -101,7 +101,7 @@ namespace
 	float uiScale = 1;
 	bool windowWalls = true;            // open windows are walls to particles (Overlay.WindowWalls)
 	bool iconWalls = true;              // and so are the desktop icons (Overlay.IconWalls)
-	// The Simulation tab's Fun group (Overlay.Fun.*), all off by default
+	// The Fun tab's settings (Overlay.Fun.*), all off by default
 	struct
 	{
 		float pets = 0, weather = 0, music = 0; // pets: how many; weather and music 0-3
@@ -129,32 +129,100 @@ namespace
 		float meteors = 0;                       // big meteors an hour at night
 		std::vector<HWND> flashed; // windows that flashed their taskbar button (a new message) since the last tick
 	} fun;
-	// A Fun slider row; unit: 0 %, 1 count, 2 minutes, 3 seconds (10 s steps), 4 clock hour, 5 px, 6 seconds
-	struct FunSlider { const wchar_t *name, *tip; float *v; float lo, hi; const char *pref; int unit; };
-	// The More fun group (Overlay.Fun.*): 0 / the far left is off where it can be
-	FunSlider moreFun[] = {
-		{ L"Pets nap from", L"From this hour the pets stop and doze (z's float up) until you move the mouse; they doze off again after 10 s", &fun.napFrom, 0, 24, "NapFrom", 4 },
-		{ L"Pets wake at", L"The hour the pets stop napping", &fun.napUntil, 1, 12, "NapUntil", 4 },
-		{ L"Pets gather after", L"Leave the PC alone this many minutes and the pets gather in the middle of the screen", &fun.gather, 0, 30, "Gather", 2 },
-		{ L"Welcome back hop", L"How long the pets hop for joy when you come back after a minute or more away", &fun.welcome, 0, 10, "Welcome", 6 },
-		{ L"Snowmen", L"Where snow lies deep enough, up to this many snowmen appear (made of ice: they melt when it warms up)", &fun.snowmen, 0, 5, "Snowmen", 1 },
-		{ L"Snowman needs", L"How deep the snow must be before a snowman appears on it", &fun.snowDepth, 6, 40, "SnowDepth", 5 },
-		{ L"Window lift", L"Drag a window up fast and whatever sits on it is thrown into the air (how hard)", &fun.lift, 0, 3, "Lift", 0 },
-		{ L"Paper planes", L"Every this many minutes a pet (or the edge of the screen) throws a paper plane that glides until it lands", &fun.planes, 0, 30, "Planes", 2 },
-		{ L"Plane speed", L"How fast the paper planes fly", &fun.planeSpeed, 0.25f, 3, "PlaneSpeed", 0 },
-		{ L"Rainbow after rain", L"When the rain (Weather) has fallen half a minute or more and stops, a rainbow shows for this many seconds", &fun.rainbow, 0, 120, "Rainbow", 6 },
-		{ L"Rainbow brightness", L"How strong the rainbow's colours are (it stays see-through, like a real one)", &fun.rainbowGlow, 0.1f, 1, "RainbowGlow", 0 },
-		{ L"Double rainbow chance", L"How often a second, fainter rainbow, its colours the other way round, shows above the first", &fun.rainbowDouble, 0, 1, "RainbowDouble", 0 },
-		{ L"Pets fetch", L"Pets run after a ball up to this far away and kick it back toward the mouse pointer", &fun.fetch, 0, 400, "Fetch", 5 },
-		{ L"Fetch kick", L"How hard the pets kick the ball back", &fun.kick, 0.25f, 3, "Kick", 0 },
-		{ L"Volcano wakes at", L"A little volcano by the clock smokes once the PC's total CPU use passes this, and erupts lava at 20% more", &fun.volcano, 0, 1, "Volcano", 0 },
-		{ L"Volcano force", L"How high the volcano throws its lava", &fun.volcanoForce, 0.25f, 3, "VolcanoForce", 0 },
-		{ L"Shooting stars", L"At night (8 pm to 5 am), about this many shooting stars an hour streak across the empty desktop", &fun.stars, 0, 30, "Stars", 7 },
-		{ L"Puddles last", L"Rain that lands on something lies there as a puddle this many seconds more before it dries up", &fun.puddles, 0, 120, "Puddles", 6 },
-		{ L"Mouse wind", L"Swipe the mouse pointer fast across the desktop and it blows the sand, snow and smoke near it (how hard)", &fun.wind, 0, 3, "Wind", 0 },
-		{ L"Birds rest for", L"About how long a bird that landed (Birds land and rest) sits before it flies on", &fun.birdRest, 2, 60, "BirdRest", 6 },
-		{ L"Windows heal", L"Holes and chunks broken out of windows and icons (Destructible) grow back in from their edges, a big hole in about this long", &overlayFeel.heal, 0, 10, "Heal", 2 },
-		{ L"Big meteors", L"At night, about this many big glowing meteors an hour crash down: a crater in the sand, and with Destructible on a big chunk out of a window (3 times as many on meteor shower nights)", &fun.meteors, 0, 10, "Meteors", 7 },
+	// The Fun tab's rows, by group, and the pref each is saved as. A row with no tip starts a group (name = heading);
+	// a row with neither b nor v is the weather kind. Slider units: 0 %, 1 count, 2 minutes, 3 seconds (10 s steps),
+	// 4 clock hour, 5 px, 6 seconds (0 off), 7 an hour
+	struct FunRow { const wchar_t *name, *tip = nullptr; bool *b = nullptr; float *v = nullptr; float lo = 0, hi = 0; const char *pref = ""; int unit = 0; };
+	FunRow Check(const wchar_t *name, const wchar_t *tip, bool *b, const char *pref) { return { name, tip, b, nullptr, 0, 0, pref }; }
+	FunRow Slide(const wchar_t *name, const wchar_t *tip, float *v, float lo, float hi, const char *pref, int unit = 0) { return { name, tip, nullptr, v, lo, hi, pref, unit }; }
+	FunRow funRows[] = {
+		{ L"Windows and icons" },
+		Check(L"Open windows are walls", L"Sand, water and snow land on your windows and pile up on their title bars. Only while the sim is in front of your windows", &windowWalls, "Overlay.WindowWalls"),
+		Check(L"Desktop icons are walls", L"Sand piles up on your desktop icons, in the shape of each icon. Not while the sim is behind the icons", &iconWalls, "Overlay.IconWalls"),
+		Slide(L"Window grip", L"How well sand rides along on a window you drag. Off: it slides off", &overlayFeel.grip, 0, 1, "Overlay.Feel.Grip"),
+		Slide(L"Fling", L"How hard sand flies off a window you drag and then stop short or turn back", &overlayFeel.fling, 0, 3, "Overlay.Feel.Fling"),
+		Slide(L"Window push", L"How hard a window you move shoves the sand in its way", &overlayFeel.push, 0, 3, "Overlay.Feel.Push"),
+		Slide(L"Window lift", L"Drag a window up fast and whatever sits on it is thrown into the air (how hard)", &fun.lift, 0, 3, "Overlay.Fun.Lift"),
+		Check(L"Closing a window throws its sand", L"Close or minimise a window and the pile on it is tossed off", &fun.closeToss, "Overlay.Fun.CloseToss"),
+		Check(L"New windows shake sand loose", L"A window that opens bumps the sand above it into the air", &fun.openShake, "Overlay.Fun.OpenShake"),
+		Check(L"Recycle Bin eats sand", L"Sand that lands on the Recycle Bin icon disappears into it (needs Desktop icons are walls)", &fun.bin, "Overlay.Fun.Bin"),
+
+		{ L"Breaking windows" },
+		Check(L"Destructible windows and icons", L"Acid, explosions and great heat eat holes in windows and icons. Only in the overlay: your real windows and icons are never touched, and clearing the sim mends them. The rest of this group needs it on", &overlayFeel.destructible, "Overlay.Feel.Destructible"),
+		Check(L"Windows crack first", L"A hit on whole glass only cracks it; a second hit on the cracks breaks it out. Cracks fade as windows heal", &overlayFeel.crack, "Overlay.Fun.Crack"),
+		Slide(L"Windows heal", L"Holes and broken chunks grow back in from their edges; a big hole takes about this long", &overlayFeel.heal, 0, 10, "Overlay.Fun.Heal", 2),
+		Slide(L"Acid eats windows", L"How fast acid eats holes in windows and icons", &overlayFeel.acidEat, 0, 3, "Overlay.Feel.AcidEat"),
+		Slide(L"Blasts and burning", L"How hard explosions, bombs, DEST, singularities and anything 2000 C or hotter break windows and icons", &overlayFeel.blast, 0, 3, "Overlay.Feel.Blast"),
+		Slide(L"Black holes", L"How far and how hard black holes (NBHL) tear at the windows and icons near them", &overlayFeel.blackHole, 0, 3, "Overlay.Feel.BlackHole"),
+		Slide(L"Hole opacity", L"Off: holes show straight through to whatever is really behind the window. Up: the broken part fades back in", &overlayFeel.holeOpacity, 0, 1, "Overlay.Feel.HoleSolid"),
+		Check(L"Hide window borders at holes", L"Where a hole breaks through a window's edge, the thin dark border Windows draws around it is covered too. Off: the border stays, showing where the real window is", &overlayFeel.holeBorder, "Overlay.Feel.HoleBorder"),
+		Slide(L"Shards", L"How many bits chip off and fly when a window breaks. Off: none", &overlayFeel.shards, 0, 3, "Overlay.Feel.Shards"),
+		Slide(L"Shard size", L"How big each chip is", &overlayFeel.shardSize, 0, 6, "Overlay.Feel.ShardSize"),
+		Check(L"Shards take the window's colour", L"On: chips are the colour of the window they broke off. Off: dark grey", &overlayFeel.shardTint, "Overlay.Feel.ShardTint"),
+		Check(L"Shards are sim particles", L"On: broken glass in the sim, which piles up, melts and reacts. Off: solid chunks that spin, fall and fade", &overlayFeel.shardParticles, "Overlay.Feel.ShardParticles"),
+		Slide(L"Explosion shake", L"How hard explosions shake your REAL windows. They go back where they were afterwards. Works without Destructible", &overlayFeel.shake, 0, 3, "Overlay.Feel.Shake"),
+
+		{ L"Marks on windows and the wallpaper" },
+		Slide(L"Scorch", L"How fast fire and lava blacken the windows they touch (gone when you clear the sim)", &overlayFeel.scorch, 0, 3, "Overlay.Feel.Scorch"),
+		Slide(L"Frost", L"How fast ice, LN2 and CRYO frost the windows they touch. The frost melts", &overlayFeel.frost, 0, 3, "Overlay.Feel.Frost"),
+		Slide(L"Acid etching", L"How fast acid pits the windows it touches (gone when you clear the sim)", &overlayFeel.acid, 0, 3, "Overlay.Feel.Acid"),
+		Slide(L"Water streaks", L"How much water streaks the windows it runs down. The streaks dry", &overlayFeel.water, 0, 3, "Overlay.Feel.Water"),
+		Check(L"Fire and acid mark the wallpaper", L"Anything 300 C or hotter blackens the desktop background behind it, and acid pits it, at the Scorch and Acid etching speeds. Only drawn by the overlay: your real wallpaper is never changed, and clearing the sim wipes it", &overlayFeel.wallpaper, "Overlay.Feel.Wallpaper"),
+
+		{ L"Mouse and keyboard" },
+		Check(L"Mouse is a broom", L"Where clicks go to the desktop, the mouse pointer is a solid paddle that shoves and scoops sand", &fun.broom, "Overlay.Fun.Broom"),
+		Slide(L"Mouse breeze", L"Moving the mouse stirs the air around the pointer: a soft breeze that drifts sand, smoke and gas (where clicks go to the desktop)", &overlayFeel.wind, 0, 3, "Overlay.Feel.Wind"),
+		Slide(L"Mouse wind", L"Swipe the mouse fast and it flings the loose sand, liquid and smoke right next to the pointer. Stronger and closer in than Mouse breeze", &fun.wind, 0, 3, "Overlay.Fun.Wind"),
+		Check(L"Sparkle trail", L"The mouse pointer leaves a short trail of cold sparks over the desktop", &fun.trail, "Overlay.Fun.Trail"),
+		Check(L"Confetti", L"Wiggle the mouse quickly from side to side to throw a burst of confetti", &fun.confetti, "Overlay.Fun.Confetti"),
+		Check(L"Typing sparks", L"Typing now and then puffs a few cold sparks up from the text cursor (or from the top of the window you're typing in)", &fun.typing, "Overlay.Fun.Typing"),
+
+		{ L"Taskbar and apps" },
+		Check(L"Throw from the taskbar", L"Hold Ctrl and drag an app's taskbar button up off the taskbar: a stone block in its icon's colour drops from the pointer, thrown the way you moved", &fun.taskThrow, "Overlay.Fun.TaskThrow"),
+		Check(L"Apps pop out of the taskbar", L"When an app opens a window, a stone block in its icon's colour pops up out of its taskbar button", &fun.taskPop, "Overlay.Fun.TaskPop"),
+		Check(L"Notifications drop a ball", L"When an app flashes its taskbar button (a new message in Discord, Teams and the like), a ball drops onto its window", &fun.notify, "Overlay.Fun.Notify"),
+		Slide(L"Busy apps run hot", L"A window warms whatever sits on it by how hard its app is working: snow melts on a busy game or browser and stays on an idle one", &fun.hot, 0, 3, "Overlay.Fun.Hot"),
+		Slide(L"Music bounce", L"Sand hops and fire flares to the beat of whatever your PC is playing (it only reads how loud it is)", &fun.music, 0, 3, "Overlay.Fun.Music"),
+		Check(L"Gravity leans to your window", L"Gravity tilts toward the side of the screen the window you're using is on, so loose sand slides that way (only while Gravity is Vertical, in the Simulation tab)", &fun.tilt, "Overlay.Fun.Tilt"),
+		Slide(L"Hourglass", L"A glass hourglass on the taskbar whose sand runs out in this many minutes, counted from when you set it; then it starts again", &fun.hourglass, 0, 120, "Overlay.Fun.Hourglass", 2),
+		Slide(L"Volcano wakes at", L"A little volcano by the clock smokes once your PC's total CPU use passes this, and erupts lava at 20% more. Off: no volcano", &fun.volcano, 0, 1, "Overlay.Fun.Volcano"),
+		Slide(L"Volcano force", L"How high the volcano throws its lava", &fun.volcanoForce, 0.25f, 3, "Overlay.Fun.VolcanoForce"),
+
+		{ L"Pets" },
+		Slide(L"Pets", L"Little stick figures that wander over your windows and taskbar (how many). Fire and long falls can kill them; new ones drop in", &fun.pets, 0, 10, "Overlay.Fun.Pets", 1),
+		Check(L"Pets build sandcastles", L"A pet next to a big enough sand pile now and then builds a little castle from it. It crumbles back into sand after 5 minutes", &fun.castles, "Overlay.Fun.Castles"),
+		Check(L"Pets explore holes", L"Pets drop through holes broken in windows instead of turning back, and stop to look out of a hole they stand in", &fun.petHoles, "Overlay.Fun.PetHoles"),
+		Slide(L"Pets fetch", L"Pets run after a ball up to this far away and kick it back toward the mouse pointer", &fun.fetch, 0, 400, "Overlay.Fun.Fetch", 5),
+		Slide(L"Fetch kick", L"How hard the pets kick the ball back", &fun.kick, 0.25f, 3, "Overlay.Fun.Kick"),
+		Slide(L"Paper planes", L"Every this many minutes a pet (or the edge of the screen) throws a paper plane that glides until it lands", &fun.planes, 0, 30, "Overlay.Fun.Planes", 2),
+		Slide(L"Plane speed", L"How fast the paper planes fly", &fun.planeSpeed, 0.25f, 3, "Overlay.Fun.PlaneSpeed"),
+		Slide(L"Pets nap from", L"From this hour the pets stop and doze (z's float up) until you move the mouse; they doze off again after 10 s", &fun.napFrom, 0, 24, "Overlay.Fun.NapFrom", 4),
+		Slide(L"Pets wake at", L"The hour the pets stop napping", &fun.napUntil, 1, 12, "Overlay.Fun.NapUntil", 4),
+		Slide(L"Pets gather after", L"Leave the PC alone this many minutes and the pets gather in the middle of the screen", &fun.gather, 0, 30, "Overlay.Fun.Gather", 2),
+		Slide(L"Welcome back hop", L"How long the pets hop for joy when you come back after a minute or more away", &fun.welcome, 0, 10, "Overlay.Fun.Welcome", 6),
+
+		{ L"Weather" },
+		Slide(L"Weather", L"Snow, rain (with lightning), leaves, hail or fog coming down from the top of the screen (how heavy)", &fun.weather, 0, 3, "Overlay.Fun.Weather"),
+		{ L"Weather is", L"By season: snow from December to February, leaves from September to November, rain the rest of the year" },
+		Check(L"Weekday weather", L"Monday rain, Tuesday fog, Wednesday hail, Thursday snow, Friday leaves; weekends by the season. Only while Weather is By season", &fun.weekday, "Overlay.Fun.Weekday"),
+		Slide(L"Weather waits", L"Weather only starts once you have left the PC alone this many minutes, and stops when you come back. Off: always", &fun.weatherIdle, 0, 30, "Overlay.Fun.WeatherIdle", 2),
+		Slide(L"Weather lasts", L"How long each flake, leaf or drop stays before it melts or fades; they thin out one by one", &fun.weatherLast, 10, 600, "Overlay.Fun.WeatherLast", 3),
+		Slide(L"Puddles last", L"Rain that lands on something lies there as a puddle this many seconds more before it dries up", &fun.puddles, 0, 120, "Overlay.Fun.Puddles", 6),
+		Slide(L"Rainbow after rain", L"When rain has fallen half a minute or more and stops, a rainbow shows for this many seconds", &fun.rainbow, 0, 120, "Overlay.Fun.Rainbow", 6),
+		Slide(L"Rainbow brightness", L"How strong the rainbow's colours are (it stays see-through, like a real one)", &fun.rainbowGlow, 0.1f, 1, "Overlay.Fun.RainbowGlow"),
+		Slide(L"Double rainbow chance", L"How often a second, fainter rainbow, its colours the other way round, shows above the first", &fun.rainbowDouble, 0, 1, "Overlay.Fun.RainbowDouble"),
+		Slide(L"Snowmen", L"Where snow lies deep enough, up to this many snowmen appear (made of ice: they melt when it warms up)", &fun.snowmen, 0, 5, "Overlay.Fun.Snowmen", 1),
+		Slide(L"Snowman needs", L"How deep the snow must be before a snowman appears on it", &fun.snowDepth, 6, 40, "Overlay.Fun.SnowDepth", 5),
+
+		{ L"Sky and holidays" },
+		Check(L"Day and night", L"By the clock: fireflies come out and fallen leaves go dark in the evening, birds fly over in the morning", &fun.dayNight, "Overlay.Fun.DayNight"),
+		Check(L"Birds land and rest", L"The morning birds (Day and night) now and then land on a window, icon or pile and rest a while", &fun.perch, "Overlay.Fun.Perch"),
+		Slide(L"Birds rest for", L"About how long a bird that landed sits before it flies on", &fun.birdRest, 2, 60, "Overlay.Fun.BirdRest", 6),
+		Slide(L"Shooting stars", L"At night (8 pm to 5 am), about this many shooting stars an hour streak across the empty desktop", &fun.stars, 0, 30, "Overlay.Fun.Stars", 7),
+		Check(L"Shooting stars land", L"Now and then a shooting star comes all the way down and hits a window or a pile with a burst of sparks; with Destructible on it knocks a chunk out of the window", &fun.starsLand, "Overlay.Fun.StarsLand"),
+		Check(L"Meteor showers", L"On the real meteor shower nights (Quadrantids, Lyrids, Eta Aquariids, Perseids, Orionids, Leonids, Geminids) shooting stars come ten times as often, at least 60 an hour", &fun.showers, "Overlay.Fun.Showers"),
+		Slide(L"Big meteors", L"At night, about this many big glowing meteors an hour crash down: a crater in the sand, and with Destructible on a big chunk out of a window (3 times as many on meteor shower nights)", &fun.meteors, 0, 10, "Overlay.Fun.Meteors", 7),
+		Check(L"Holidays", L"Pumpkins roll about on Halloween, jelly hearts fall on Valentine's Day, fireworks go up after midnight on New Year's", &fun.holidays, "Overlay.Fun.Holidays"),
 	};
 	// paper planes in flight or landed (sim pixels; landed: ticks since), and when the rainbow goes (GetTickCount64)
 	struct PaperPlane { float x, y, vx, vy; int landed; };
@@ -2232,8 +2300,8 @@ namespace
 		std::wstring query; // Elements tab search: tools from every section whose name or description has it
 		bool typing = false; // a search box has the keyboard
 		std::wstring *typed = &query; // which one: the elements' or the online saves'
-		static constexpr const wchar_t *tabNames[] = { L"Elements", L"Tools", L"Simulation", L"Display", L"Saves", L"Overlay", L"Welcome" };
-		static constexpr int toolsTab = 1, welcomeTab = 6;
+		static constexpr const wchar_t *tabNames[] = { L"Elements", L"Tools", L"Simulation", L"Display", L"Saves", L"Overlay", L"Fun", L"Welcome" };
+		static constexpr int toolsTab = 1, welcomeTab = 7;
 
 		SideWindow()
 		{
@@ -2591,15 +2659,7 @@ namespace
 			}, L"Most elements update on all CPU cores: several times faster in big scenes. Off: one core, TPT's exact order");
 			y += S(96);
 
-			top = Group(x, y, w, S(100), L"Edges");
-			Toggle(x + S(12), top + S(24), L"Open windows are walls (sand piles on title bars)", windowWalls, false, [] {
-				windowWalls = !windowWalls;
-				GlobalPrefs::Ref().Set("Overlay.WindowWalls", windowWalls);
-			}, L"Only while the sim is on top of every window");
-			Toggle(x + S(12), top + S(48), L"Desktop icons are walls (sand piles on them, in their shapes)", iconWalls, false, [] {
-				iconWalls = !iconWalls;
-				GlobalPrefs::Ref().Set("Overlay.IconWalls", iconWalls);
-			}, L"Sand piles on your icons, shaped like each icon (not when the sim is behind them)");
+			top = Group(x, y, w, S(52), L"Edges");
 			const wchar_t *edges[] = { L"Void", L"Solid", L"Loop" };
 			const wchar_t *edgeTips[] = { L"Particles and air leave at the edges", L"The edges are walls", L"Particles wrap around (whole screen only for now)" };
 			int ex = x + S(12);
@@ -2607,147 +2667,7 @@ namespace
 			{
 				ex += Toggle(ex, top, edges[i], gc.GetEdgeMode() == i, true, [i] { GameController::Ref().SetEdgeMode(i); }, edgeTips[i]) + S(18);
 			}
-			y += S(108);
-
-			// How the desktop pushes the sim around: multipliers on the overlay's own physics
-			struct FeelRow { const wchar_t *name, *tip; float *v; float hi; const char *pref; };
-			FeelRow feel[] = {
-				{ L"Window grip", L"How well sand rides a window you drag (0: it slides off)", &overlayFeel.grip, 1, "Grip" },
-				{ L"Fling", L"How hard sand flies off a window that stops short or turns back", &overlayFeel.fling, 3, "Fling" },
-				{ L"Window push", L"How hard a moving window shoves the sand in its way", &overlayFeel.push, 3, "Push" },
-				{ L"Mouse breeze", L"How much your mouse blows the sand where clicks go to the desktop", &overlayFeel.wind, 3, "Wind" },
-				{ L"Scorch", L"How fast fire and lava blacken the windows they touch (cleared with the sim)", &overlayFeel.scorch, 3, "Scorch" },
-				{ L"Frost", L"How fast ice, LN2 and cryo frost the windows they touch (it melts)", &overlayFeel.frost, 3, "Frost" },
-				{ L"Acid etching", L"How fast acid pits the windows it touches (cleared with the sim)", &overlayFeel.acid, 3, "Acid" },
-				{ L"Water streaks", L"How much water streaks the windows it runs over (they dry)", &overlayFeel.water, 3, "Water" },
-				{ L"Acid eats windows", L"How fast acid eats holes in windows and icons (with Destructible on)", &overlayFeel.acidEat, 3, "AcidEat" },
-				{ L"Hole opacity", L"0: holes are fully see-through to whatever is really behind the window (your other windows, the desktop). Up: the broken part of the window fades back in", &overlayFeel.holeOpacity, 1, "HoleSolid" },
-				{ L"Shards", L"How many bits chip off and fly when something breaks a window (off: none)", &overlayFeel.shards, 3, "Shards" },
-				{ L"Shard size", L"How big each chip is, in sim pixels", &overlayFeel.shardSize, 6, "ShardSize" },
-				{ L"Black holes", L"How far and hard black holes (NBHL) tear at windows and icons near them (with Destructible on)", &overlayFeel.blackHole, 3, "BlackHole" },
-				{ L"Explosion shake", L"How hard explosions shake the REAL windows they hit; they go back where they were (off by default)", &overlayFeel.shake, 3, "Shake" },
-				{ L"Blasts and burning", L"How hard explosions, bombs, DEST, singularities and anything 2000 C or hotter break windows and icons (with Destructible on)", &overlayFeel.blast, 3, "Blast" },
-			};
-			top = Group(x, y, w, S(26) * int(std::size(feel)) + S(138), L"Desktop physics");
-			Toggle(x + S(12), top, L"Destructible windows and icons", overlayFeel.destructible, false, [] {
-				overlayFeel.destructible = !overlayFeel.destructible;
-				GlobalPrefs::Ref().Set("Overlay.Feel.Destructible", overlayFeel.destructible);
-			}, L"Acid and explosions eat holes in windows and icons. Only in the overlay: the real windows and icons are never touched, and clearing the sim mends them");
-			Toggle(x + S(12), top + S(26), L"Shards take the window's colour", overlayFeel.shardTint, false, [] {
-				overlayFeel.shardTint = !overlayFeel.shardTint;
-				GlobalPrefs::Ref().Set("Overlay.Feel.ShardTint", overlayFeel.shardTint);
-			}, L"On: chips are the colour of the window they broke off. Off: dark grey");
-			Toggle(x + S(12), top + S(52), L"Shards are sim particles (broken glass)", overlayFeel.shardParticles, false, [] {
-				overlayFeel.shardParticles = !overlayFeel.shardParticles;
-				GlobalPrefs::Ref().Set("Overlay.Feel.ShardParticles", overlayFeel.shardParticles);
-			}, L"Off: solid chunks that spin, fall and fade. On: broken glass in the sim, which piles up, melts and reacts");
-			Toggle(x + S(12), top + S(78), L"Hide window borders at holes", overlayFeel.holeBorder, false, [] {
-				overlayFeel.holeBorder = !overlayFeel.holeBorder;
-				GlobalPrefs::Ref().Set("Overlay.Feel.HoleBorder", overlayFeel.holeBorder);
-			}, L"On: where a hole breaks through a window's edge, the thin dark border Windows draws round the real window is covered too. Off: it stays, showing where the real window is");
-			Toggle(x + S(12), top + S(104), L"Fire and acid mark the wallpaper", overlayFeel.wallpaper, false, [] {
-				overlayFeel.wallpaper = !overlayFeel.wallpaper;
-				GlobalPrefs::Ref().Set("Overlay.Feel.Wallpaper", overlayFeel.wallpaper);
-			}, L"Anything 300 C or hotter blackens the desktop background behind it and acid pits it, like the windows (Scorch and Acid etching set how fast). Only drawn by the overlay: your real wallpaper is never changed, and clearing the sim wipes it");
-			top += S(130);
-			for (int i = 0; i < int(std::size(feel)); i++)
-			{
-				auto &f = feel[i];
-				int ry = top + i * S(26);
-				Caption(x + S(12), ry, f.name);
-				wchar_t pct[16];
-				swprintf(pct, 16, *f.v > 0 ? L"%d%%" : L"off", int(std::lround(*f.v * 100)));
-				Caption(x + w - S(60), ry, pct);
-				Slider(x + S(160), ry, w - S(232), *f.v, 0, f.hi, [f](float v) {
-					*f.v = std::round(v * 20) / 20; // 5% steps
-					GlobalPrefs::Ref().Set(ByteString("Overlay.Feel.") + f.pref, *f.v);
-				}, f.tip);
-			}
-			y += S(26) * int(std::size(feel)) + S(120);
-
-			top = Group(x, y, w, S(26) * 29 + S(8), L"Fun");
-			struct FunToggle { const wchar_t *name, *tip; bool *v; const char *pref; };
-			FunToggle funToggles[] = {
-				{ L"Recycle Bin eats sand", L"Sand that lands on the Recycle Bin icon disappears into it (with icons as walls)", &fun.bin, "Bin" },
-				{ L"Mouse is a broom", L"Where clicks go to the desktop, the mouse pointer is a solid paddle that shoves and scoops sand", &fun.broom, "Broom" },
-				{ L"Closing a window throws its sand", L"Close or minimise a window and the pile on it is tossed off", &fun.closeToss, "CloseToss" },
-				{ L"New windows shake sand loose", L"A window that opens bumps the sand above it into the air", &fun.openShake, "OpenShake" },
-				{ L"Holidays", L"Pumpkins roll about on Halloween, jelly hearts fall on Valentine's Day, fireworks go up after midnight on New Year's", &fun.holidays, "Holidays" },
-				{ L"Notifications drop a ball", L"When an app flashes its taskbar button (a new message in Discord, Teams and the like), a ball drops onto its window", &fun.notify, "Notify" },
-				{ L"Day and night", L"By the clock: fireflies come out and fallen leaves go dark in the evening, birds fly over in the morning", &fun.dayNight, "DayNight" },
-				{ L"Sparkle trail", L"The mouse pointer leaves a short trail of cold sparks over the desktop", &fun.trail, "Trail" },
-				{ L"Confetti", L"Wiggle the mouse pointer quickly from side to side to throw a burst of confetti", &fun.confetti, "Confetti" },
-				{ L"Pets build sandcastles", L"A pet next to a big enough sand pile now and then builds a little castle from it; it crumbles back into sand after 5 minutes", &fun.castles, "Castles" },
-				{ L"Birds land and rest", L"The morning birds (Day and night) now and then land on a window, icon or pile and rest a few seconds", &fun.perch, "Perch" },
-				{ L"Shooting stars land", L"Now and then a shooting star comes all the way down and hits a window or a pile with a burst of sparks; with Destructible on it knocks a chunk out of the window", &fun.starsLand, "StarsLand" },
-				{ L"Windows crack first", L"With Destructible on, a hit on whole glass only cracks it; another hit on the cracks breaks it out. Cracks fade as windows heal", &overlayFeel.crack, "Crack" },
-				{ L"Pets explore holes", L"Pets drop through holes broken in windows instead of turning back, and stop to look out of a hole they stand in", &fun.petHoles, "PetHoles" },
-				{ L"Meteor showers", L"On the real shower nights (Quadrantids, Lyrids, Eta Aquariids, Perseids, Orionids, Leonids, Geminids) shooting stars come ten times as often, at least 60 an hour", &fun.showers, "Showers" },
-				{ L"Throw from the taskbar", L"Hold Ctrl and drag an app's taskbar button up off the taskbar: a stone block in its icon's colour drops from the pointer, thrown the way you moved", &fun.taskThrow, "TaskThrow" },
-				{ L"Apps pop out of the taskbar", L"When an app opens a window, a stone block in its icon's colour pops up out of its taskbar button", &fun.taskPop, "TaskPop" },
-				{ L"Gravity leans to your window", L"Gravity tilts toward the side of the screen the window you are using is on, so loose sand slides that way (only while Gravity is the normal down)", &fun.tilt, "Tilt" },
-				{ L"Weekday weather", L"With Weather on and set to the season: Monday rain, Tuesday fog, Wednesday hail, Thursday snow, Friday leaves; weekends by the season", &fun.weekday, "Weekday" },
-				{ L"Typing sparks", L"Typing now and then puffs a few cold sparks up from the text cursor (or the top of the window you type in)", &fun.typing, "Typing" },
-			};
-			for (int i = 0; i < int(std::size(funToggles)); i++)
-			{
-				auto f = funToggles[i];
-				Toggle(x + S(12), top + i * S(26), f.name, *f.v, false, [f] {
-					*f.v = !*f.v;
-					GlobalPrefs::Ref().Set(ByteString("Overlay.Fun.") + f.pref, *f.v);
-				}, f.tip);
-			}
-			FunSlider funSliders[] = {
-				{ L"Pets", L"Stick figures that wander your windows and taskbar (how many). Fire and long falls can kill them; new ones drop in", &fun.pets, 0, 10, "Pets", 1 },
-				{ L"Weather", L"Snow, rain (with lightning) or leaves falling from the top of the screen (how heavy). It melts or fades after a while", &fun.weather, 0, 3, "Weather", 0 },
-				{ L"Weather waits", L"Weather only starts once you have left the PC alone this many minutes, and stops when you come back (off: always)", &fun.weatherIdle, 0, 30, "WeatherIdle", 2 },
-				{ L"Weather lasts", L"How long each flake, leaf or drop stays before it melts or fades; they thin out one by one", &fun.weatherLast, 10, 600, "WeatherLast", 3 },
-				{ L"Music bounce", L"Sand hops and fire flares to the beat of whatever your PC is playing (only the sound level is read)", &fun.music, 0, 3, "Music", 0 },
-				{ L"Busy apps run hot", L"A window warms whatever sits on it by how hard its app is working: snow melts on a busy game or browser and stays on an idle one", &fun.hot, 0, 3, "Hot", 0 },
-				{ L"Hourglass", L"A glass hourglass on the taskbar whose sand runs out in this many minutes, counted from when you set it; then it starts again", &fun.hourglass, 0, 120, "Hourglass", 2 },
-			};
-			int sy = top + int(std::size(funToggles)) * S(26);
-			auto funRow = [&](const FunSlider &f, int ry) {
-				Caption(x + S(12), ry, f.name);
-				wchar_t val[16];
-				if (f.unit == 1) swprintf(val, 16, *f.v >= 1 ? L"%d" : L"off", int(*f.v));
-				else if (f.unit == 2) swprintf(val, 16, *f.v >= 1 ? L"%d min" : L"off", int(*f.v));
-				else if (f.unit == 3) swprintf(val, 16, L"%d s", int(*f.v));
-				else if (f.unit == 4) swprintf(val, 16, *f.v >= 1 ? L"%d:00" : L"off", int(*f.v) % 24);
-				else if (f.unit == 5) swprintf(val, 16, *f.v >= 1 ? L"%d px" : L"off", int(*f.v));
-				else if (f.unit == 6) swprintf(val, 16, *f.v >= 1 ? L"%d s" : L"off", int(*f.v));
-				else if (f.unit == 7) swprintf(val, 16, *f.v >= 1 ? L"%d / h" : L"off", int(*f.v));
-				else swprintf(val, 16, *f.v > 0 ? L"%d%%" : L"off", int(std::lround(*f.v * 100)));
-				Caption(x + w - S(60), ry, val);
-				Slider(x + S(160), ry, w - S(232), *f.v, f.lo, f.hi, [f](float v) {
-					*f.v = f.unit == 3 ? std::round(v / 10) * 10 : f.unit ? std::round(v) : std::round(v * 20) / 20;
-					GlobalPrefs::Ref().Set(ByteString("Overlay.Fun.") + f.pref, *f.v);
-				}, f.tip);
-			};
-			for (auto &f : funSliders)
-			{
-				funRow(f, sy);
-				sy += S(26);
-			}
-			Caption(x + S(12), sy, L"Weather is");
-			const wchar_t *kinds[] = { L"By season", L"Snow", L"Rain", L"Leaves", L"Hail", L"Fog" };
-			int kx = x + S(160);
-			for (int i = 0; i < 6; i++)
-			{
-				if (i == 4) kx = x + S(160), sy += S(26); // second row
-				kx += Toggle(kx, sy, kinds[i], fun.weatherKind == i, true, [i] {
-					fun.weatherKind = i;
-					GlobalPrefs::Ref().Set("Overlay.Fun.WeatherKind", i);
-				}) + S(18);
-			}
-			y += S(26) * 29 + S(16);
-
-			top = Group(x, y, w, S(26) * int(std::size(moreFun)) + S(8), L"More fun");
-			for (int i = 0; i < int(std::size(moreFun)); i++)
-			{
-				funRow(moreFun[i], top + i * S(26));
-			}
-			y += S(26) * int(std::size(moreFun)) + S(16);
+			y += S(60);
 
 			top = Group(x, y, w, S(76), L"Gravity");
 			const wchar_t *gravs[] = { L"Vertical", L"Off", L"Radial", L"Custom" };
@@ -2886,6 +2806,74 @@ namespace
 		}
 
 		// Brush, replace mode and decoration colour (TPT keeps them in its tool strip and keys).
+		// The Fun tab: what the sim does with the desktop, by topic, each setting with its description under it.
+		void PaintFun()
+		{
+			auto c = Content();
+			int x = c.left + S(10), w = c.right - c.left - S(20), y = c.top + S(8) - scroll;
+			const Text::Style note{ 11, FW_NORMAL, false, false, 0x6D6D6D };
+			for (size_t i = 0; i < std::size(funRows);)
+			{
+				const wchar_t *title = funRows[i++].name;
+				int top = y + text->Measure(title).cy + S(4), ry = top;
+				for (; i < std::size(funRows) && funRows[i].tip; i++)
+				{
+					auto &f = funRows[i];
+					int nx = x + S(12);
+					if (f.b)
+					{
+						Toggle(nx, ry, f.name, *f.b, false, [&f] {
+							*f.b = !*f.b;
+							GlobalPrefs::Ref().Set(f.pref, *f.b);
+						}, f.tip);
+						nx += S(19); // under the label, past the box
+					}
+					else if (f.v)
+					{
+						FunSliderRow(f, x, w, ry);
+					}
+					else
+					{
+						Caption(nx, ry, f.name);
+						const wchar_t *kinds[] = { L"By season", L"Snow", L"Rain", L"Leaves", L"Hail", L"Fog" };
+						int kx = x + S(160);
+						for (int k = 0; k < 6; k++)
+						{
+							if (k == 4) kx = x + S(160), ry += S(26); // second row
+							kx += Toggle(kx, ry, kinds[k], fun.weatherKind == k, true, [k] {
+								fun.weatherKind = k;
+								GlobalPrefs::Ref().Set("Overlay.Fun.WeatherKind", k);
+							}) + S(18);
+						}
+					}
+					ry = Para(nx, ry + S(21), x + w - S(12), f.tip, note) + S(8);
+				}
+				Group(x, y, w, ry - y, title);
+				y = ry + S(10);
+			}
+			Add(RECT{ x, y, x + 1, y + 1 }, nullptr); // lets the page scroll to the last description
+		}
+
+		// A Fun slider: name, track and value ("off" at the far left where that is off)
+		void FunSliderRow(FunRow &f, int x, int w, int ry)
+		{
+			Caption(x + S(12), ry, f.name);
+			wchar_t val[16];
+			if (f.unit == 1) swprintf(val, 16, *f.v >= 1 ? L"%d" : L"off", int(*f.v));
+			else if (f.unit == 2) swprintf(val, 16, *f.v >= 1 ? L"%d min" : L"off", int(*f.v));
+			else if (f.unit == 3) swprintf(val, 16, L"%d s", int(*f.v));
+			else if (f.unit == 4) swprintf(val, 16, *f.v >= 1 ? L"%d:00" : L"off", int(*f.v) % 24);
+			else if (f.unit == 5) swprintf(val, 16, *f.v >= 1 ? L"%d px" : L"off", int(*f.v));
+			else if (f.unit == 6) swprintf(val, 16, *f.v >= 1 ? L"%d s" : L"off", int(*f.v));
+			else if (f.unit == 7) swprintf(val, 16, *f.v >= 1 ? L"%d / h" : L"off", int(*f.v));
+			else swprintf(val, 16, *f.v > 0 ? L"%d%%" : L"off", int(std::lround(*f.v * 100)));
+			Caption(x + w - S(60), ry, val);
+			Slider(x + S(160), ry, w - S(232), *f.v, f.lo, f.hi, [&f](float v) {
+				*f.v = f.unit == 3 ? std::round(v / 10) * 10 : f.unit ? std::round(v) : std::round(v * 20) / 20;
+				GlobalPrefs::Ref().Set(f.pref, *f.v);
+			}, f.tip);
+		}
+
 		void PaintTools()
 		{
 			auto c = Content();
@@ -3149,6 +3137,28 @@ namespace
 		// welcome page. Drawn on its own canvas, then the visible part is copied in (it scrolls).
 		int welcomeH = 0;
 		int formH = 0; // the Tools, Simulation, Display, Saves and Overlay pages' height (they scroll when the window is short)
+		// Words wrapped to [x, right); returns the y after the last line.
+		int Para(int x, int y, int right, const std::wstring &s, const Text::Style &st)
+		{
+			int cx = x, lineH = text->Measure(L"Ag", st).cy, space = text->Measure(L" ", st).cx;
+			size_t at = 0;
+			while (at < s.size())
+			{
+				auto end = s.find(L' ', at);
+				auto word = s.substr(at, end == s.npos ? s.npos : end - at);
+				at = end == s.npos ? s.size() : end + 1;
+				int ww = text->Measure(word, st).cx;
+				if (cx > x && cx + ww > right)
+				{
+					cx = x;
+					y += lineH;
+				}
+				text->Draw(cv, cx, y, word, st);
+				cx += ww + space;
+			}
+			return y + lineH;
+		}
+
 		void PaintWelcome()
 		{
 			using Style = Text::Style;
@@ -3165,26 +3175,6 @@ namespace
 			const Style title{ 22, FW_LIGHT, false, false, 0x1E395B }, subtitle{ 12, FW_NORMAL, true, false, 0x6D6D6D },
 			            link{ 12, FW_NORMAL, false, true, 0x0066CC }, body{ 12, FW_NORMAL, false, false, 0x1A1A1A },
 			            note{ 11, FW_NORMAL, true, false, 0x6D6D6D }, footer{ 10, FW_NORMAL, false, false, 0x8A8A8A };
-			// Words wrapped to [x, x1); returns the y after the last line.
-			auto para = [&](int x, int y, int right, const std::wstring &s, const Style &st) {
-				int cx = x, lineH = text->Measure(L"Ag", st).cy, space = text->Measure(L" ", st).cx;
-				size_t at = 0;
-				while (at < s.size())
-				{
-					auto end = s.find(L' ', at);
-					auto word = s.substr(at, end == s.npos ? s.npos : end - at);
-					at = end == s.npos ? s.size() : end + 1;
-					int ww = text->Measure(word, st).cx;
-					if (cx > x && cx + ww > right)
-					{
-						cx = x;
-						y += lineH;
-					}
-					text->Draw(cv, cx, y, word, st);
-					cx += ww + space;
-				}
-				return y + lineH;
-			};
 
 			text->Draw(cv, x0, y, L"Welcome to The Powder Toy", title);
 			y += text->Measure(L"Ag", title).cy + S(2);
@@ -3242,14 +3232,14 @@ namespace
 			// The tip: a Vista information bar.
 			{
 				int top = y, tx = x0 + S(30);
-				int bottom = para(tx + S(32), top + S(8), x1 - S(10),
+				int bottom = Para(tx + S(32), top + S(8), x1 - S(10),
 				                  L"Pick a material in the Elements tab, then draw anywhere on your desktop. Ctrl+Alt+E shows or hides this window.", body) + S(8);
 				cv.RoundRect(x0, top, x1 - x0, bottom - top, S(3), 0xFFFBE5, 0xFFF4C4, 255);
 				cv.RoundFrame(x0, top, x1 - x0, bottom - top, S(3), 0xE5C365, 255);
 				cv.RoundRect(x0 + S(10), top + S(9), S(16), S(16), S(8), 0x3C8DDE, 0x1E5FAA, 255);
 				text->Draw(cv, x0 + S(16), top + S(9), L"i", Style{ 11, FW_BOLD, true, false, 0xFFFFFF });
 				text->Draw(cv, tx, top + S(8), L"Tip", Style{ 12, FW_BOLD, false, false, 0x7A5B00 });
-				para(tx + S(32), top + S(8), x1 - S(10),
+				Para(tx + S(32), top + S(8), x1 - S(10),
 				     L"Pick a material in the Elements tab, then draw anywhere on your desktop. Ctrl+Alt+E shows or hides this window.", body);
 				y = bottom + S(18);
 			}
@@ -3306,10 +3296,10 @@ namespace
 						kx += S(4);
 					}
 					int dx = std::max(x0 + keyW, kx + S(8));
-					int end = para(dx, y + S(1), x1, row.what, body);
+					int end = Para(dx, y + S(1), x1, row.what, body);
 					if (row.aside)
 					{
-						end = para(dx, end, x1, row.aside, note);
+						end = Para(dx, end, x1, row.aside, note);
 					}
 					y = std::max(end, y + S(20)) + S(7);
 				}
@@ -3762,15 +3752,23 @@ namespace
 			// The tab strip: the selected tab joined to the page.
 			int tx = border + S(4);
 			cv.RoundRect(border, titleH, cv.w - 2 * border, tabH, 0, theme->strip, theme->strip, theme->stripAlpha);
+			// padding around each tab's name, less when they would not all fit
+			int pad = S(20);
+			if (fixedTab < 0)
+			{
+				int names = 0;
+				for (auto *n : tabNames) names += text->Measure(n).cx + S(1);
+				pad = std::clamp((cv.w - 2 * tx - names) / int(std::size(tabNames)), S(6), S(20));
+			}
 			for (int i = 0; i < int(std::size(tabNames)); i++)
 			{
 				if (fixedTab >= 0 && i != fixedTab) continue;
-				int tw = text->Measure(tabNames[i]).cx + S(20);
+				int tw = text->Measure(tabNames[i]).cx + pad;
 				bool on = i == tab;
 				RECT rc{ tx, titleH + (on ? S(2) : S(4)), tx + tw, titleH + tabH + (on ? 1 : 0) };
 				bool hot = !on && Hovered(rc);
 				theme->Tab(cv, rc, on, hot);
-				text->Draw(cv, tx + S(10), rc.top + (rc.bottom - rc.top - text->Measure(tabNames[i]).cy) / 2 - (theme->segmentTabs ? S(1) : 0), tabNames[i], theme->TabInk(i == tab));
+				text->Draw(cv, tx + pad / 2, rc.top + (rc.bottom - rc.top - text->Measure(tabNames[i]).cy) / 2 - (theme->segmentTabs ? S(1) : 0), tabNames[i], theme->TabInk(i == tab));
 				if (fixedTab < 0) Add(rc, [this, i] { tab = i, scroll = 0; }, L"Right-click: open this tab in its own window", [i] { OpenTorn(i); });
 				tx += tw + S(1);
 			}
@@ -3780,12 +3778,12 @@ namespace
 			for (int i = c.left; i < c.right; i++) cv.Blend(i, c.top, theme->edge, 255);
 			// The selected tab's bottom edge opens into the page.
 			int sx = border + S(4);
-			for (int i = 0; i < tab && fixedTab < 0; i++) sx += text->Measure(tabNames[i]).cx + S(21);
+			for (int i = 0; i < tab && fixedTab < 0; i++) sx += text->Measure(tabNames[i]).cx + pad + S(1);
 			if (!theme->segmentTabs)
-				for (int i = sx + 1; i < sx + text->Measure(tabNames[tab]).cx + S(19); i++) cv.Blend(i, c.top, theme->page, 255);
+				for (int i = sx + 1; i < sx + text->Measure(tabNames[tab]).cx + pad - S(1); i++) cv.Blend(i, c.top, theme->page, 255);
 
 			// Form pages scroll: rows outside the page are put back after, and controls there dropped.
-			bool form = tab >= 1 && tab <= 5;
+			bool form = tab >= 1 && tab <= 6;
 			size_t firstPageHit = hits.size();
 			size_t topEnd = size_t(c.top + 1) * cv.w, bottomStart = size_t(c.bottom) * cv.w;
 			std::vector<uint32_t> above(cv.px.begin(), cv.px.begin() + topEnd), below(cv.px.begin() + bottomStart, cv.px.end());
@@ -3796,6 +3794,7 @@ namespace
 			case 3: PaintDisplay(); break;
 			case 4: PaintSaves(); break;
 			case 5: PaintOverlay(); break;
+			case 6: PaintFun(); break;
 			case welcomeTab: PaintWelcome(); break;
 			case toolsTab: PaintTools(); break;
 			}
@@ -3858,7 +3857,7 @@ namespace
 				scroll = std::clamp(scroll - GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA * S(51), 0, maxScroll);
 				dirty = true;
 			}
-			if (msg == WM_MOUSEWHEEL && tab >= 1 && tab <= 5)
+			if (msg == WM_MOUSEWHEEL && tab >= 1 && tab <= 6)
 			{
 				auto c = Content();
 				scroll = std::clamp(scroll - GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA * S(40), 0, std::max(0, formH - int(c.bottom - c.top)));
@@ -4922,13 +4921,12 @@ void OverlayWindows::Init(void *mainHwnd)
 	overlayFeel.wallpaper = prefs.Get("Overlay.Feel.Wallpaper", false);
 	for (auto [v, name] : { std::pair{ &overlayFeel.grip, "Grip" }, { &overlayFeel.fling, "Fling" }, { &overlayFeel.push, "Push" }, { &overlayFeel.wind, "Wind" }, { &overlayFeel.scorch, "Scorch" }, { &overlayFeel.frost, "Frost" }, { &overlayFeel.acid, "Acid" }, { &overlayFeel.water, "Water" }, { &overlayFeel.acidEat, "AcidEat" }, { &overlayFeel.blast, "Blast" }, { &overlayFeel.holeOpacity, "HoleSolid" }, { &overlayFeel.shards, "Shards" }, { &overlayFeel.shardSize, "ShardSize" }, { &overlayFeel.blackHole, "BlackHole" }, { &overlayFeel.shake, "Shake" } })
 		*v = prefs.Get(ByteString("Overlay.Feel.") + name, *v);
-	for (auto [v, name] : { std::pair{ &fun.pets, "Pets" }, { &fun.weather, "Weather" }, { &fun.music, "Music" }, { &fun.weatherIdle, "WeatherIdle" }, { &fun.weatherLast, "WeatherLast" }, { &fun.hot, "Hot" }, { &fun.hourglass, "Hourglass" } })
-		*v = prefs.Get(ByteString("Overlay.Fun.") + name, *v);
-	for (auto [v, name] : { std::pair{ &fun.bin, "Bin" }, { &fun.broom, "Broom" }, { &fun.closeToss, "CloseToss" }, { &fun.openShake, "OpenShake" }, { &fun.holidays, "Holidays" }, { &fun.notify, "Notify" }, { &fun.dayNight, "DayNight" }, { &fun.trail, "Trail" }, { &fun.confetti, "Confetti" }, { &fun.castles, "Castles" }, { &fun.perch, "Perch" }, { &fun.starsLand, "StarsLand" }, { &overlayFeel.crack, "Crack" }, { &fun.petHoles, "PetHoles" }, { &fun.showers, "Showers" }, { &fun.taskThrow, "TaskThrow" }, { &fun.taskPop, "TaskPop" }, { &fun.tilt, "Tilt" }, { &fun.weekday, "Weekday" }, { &fun.typing, "Typing" } })
-		*v = prefs.Get(ByteString("Overlay.Fun.") + name, *v);
 	fun.weatherKind = prefs.Get("Overlay.Fun.WeatherKind", 0);
-	for (auto &f : moreFun)
-		*f.v = prefs.Get(ByteString("Overlay.Fun.") + f.pref, *f.v);
+	for (auto &f : funRows)
+	{
+		if (f.b) *f.b = prefs.Get(f.pref, *f.b);
+		if (f.v) *f.v = prefs.Get(f.pref, *f.v);
+	}
 	// Default UI scale: the larger of Windows' display scaling (TPT is DPI aware) and screen height / 1080, in
 	// quarter steps. Overridable.
 	HDC screen = GetDC(nullptr);
@@ -5744,7 +5742,7 @@ static void TossAbove(Simulation *sim, int x0, int y0, int x1, bool close)
 		}
 }
 
-// The Fun group's pets, weather and music, once per sim tick (not while paused)
+// The Fun tab's pets, weather and music, once per sim tick (not while paused)
 // A cold spark (EMBR at room temperature: it sets nothing alight) in a glitter colour, drifting up
 static void ColdSpark(Simulation *sim, int x, int y)
 {

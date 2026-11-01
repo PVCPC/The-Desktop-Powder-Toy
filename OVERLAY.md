@@ -389,7 +389,7 @@ tray menu: the tray menu stays native on purpose.
 
 ## Fun to-do 3 (user 2026-11-01: "add that new batch", each with sliders for length, times, intensity)
 
-The "More fun" group under Fun, one table (moreFun[]) for the rows and their prefs; the far left is off.
+The "More fun" group under Fun; the far left is off. (2026-11-01: both groups and Desktop physics are now the Fun tab, one table funRows[] of rows by topic, each with its description drawn under it.)
 
 - [x] Pets nap: "Pets nap from" / "Pets wake at" (hours); in those hours, after 10 s with no input, pets stand still
   and z's float up from them (drawn on the frame, OverlayWindows::DrawExtras). Tested: pet held still.

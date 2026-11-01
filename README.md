@@ -32,14 +32,14 @@ What's new
 - **Windows you can throw sand with**: sand rides a window you drag and flies off when you stop or shake it; a tall
   pile shears (the bottom grips the window, the layers above slip and slide off) and liquids slosh;
   fire and lava scorch windows, ice frosts them, acid pits them and water streaks them; desktop icons carry their
-  pile when you drop them; your mouse blows sand like a breeze. Sliders in the Simulation tab tune all of it.
+  pile when you drop them; your mouse blows sand like a breeze. Sliders in the Fun tab tune all of it.
 - **Multicore physics** (off by default, Simulation tab): most elements, water, fire, lava, ice and acid included, update
   on all your CPU cores, about three times faster in big scenes, but not the exact results of one core (like a different
   random seed). Off: one core and TPT's exact results; everything else that was sped up gives the same results anyway.
 - **Destructible windows** (a switch, off by default): acid eats holes in windows and icons, explosions blow chunks
   out that fly off in the window's colour, DEST and black holes chew through, and you see what's really behind
   through the holes. Explosions can even shake your real windows (its own slider, off by default). Only the overlay
-  is broken: clearing the sim mends everything, and the **Windows heal** slider (More fun) lets holes grow back by themselves.
+  is broken: clearing the sim mends everything, and the **Windows heal** slider lets holes grow back by themselves.
   **Windows crack first** makes glass crack on the first hit and break on the next. Stacked windows break one at a
   time: a hole in the front window shows the window behind, which still stops sand until it breaks too.
   **Hide window borders at holes** (on by default) paints over the thin dark line Windows draws round a window where
@@ -48,19 +48,19 @@ What's new
 - **Scorched wallpaper** (a switch, off by default): fire, lava and anything 300 C or hotter blackens the desktop
   background behind it and acid pits it. Only the overlay draws it: your real wallpaper is never changed, and clearing
   the sim wipes it.
-- **Taskbar toys** (two switches in Fun, off by default): hold Ctrl and drag an app's taskbar button up off the
+- **Taskbar toys** (two switches in the Fun tab, off by default): hold Ctrl and drag an app's taskbar button up off the
   taskbar to throw a stone block in its icon's colour; or have every app that opens pop one up out of its button.
-- **Small extras** (switches in Fun, off by default): gravity leans toward the window you are using; weekday
+- **Small extras** (switches in the Fun tab, off by default): gravity leans toward the window you are using; weekday
   weather (Monday rain, Tuesday fog, Wednesday hail, Thursday snow, Friday leaves); typing puffs cold sparks from the
   text cursor.
-- **Fun switches** (Simulation window, all off by default): stick figure pets that wander your windows and
+- **The Fun tab** (everything off by default; each setting has its description under it, grouped as windows, breaking windows, marks, mouse and keyboard, taskbar and apps, pets, weather, and sky and holidays): stick figure pets that wander your windows and
   taskbar; snow, rain with lightning, leaves by the season, hail or low fog, drifting in the wind; pets run from fire, come over to a slow mouse pointer, scatter from a fast one and hop to greet you when
   you come back; the Recycle Bin eats sand that lands on it; sand hops to the beat
   of whatever your PC plays; the mouse pointer as a broom; closing a window throws its pile off; pumpkins on Halloween, jelly hearts on Valentine's Day and
   fireworks after midnight on New Year's; an hourglass on the taskbar that runs out in the minutes you set; a ball dropped on any app that flashes for
   your attention; fireflies in the evening (the pets chase them) and birds in the morning; a sparkle trail behind the
   mouse pointer; confetti when you wiggle it; busy apps warm what sits on their windows, so snow melts on a working game but stays on an idle
-  app; new windows shake sand loose; pets build sandcastles from big sand piles; morning birds land and rest (for as long as you set); shooting stars that come down and knock chunks out of windows; meteor showers on their real nights (Perseids, Geminids and the rest); pets that drop through holes in windows and stop to look out of them. The **More fun** group has a slider for each of these (far left is off): pets
+  app; new windows shake sand loose; pets build sandcastles from big sand piles; morning birds land and rest (for as long as you set); shooting stars that come down and knock chunks out of windows; meteor showers on their real nights (Perseids, Geminids and the rest); pets that drop through holes in windows and stop to look out of them. Sliders set how much of each (far left is off): pets
   nap in the hours you pick (little z's float up), gather in the middle when you're away and hop for as long as you
   like when you come back; snowmen on deep snow (how many, how deep); dragging a window up fast throws what sits on
   it (how hard); paper planes (how often, how fast); a faint, see-through rainbow after the rain, sometimes a double one (how long, how bright, how often double); pets fetch a
