@@ -847,30 +847,18 @@ std::pair<Vec2<int>, int> OverlaySimSize(int scale)
 {
 #ifdef _WIN32
 	Vec2<int> screen(GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN)); // every monitor
-	for (scale = std::max(scale, 1); ; scale++)
-	{
-		bool menus = GlobalPrefs::Ref().Get("Overlay.ShowTPTMenus", false);
-		auto cells = (screen / scale - (menus ? Vec2(BARSIZE, MENUSIZE) : Vec2(0, 0))) / CELL; // hidden menus: off screen
-		// pmap holds the particle index above PMAPBITS
-		if (int64_t(cells.X) * cells.Y * CELL * CELL <= (int64_t(1) << (31 - PMAPBITS)))
-		{
-			return { cells, scale };
-		}
-	}
+	// any size: past MAX_NPART pixels the particle count is what's capped (SetSimSize)
+	scale = std::max(scale, 1);
+	bool menus = GlobalPrefs::Ref().Get("Overlay.ShowTPTMenus", false);
+	return { (screen / scale - (menus ? Vec2(BARSIZE, MENUSIZE) : Vec2(0, 0))) / CELL, scale }; // hidden menus: off screen
 #elif defined(__APPLE__)
 	auto &prefs = GlobalPrefs::Ref();
 	OverlayMac::SetScreen(prefs.Get("Overlay.Screen", 0));
 	bool menus = prefs.Get("Overlay.ShowTPTMenus", false);
 	int sw, sh;
 	OverlayMac::ScreenSize(sw, sh, !menus);
-	for (scale = std::max(scale, 1); ; scale++)
-	{
-		auto cells = (Vec2(sw, sh) / scale - (menus ? Vec2(BARSIZE, MENUSIZE) : Vec2(0, 0))) / CELL; // hidden menus: off screen
-		if (int64_t(cells.X) * cells.Y * CELL * CELL <= (int64_t(1) << (31 - PMAPBITS)))
-		{
-			return { cells, scale };
-		}
-	}
+	scale = std::max(scale, 1);
+	return { (Vec2(sw, sh) / scale - (menus ? Vec2(BARSIZE, MENUSIZE) : Vec2(0, 0))) / CELL, scale }; // hidden menus: off screen
 #else
 	return { CELLS, scale };
 #endif

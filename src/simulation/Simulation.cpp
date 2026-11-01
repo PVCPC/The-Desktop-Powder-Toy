@@ -1045,6 +1045,7 @@ void Parts::Reset()
 void Simulation::clear_sim(void)
 {
 	windowMarks.clear();
+	walledArea = CELLS.OriginRect();
 	for (auto i = 0; i < parts.active; i++)
 	{
 		if (parts[i].type)
@@ -3947,6 +3948,13 @@ void Simulation::UpdateGravityMask()
 // Loop edges wrap inside the area (LoopWrap); the walls outside it only matter for solid edges.
 void Simulation::ApplyPlayArea()
 {
+	// the area grew (a bigger window): the edge walls it put up where the area now reaches come down
+	if (walledArea != playArea)
+	{
+		for (auto c : playArea)
+			if (!walledArea.Contains(c) && bmap[c.Y][c.X] == WL_WALL) bmap[c.Y][c.X] = 0;
+		walledArea = playArea;
+	}
 	if (playArea == CELLS.OriginRect())
 	{
 		return;
@@ -4182,11 +4190,6 @@ Simulation::~Simulation() = default;
 
 Simulation::Simulation()
 {
-	// pmap packs the particle index above PMAPBITS: XRES * YRES must fit (the division avoids overflow).
-	if (uint32_t(XRES) > (UINT32_C(1) << (31 - PMAPBITS)) / uint32_t(YRES))
-	{
-		throw std::runtime_error("simulation too large for pmap");
-	}
 	std::fill(elementCount, elementCount+PT_NUM, 0);
 	elementRecount = true;
 

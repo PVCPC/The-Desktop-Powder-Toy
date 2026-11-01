@@ -187,6 +187,7 @@ public:
 	// The playable area, in cells. The rest of the (build-time) sim is off limits: solid wall with solid or loop
 	// edges, an air and particle sink with void edges. Full size = stock behaviour. Saves cover just this area.
 	Rect<int> playArea = CELLS.OriginRect();
+	Rect<int> walledArea = CELLS.OriginRect(); // the play area ApplyPlayArea last walled round (Solid edges)
 	void ApplyPlayArea();
 	Rect<int> PlayRect() const
 	{
