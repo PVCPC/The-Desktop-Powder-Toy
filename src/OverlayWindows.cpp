@@ -95,7 +95,77 @@ static std::vector<ByteString> RunningApps();
 #pragma comment(lib, "dxgi.lib")
 #undef small       // rpcndr.h, via dwmapi.h
 #undef GetUserName // SaveInfo::GetUserName
+#elif defined(__APPLE__)
+#include "Overlay.h"
+#include "gui/game/GameController.h"
+#include "gui/game/GameModel.h"
+#include "gui/game/GameView.h"
+#include "gui/game/Notification.h"
+#include "gui/interface/Engine.h"
+#include "client/GameSave.h"
+#include "client/http/Request.h"
+#include "simulation/Simulation.h"
+#include "simulation/ElementClasses.h"
+#include "simulation/SimulationData.h"
+#include "SimulationConfig.h"
+#include "prefs/GlobalPrefs.h"
+#include "common/platform/Platform.h"
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <codecvt>
+#include <cstring>
+#include <deque>
+#include <locale>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <SDL.h>
+#include <tuple>
+#include <vector>
+#include "OverlayMacWin32.h"
+#include "gui/game/Menu.h"
+#include "gui/game/Brush.h"
+#include "gui/game/tool/Tool.h"
+#include "gui/game/RenderPreset.h"
+#include "gui/game/IntroText.h"
+#include "gui/SavePreviewType.h"
+#include "gui/options/OptionsModel.h"
+#include "gui/dialogues/ErrorMessage.h"
+#include "client/Client.h"
+#include "client/SaveFile.h"
+#include "client/SaveInfo.h"
+#include "client/http/SearchSavesRequest.h"
+#include "client/http/ThumbnailRequest.h"
+#include "graphics/VideoBuffer.h"
+#include "graphics/Graphics.h"
+#include "graphics/Renderer.h"
+#include "simulation/Air.h"
+#include "simulation/ElementGraphics.h"
+#include "simulation/SaveRenderer.h"
+#include "lua/CommandInterface.h"
+#include "Format.h"
+#include "Config.h"
+#include "gui/interface/Window.h"
+#include "gui/interface/Button.h"
+#include "gui/interface/Checkbox.h"
+#include "gui/interface/DropDown.h"
+#include "gui/interface/Label.h"
+#include "gui/interface/Panel.h"
+#include "gui/interface/ProgressBar.h"
+#include "gui/interface/Slider.h"
+#include "gui/interface/Textbox.h"
+#include <atomic>
+#include <chrono>
+#include <cwctype>
+#include <functional>
+#include <thread>
+static std::vector<ByteString> PassApps();
+static void SetPassApps(const std::vector<ByteString> &apps);
+static std::vector<ByteString> RunningApps();
+#endif
 
+#if defined(_WIN32) || defined(__APPLE__)
 namespace
 {
 	float uiScale = 1;
@@ -486,6 +556,7 @@ namespace
 	// The desktop as the GPU composes it (DXGI desktop duplication, what screen recorders use), minus windows kept out
 	// of captures. Grab copies one screen rectangle out at half size; the last frame is kept for when nothing has
 	// changed.
+#ifdef _WIN32
 	struct DesktopGrab
 	{
 		ID3D11Device *dev = nullptr;
@@ -645,6 +716,26 @@ namespace
 		}
 	};
 
+#else
+	// The Mac's: what's on screen under one window, at half size, at most 30 times a second (a capture is a read from the
+	// window server, no GPU copy to chain). Needs Screen Recording; without it the glass has nothing behind it to bend.
+	struct DesktopGrab
+	{
+		HWND window = nullptr;
+		double last = 0;
+		bool have = false;
+
+		bool Grab(int x, int y, int bw, int bh, uint32_t *dst)
+		{
+			double now = OverlayMac::Now(), s = MacScale();
+			if (have && now - last < 1 / 30.0) return true;
+			last = now;
+			have = OverlayMac::GrabBelow(MacWindowNumber(window), x / s, y / s, bw / s, bh / s, bw / 2, bh / 2, dst);
+			return have;
+		}
+	};
+
+#endif
 	// An OS look (pref Overlay.Theme). The theme draws the frame, caption buttons, push buttons and popups; tabs,
 	// list items, check boxes, group boxes and the status bar are drawn here in its colours. Sizes are unscaled.
 	struct Theme
@@ -1610,6 +1701,9 @@ namespace
 			int hw = bw / 2, hh = bh / 2;
 			auto &half = bd.small;
 			half.resize(size_t(hw) * hh);
+#ifdef __APPLE__
+			bd.grab.window = hwnd;
+#endif
 			if (!bd.grab.Grab(wr.left - m, wr.top - m, bw, bh, half.data()))
 			{
 				auto &backdrop = bd.px;
@@ -1892,6 +1986,7 @@ namespace
 			vsyncRun = true;
 			vsync = std::thread([this] {
 				SetThreadDescription(GetCurrentThread(), L"overlay side window vsync");
+#ifdef _WIN32
 				// the vertical blank of the screen the window is on; DwmFlush if there's none
 				// ponytail: picked once, so a window dragged to a screen with another refresh rate keeps the first's
 				IDXGIOutput *screen = nullptr;
@@ -1924,6 +2019,13 @@ namespace
 					Compose();
 				}
 				if (screen) screen->Release();
+#else
+				while (vsyncRun)
+				{
+					usleep(16000);
+					Compose();
+				}
+#endif
 			});
 		}
 
@@ -3364,7 +3466,12 @@ namespace
 				return Platform::WinWiden(prefs.Get(ByteString("Overlay.Keys.") + name, ByteString(fallback)));
 			};
 			int top = Group(x, y, w, S(100), L"Clicks go to");
-			const wchar_t *modes[] = { L"Auto: TPT while it's in front, the desktop once another app is", L"Pass-through: the sim takes no clicks (side windows still do)", L"Locked: everything to TPT" };
+#ifdef __APPLE__
+			const wchar_t *autoLabel = L"Auto: empty desktop is TPT's, windows and icons keep their clicks";
+#else
+			const wchar_t *autoLabel = L"Auto: TPT while it's in front, the desktop once another app is";
+#endif
+			const wchar_t *modes[] = { autoLabel, L"Pass-through: the sim takes no clicks (side windows still do)", L"Locked: everything to TPT" };
 			for (int i = 0; i < int(OverlayInput::Count); i++)
 			{
 				Toggle(x + S(12), top + i * S(24), modes[i], int(OverlayGetInput()) == i, true, [i] { OverlaySetInput(OverlayInput(i)); });
@@ -3388,6 +3495,7 @@ namespace
 				overlayAutoPass = !overlayAutoPass;
 				GlobalPrefs::Ref().Set("Overlay.AutoPassThrough", overlayAutoPass);
 			});
+#ifdef _WIN32
 			// Start with Windows: a value under the user's Run key, pointing at this exe
 			static const wchar_t *runKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", *runName = L"The Desktop Powder Toy";
 			bool startup = RegGetValueW(HKEY_CURRENT_USER, runKey, runName, RRF_RT_REG_SZ, nullptr, nullptr, nullptr) == ERROR_SUCCESS;
@@ -3404,6 +3512,10 @@ namespace
 				}
 				RegCloseKey(k);
 			}, L"Opens on the desktop when you sign in");
+#else
+			Toggle(x + S(12), top + S(48), L"Start at login", OverlayMac::StartsAtLogin(), false, [] { OverlayMac::SetStartsAtLogin(!OverlayMac::StartsAtLogin()); },
+			       L"Opens on the desktop when you log in");
+#endif
 			y += S(100);
 			// Apps that always get the clicks while they're in front (Overlay.PassApps: exe names, ';'-separated)
 			auto apps = PassApps();
@@ -4014,16 +4126,30 @@ namespace
 
 	bool sceneSaved = false; // a restart saved it already, and the new TPT is loading it
 
+	// In cells. A save bigger than the sim is refused outright, and the sim shrinks when the pixel size goes up.
+	constexpr int sceneTile = 24;
+
 	void SaveSceneTiles()
 	{
 		if (sceneSaved) return;
 		sceneSaved = true;
 		auto *model = GameController::Ref().GetModel();
 		auto *sim = model->GetSimulation();
-		for (int y = 0; y < YCELLS; y += 255)
-			for (int x = 0; x < XCELLS; x += 255)
+		std::vector<bool> used(size_t(XCELLS) * YCELLS);
+		for (int i = 0; i < sim->parts.active; i++)
+			if (sim->parts[i].type)
 			{
-				auto tile = RectSized(Vec2(x, y), Vec2(std::min(255, XCELLS - x), std::min(255, YCELLS - y)));
+				int x = int(sim->parts[i].x + 0.5f) / CELL, y = int(sim->parts[i].y + 0.5f) / CELL;
+				if (x >= 0 && y >= 0 && x < XCELLS && y < YCELLS) used[size_t(y) * XCELLS + x] = true;
+			}
+		for (int y = 0; y < YCELLS; y += sceneTile)
+			for (int x = 0; x < XCELLS; x += sceneTile)
+			{
+				auto tile = RectSized(Vec2(x, y), Vec2(std::min(sceneTile, XCELLS - x), std::min(sceneTile, YCELLS - y)));
+				bool any = false; // most of a desktop is empty
+				for (int cy = y; cy < y + tile.size.Y; cy++)
+					for (int cx = x; cx < x + tile.size.X; cx++) any = any || used[size_t(cy) * XCELLS + cx] || sim->bmap[cy][cx];
+				if (!any) continue;
 				auto save = sim->Save(true, RectSized(tile.pos * CELL, tile.size * CELL));
 				if (!save) continue;
 				save->paused = model->GetPaused();
@@ -4038,8 +4164,8 @@ namespace
 		auto *model = GameController::Ref().GetModel();
 		auto *sim = model->GetSimulation();
 		GameController::Ref().GetView()->PauseRendererThread();
-		for (int y = 0; y < YCELLS; y += 255)
-			for (int x = 0; x < XCELLS; x += 255)
+		for (int y = 0; y < YCELLS; y += sceneTile)
+			for (int x = 0; x < XCELLS; x += sceneTile)
 			{
 				auto file = Platform::WinNarrow(SceneTile(x, y));
 				std::vector<char> data;
@@ -4052,6 +4178,9 @@ namespace
 				catch (std::exception &) {} // a bad tile: that part of the scene is lost
 				DeleteFileW(SceneTile(x, y).c_str());
 			}
+		// tiles past the edge of a smaller sim: gone, or a later run at a bigger size would bring old sand back
+		for (auto &file : Platform::DirectorySearch(".", "overlay-scene-", { ".cps" }))
+			Platform::RemoveFile(file);
 	}
 
 	// Saves the scene, sets the new pixel size and starts a fresh TPT, which loads the scene; this one quits.
@@ -4061,6 +4190,7 @@ namespace
 		if (!force && scale == ui::Engine::Ref().windowFrameOps.scale && windowed == overlayWindowed) return;
 		SaveSceneTiles();
 		GlobalPrefs::Ref().Set("Scale", scale);
+#ifdef _WIN32
 		// The same command line, with overlay:on or overlay:window.
 		wchar_t exe[MAX_PATH];
 		GetModuleFileNameW(nullptr, exe, MAX_PATH);
@@ -4078,6 +4208,15 @@ namespace
 			quit.type = SDL_QUIT;
 			SDL_PushEvent(&quit);
 		}
+#else
+		GlobalPrefs::Ref().Set("Overlay.Windowed", windowed);
+		if (OverlayMac::Relaunch(nullptr))
+		{
+			SDL_Event quit{};
+			quit.type = SDL_QUIT;
+			SDL_PushEvent(&quit);
+		}
+#endif
 	}
 
 	void OpenTorn(int tab)
@@ -4549,6 +4688,15 @@ namespace
 		menu->window = window;
 		std::vector<std::tuple<std::wstring, bool, bool>> items;
 		for (auto &it : window->MenuItems) items.push_back({ Wide(it.text), it.enabled, it.checked });
+#ifdef __APPLE__
+		// not an NSMenu: those hold the main thread, and with it the sim, until they close
+		{
+			auto *m = menu.get();
+			OverlayMac::PopupList(items, at.x / MacScale(), at.y / MacScale(), [m](int picked) { m->picked = picked; });
+			return;
+		}
+#endif
+#ifdef _WIN32
 		menu->thread = std::thread([m = menu.get(), items = std::move(items), at] {
 			HWND owner = CreateWindowExW(WS_EX_TOOLWINDOW, L"STATIC", L"", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, nullptr, nullptr);
 			HMENU popup = CreatePopupMenu();
@@ -4567,6 +4715,7 @@ namespace
 			DestroyWindow(owner);
 			m->picked = cmd;
 		});
+#endif
 	}
 
 	// Called each tick: hands a picked item (or a cancel) back to TPT on its own thread.
@@ -4658,7 +4807,12 @@ namespace
 				GetMonitorInfoW(MonitorFromPoint(at, MONITOR_DEFAULTTONEAREST), &mi);
 				auto work = mi.rcWork;
 				int chromeW = 2 * host->border, chromeH = host->titleH + host->border;
-				host->scale = std::max(1, std::min({ engine.GetScale(), int(work.right - work.left - chromeW) / std::max(1, hosted.size.X),
+#ifdef __APPLE__
+				int dialogScale = engine.GetScale() * int(std::lround(MacScale())); // TPT's scale is in points, these windows are in pixels
+#else
+				int dialogScale = engine.GetScale();
+#endif
+				host->scale = std::max(1, std::min({ dialogScale, int(work.right - work.left - chromeW) / std::max(1, hosted.size.X),
 				                                      int(work.bottom - work.top - chromeH) / std::max(1, hosted.size.Y) }));
 				int w = hosted.size.X * host->scale + chromeW, h = hosted.size.Y * host->scale + chromeH;
 				int x = at.x - host->border, y = at.y - host->titleH;
@@ -4707,6 +4861,7 @@ namespace
 	std::mutex taskMutex;
 	std::vector<TaskButton> taskButtons;
 	std::vector<RECT> taskPopped;
+#ifdef _WIN32
 	void StartTaskButtons()
 	{
 		static bool started = false;
@@ -4778,6 +4933,9 @@ namespace
 			}
 		}).detach();
 	}
+#else
+	void StartTaskButtons() {} // TickMacDock reads the Dock
+#endif
 
 	constexpr UINT trayMessage = WM_APP + 1;
 
@@ -4890,13 +5048,18 @@ namespace
 		}
 		wcscpy_s(tray.szTip, L"The Powder Toy (overlay)");
 		Shell_NotifyIconW(NIM_ADD, &tray);
+#ifdef _WIN32
 		RegisterShellHookWindow(tray.hWnd); // taskbar buttons flashing (Notifications drop a ball)
+#endif
 		std::atexit([] { Shell_NotifyIconW(NIM_DELETE, &tray); });
+#ifdef _WIN32
 		// On a crash too. A forced kill (Task Manager's End task) can't be caught: Windows clears that icon on hover.
 		static LPTOP_LEVEL_EXCEPTION_FILTER previous = SetUnhandledExceptionFilter([](EXCEPTION_POINTERS *e) -> LONG {
 			Shell_NotifyIconW(NIM_DELETE, &tray);
 			return previous ? previous(e) : EXCEPTION_CONTINUE_SEARCH;
 		});
+#else
+#endif
 	}
 
 	void ApplyPassThrough(Panel &panel)
@@ -4907,6 +5070,84 @@ namespace
 		panel.Present();
 	}
 }
+
+#ifdef __APPLE__
+// SDL can miss a button's release when our window goes back to ignoring the mouse mid-press, or another app takes it; TPT
+// would keep drawing. The system knows what's really held.
+static void ReleaseStuckButtons()
+{
+	static uint32_t sent = 0;
+	int x, y;
+	uint32_t held = SDL_GetMouseState(&x, &y);
+	sent &= held;
+	for (auto [button, index] : { std::pair{ SDL_BUTTON_LEFT, 0 }, { SDL_BUTTON_RIGHT, 1 } })
+	{
+		uint32_t mask = SDL_BUTTON(button);
+		if (!(held & mask) || (sent & mask) || OverlayMac::ButtonDown(index)) continue;
+		sent |= mask;
+		SDL_Event up{};
+		up.type = SDL_MOUSEBUTTONUP;
+		up.button.button = uint8_t(button), up.button.state = SDL_RELEASED, up.button.clicks = 1, up.button.x = x, up.button.y = y;
+		SDL_PushEvent(&up);
+	}
+}
+
+// The Dock stands in for the taskbar: its buttons for the throw, a badge that went up is the Mac's "flashed its button",
+// an app that started pops a block. Twice a second is as often as the Dock is read.
+static void TickMacDock(Simulation *sim)
+{
+	static std::map<std::string, std::pair<int, bool>> dock; // badge, running
+	bool wanted = fun.notify || fun.taskPop || fun.taskThrow;
+	if (!wanted)
+	{
+		dock.clear();
+		return;
+	}
+	if (sim->currentTick % 30) return;
+	auto windows = OverlayMac::OtherWindows();
+	std::map<std::string, std::pair<int, bool>> now;
+	std::vector<TaskButton> buttons;
+	double s = MacScale();
+	RECT floor;
+	GetWindowRect(macDock, &floor);
+	for (auto &item : OverlayMac::DockItems())
+	{
+		RECT r{ long(item.l * s), long(item.t * s), long(item.r * s), long(item.b * s) };
+		buttons.push_back({ Platform::WinWiden(item.name), r });
+		now[item.name] = { item.badge, item.running };
+		auto was = dock.find(item.name);
+		if (was == dock.end()) continue; // the first look: nothing has changed yet
+		if (fun.notify && item.badge > was->second.first)
+			for (auto &w : windows) // front to back: its top window
+				if (w.owner == item.name)
+				{
+					fun.flashed.push_back(HWND(uintptr_t(w.id)));
+					break;
+				}
+		if (fun.taskPop && item.running && !was->second.second)
+		{
+			std::lock_guard lock(taskMutex);
+			taskPopped.push_back({ r.left, std::min(r.top, floor.top), r.right, r.bottom }); // from the sim's floor, the Dock is below it
+		}
+	}
+	dock = std::move(now);
+	std::lock_guard lock(taskMutex);
+	taskButtons = std::move(buttons);
+}
+
+static void MacInit()
+{
+	overlayFeel.holeBorder = false; // that's for the dark line DWM draws round a window
+	OverlayMac::SetShiftSource([] {
+		std::vector<OverlayMac::Shift> out;
+		for (auto &s : OverlayWindows::WindowShifts())
+			out.push_back({ s.x0, s.y0, s.x1, s.y1, s.dx, s.dy, uint32_t(uintptr_t(s.id)) });
+		return out;
+	});
+	// icons as walls are on by default and need this; macOS asks once, and the Welcome tab has the status
+	if (iconWalls && !OverlayMac::AccessibilityGranted()) OverlayMac::AskAccessibility();
+}
+#endif
 
 void OverlayWindows::Init(void *mainHwnd)
 {
@@ -4935,7 +5176,14 @@ void OverlayWindows::Init(void *mainHwnd)
 	float heightScale = GetSystemMetrics(SM_CYSCREEN) / 1080.f;
 	uiScale = prefs.Get("Overlay.UIScale", std::max(1.f, std::round(std::max(dpiScale, heightScale) * 4) / 4));
 	showTPTMenus = prefs.Get("Overlay.ShowTPTMenus", false);
+#ifdef __APPLE__
+	mainWindow = macOverlay;
+	MacInit();
+	// this Mac's own look: Liquid Glass needs to see what's behind the window, 11-15 doesn't
+	theme = themes[std::clamp(prefs.Get("Overlay.Theme", OverlayMac::ScreenCaptureGranted() ? 17 : 10), 0, int(std::size(themes)) - 1)];
+#else
 	theme = themes[std::clamp(prefs.Get("Overlay.Theme", defaultTheme), 0, int(std::size(themes)) - 1)];
+#endif
 	text = new Text;
 	text->SetScale();
 	AddTrayIcon();
@@ -4950,8 +5198,14 @@ void OverlayWindows::Tick()
 	{
 		return;
 	}
+#ifdef __APPLE__
+	ReleaseStuckButtons();
+	TickMacDock(GameController::Ref().GetModel()->GetSimulation());
+	OverlayMac::HoldDockClicks(fun.taskThrow && !overlayWindowed);
+	OverlayMac::WantDesktop(!overlayWindowed && iconWalls && OverlayGetLayer() != OverlayLayer::BehindIcons, !overlayWindowed && (windowWalls || fun.bin || fun.notify || fun.taskPop || fun.taskThrow), !overlayWindowed && fun.typing);
+#endif
 	TickWindowWalls();
-	static std::unique_ptr<http::Request> release;
+	static auto &release = *new std::unique_ptr<http::Request>(); // never destroyed: at exit it would outlive the request manager
 	static bool checked = false;
 	if (!checked)
 	{
@@ -5102,6 +5356,9 @@ static void TickRecording()
 
 void OverlayWindows::SaveScene()
 {
+#ifdef __APPLE__
+	OverlayMac::Shutdown();
+#endif
 	SaveSceneTiles();
 }
 
@@ -5175,6 +5432,7 @@ bool OverlayWindows::HideTPTMenus()
 // What a hole eaten in a window shows: the desktop wallpaper behind it, per monitor, in sim pixels (XRES x YRES,
 // 0x00RRGGBB). Rebuilt now and then while there are holes (slideshows, moved overlay).
 // ponytail: wallpaper drawn as "fill" (cover, centred) whatever the fit setting; read IDesktopWallpaper::GetPosition if it matters.
+#ifdef _WIN32
 static const std::vector<uint32_t> &HoleBackdrop(RECT sr, int sw, int sh)
 {
 	static std::vector<uint32_t> backdrop;
@@ -5243,9 +5501,11 @@ static const std::vector<uint32_t> &HoleBackdrop(RECT sr, int sw, int sh)
 	return backdrop;
 }
 
+#endif // HoleBackdrop
 static std::map<HWND, RECT> wallRects, frameRects; // the wall windows when the sim last read them / at the frame drawn
 static std::mutex frameLock; // frameRects: WindowShifts is also asked from the GPU drawing thread
 
+#ifdef _WIN32
 // What is really behind holed windows: the windows under each one, captured with PrintWindow a few times a second on
 // a worker thread (scaled to sim pixels), over the wallpaper.
 namespace
@@ -5387,6 +5647,47 @@ static const uint32_t *HoleBehind(const Simulation *sim, RECT sr)
 	shotWanted = std::move(want);
 	return behind.data();
 }
+#else
+// What is really behind holed windows: a capture of everything under each one, a few times a second (OverlayMac's worker
+// thread), over the wallpaper. Without Screen Recording, just the wallpaper.
+static const uint32_t *HoleBehind(const Simulation *sim, RECT sr)
+{
+	static std::vector<uint32_t> wallpaper, behind;
+	static ULONGLONG built = 0;
+	int sw = sr.right - sr.left;
+	if (wallpaper.empty() || GetTickCount64() - built > 30000)
+	{
+		built = GetTickCount64();
+		wallpaper.resize(size_t(XRES) * YRES);
+		// the sim is the window's top-left corner: the wallpaper is read for the window, then cut down to it
+		std::vector<uint32_t> whole(size_t(WINDOWW) * WINDOWH);
+		OverlayMac::Wallpaper(WINDOWW, WINDOWH, whole.data());
+		for (int y = 0; y < YRES; y++) std::copy_n(whole.begin() + size_t(y) * WINDOWW, XRES, wallpaper.begin() + size_t(y) * XRES);
+	}
+	behind = wallpaper;
+	std::vector<uint32_t> want;
+	auto px = [](long v, int n, int nw) { return int(std::floor(double(v) * n / nw)); }; // screen -> sim pixels
+	for (auto &[id, m] : sim->windowMarks)
+	{
+		auto it = wallRects.find(HWND(id));
+		if (!m.any[Simulation::MarkHole] || it == wallRects.end()) continue; // icons: just the wallpaper
+		want.push_back(uint32_t(id));
+		auto shot = OverlayMac::TakeShot(uint32_t(id));
+		if (!shot) continue;
+		int x0 = px(it->second.left - sr.left, WINDOWW, sw), y0 = px(it->second.top - sr.top, WINDOWH, sr.bottom - sr.top);
+		auto &hole = m.a[Simulation::MarkHole];
+		for (int j = 0; j < m.h; j++)
+			for (int i = 0; i < m.w; i++)
+			{
+				int x = m.x + i, y = m.y + j, sx = x - x0, sy = y - y0;
+				if (!hole[size_t(j) * m.w + i] || x < 0 || y < 0 || x >= XRES || y >= YRES || sx < 0 || sy < 0 || sx >= shot->w || sy >= shot->h) continue;
+				behind[size_t(y) * XRES + x] = shot->px[size_t(sy) * shot->w + sx];
+			}
+	}
+	OverlayMac::WantShots(want, double(WINDOWW) * MacScale() / sw);
+	return behind.data();
+}
+#endif
 
 void OverlayWindows::ApplySimMasks(uint32_t *argb, int w, const uint8_t *occupied)
 {
@@ -5457,6 +5758,7 @@ void OverlayWindows::ApplySimMasks(uint32_t *argb, int w, const uint8_t *occupie
 	}
 }
 
+#ifdef _WIN32
 // The desktop icons: where each sits on screen (grid or free placement) and its shape (the icon's own picture from the
 // shell, opaque pixels solid), through the desktop's IFolderView. Positions are re-read every few frames, so dragged
 // icons push sand live; shapes are cached per file and size. Empty when Explorer isn't there or icons are hidden. All
@@ -5623,6 +5925,34 @@ static std::vector<DeskIcon> DesktopIcons()
 	return latest;
 }
 
+#else
+// The desktop icons and the Trash, as OverlayMac's Accessibility thread last read them (none without the permission)
+struct DeskIcon
+{
+	RECT r;
+	std::shared_ptr<const std::vector<uint8_t>> shape; // (r.right - r.left) squared, 1 = solid; null = the whole box
+	uintptr_t id;
+	bool bin = false; // the Trash
+};
+
+static std::vector<DeskIcon> DesktopIcons()
+{
+	std::vector<DeskIcon> out;
+	double s = MacScale();
+	for (auto &i : OverlayMac::Icons())
+		out.push_back({ { long(i.l * s), long(i.t * s), long(i.r * s), long(i.b * s) }, i.shape, uintptr_t(i.id), false });
+	if (fun.bin)
+	{
+		// The Dock is under the sim: the Trash is a low block on the floor above it, as wide as its icon
+		RECT floor;
+		GetWindowRect(macDock, &floor);
+		for (auto &d : OverlayMac::DockItems())
+			if (d.trash) out.push_back({ { long(d.l * s), floor.top - long(6 * s), long(d.r * s), floor.top }, nullptr, 3, true });
+	}
+	return out;
+}
+#endif
+
 // Every frame: every visible window's rectangle, in sim pixels, blocks particles (Simulation::pixelWalls), so they
 // pile on title bars and flow around windows. A window moving onto particles shoves each one along its move to the
 // first free pixel past it, at the window's speed; one that appeared or grew lifts them out over its top. One with
@@ -5649,10 +5979,20 @@ std::vector<OverlayWindows::WindowShift> OverlayWindows::WindowShifts()
 	if (sw <= 0 || sh <= 0) return out;
 	auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); }; // as TickWindowWalls
 	std::lock_guard lock(frameLock);
+#ifdef __APPLE__
+	if (frameRects.empty()) return out;
+	auto live = OverlayMac::OtherWindows(); // one read for them all, at every screen refresh
+#endif
 	for (auto &[hwnd, at] : frameRects)
 	{
 		RECT r;
+#ifdef _WIN32
 		if (DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &r, sizeof(r)) != S_OK) GetWindowRect(hwnd, &r);
+#else
+		auto it = std::find_if(live.begin(), live.end(), [hwnd = hwnd](auto &w) { return w.id == uint32_t(uintptr_t(hwnd)); });
+		if (it == live.end()) continue;
+		r = MacRect(*it);
+#endif
 		if (r.left == at.left && r.top == at.top) continue;
 		out.push_back({ px(at.left - sr.left, WINDOWW, sw), px(at.top - sr.top, WINDOWH, sh), px(at.right - sr.left, WINDOWW, sw),
 		                px(at.bottom - sr.top, WINDOWH, sh), float(double(r.left - at.left) * WINDOWW / sw),
@@ -5661,6 +6001,7 @@ std::vector<OverlayWindows::WindowShift> OverlayWindows::WindowShifts()
 	return out;
 }
 
+#ifdef _WIN32
 // The exe name (lower case) of the app owning a window
 static ByteString ExeName(HWND hwnd)
 {
@@ -5728,6 +6069,38 @@ ByteString OverlayWindows::PassApp(void *hwnd)
 
 // Throws what sits in the band above a sim rectangle into the air: up hard when the window under it closes, a
 // lighter bump when one opens below it.
+#else
+static std::vector<ByteString> PassApps()
+{
+	std::vector<ByteString> out;
+	for (auto &s : GlobalPrefs::Ref().Get("Overlay.PassApps", ByteString("")).PartitionBy(';'))
+		if (s.size()) out.push_back(s);
+	return out;
+}
+
+static void SetPassApps(const std::vector<ByteString> &apps)
+{
+	ByteString all;
+	for (auto &a : apps) all += (all.size() ? ";" : "") + a;
+	GlobalPrefs::Ref().Set("Overlay.PassApps", all);
+}
+
+static std::vector<ByteString> RunningApps()
+{
+	std::vector<ByteString> out;
+	for (auto &w : OverlayMac::OtherWindows())
+		if (w.owner.size() && std::find(out.begin(), out.end(), ByteString(w.owner).ToLower()) == out.end()) out.push_back(ByteString(w.owner).ToLower());
+	return out;
+}
+
+ByteString OverlayWindows::PassApp(void *)
+{
+	auto front = OverlayMac::FrontName();
+	for (auto &a : PassApps())
+		if (std::string(a.ToLower()) == front) return a;
+	return {};
+}
+#endif
 static void TossAbove(Simulation *sim, int x0, int y0, int x1, bool close)
 {
 	auto &elements = SimulationData::CRef().elements;
@@ -5960,6 +6333,7 @@ static void TickFun(Simulation *sim)
 	// that makes resting sand and liquid hop and fire flare
 	if (fun.music > 0)
 	{
+#ifdef _WIN32
 		static IAudioMeterInformation *meter = nullptr;
 		static int retry = 0;
 		if (!meter && --retry <= 0)
@@ -5982,6 +6356,9 @@ static void TickFun(Simulation *sim)
 			meter->Release(); // the speakers changed: find the new ones
 			meter = nullptr;
 		}
+#else
+		float peak = OverlayMac::AudioPeak();
+#endif
 		static float level = 0;
 		static int since = 0;
 		bool beat = ++since > 6 && peak > 0.03f && peak > level * 1.15f;
@@ -6219,6 +6596,12 @@ static void TickWindowWalls()
 	int sw = sr.right - sr.left, sh = sr.bottom - sr.top;
 	static RECT grabRect;
 	grabRect = sr;
+#ifdef __APPLE__
+	overlayGrabScreen = [](int x0, int y0, int w, int h, uint32_t *out) {
+		double px = MacScale(), sw = (grabRect.right - grabRect.left) / px, sh = (grabRect.bottom - grabRect.top) / px;
+		return sw > 0 && sh > 0 && OverlayMac::Grab(grabRect.left / px + x0 * sw / WINDOWW, grabRect.top / px + y0 * sh / WINDOWH, w * sw / WINDOWW, h * sh / WINDOWH, w, h, out);
+	};
+#else
 	// shards take the colour under them: GDI's copy of the screen leaves out layered windows, so not the overlay
 	overlayGrabScreen = [](int x0, int y0, int w, int h, uint32_t *out) {
 		int sw = grabRect.right - grabRect.left, sh = grabRect.bottom - grabRect.top;
@@ -6244,6 +6627,7 @@ static void TickWindowWalls()
 		ReleaseDC(nullptr, screen);
 		return ok;
 	};
+#endif
 	// windows are walls only when the sim is over them; icons whenever it's over the icons
 	// the mouse over the desktop (where the overlay lets clicks through) stirs the air
 	static POINT lastCursor{ -1, -1 };
@@ -6266,6 +6650,20 @@ static void TickWindowWalls()
 	// Mouse is a broom: a small solid block at the pointer where clicks go to the desktop, moving like a window
 	POINT at;
 	bool broom = fun.broom && !overlayWindowed && GetCursorPos(&at) && GetAncestor(WindowFromPoint(at), GA_ROOT) != mainWindow;
+#ifdef __APPLE__
+	// It covers one screen, so no gaps. The Dock is a solid shape, added with the windows below; only when it can't be read
+	// (no Accessibility) is there a floor where it starts, or everything would drain out of the void edge.
+	static std::vector<RECT> gaps;
+	gaps.clear();
+	double dockL, dockT, dockR, dockB;
+	bool dockKnown = OverlayMac::DockFrame(dockL, dockT, dockR, dockB);
+	if (windowWalls && !dockKnown)
+	{
+		RECT floor;
+		GetWindowRect(macDock, &floor);
+		gaps.push_back({ sr.left, floor.top, sr.right, sr.bottom });
+	}
+#else
 	// The overlay spans every monitor; where none is (beside a shorter one) is solid, so sand stops at its edge
 	static std::vector<RECT> gaps = [] {
 		std::vector<RECT> mons, out;
@@ -6295,6 +6693,7 @@ static void TickWindowWalls()
 		}
 		return out;
 	}();
+#endif
 	if (overlayWindowed || (!doWindows && !doIcons && gaps.empty() && !broom) || sw <= 0 || sh <= 0)
 	{
 		sim->pixelWalls.clear();
@@ -6302,6 +6701,28 @@ static void TickWindowWalls()
 		return;
 	}
 	std::map<HWND, RECT> now;
+#ifdef __APPLE__
+	static std::map<HWND, int> pids; // whose window it is
+	if (doWindows)
+		for (auto &o : OverlayMac::OtherWindows())
+		{
+			HWND hwnd = HWND(uintptr_t(o.id));
+			RECT r = MacRect(o);
+			auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); }; // screen -> sim pixels
+			OverlayWall w{ std::max(0, px(r.left - sr.left, WINDOWW, sw)), std::max(0, px(r.top - sr.top, WINDOWH, sh)),
+			               std::min(XRES, px(r.right - sr.left, WINDOWW, sw)), std::min(YRES, px(r.bottom - sr.top, WINDOWH, sh)), 0, 0, {} };
+			now[hwnd] = r;
+			pids[hwnd] = o.pid;
+			if (w.x1 <= w.x0 || w.y1 <= w.y0) continue;
+			if (auto it = wallRects.find(hwnd); it != wallRects.end())
+			{
+				w.mx = px(r.left - it->second.left, WINDOWW, sw);
+				w.my = px(r.top - it->second.top, WINDOWH, sh);
+			}
+			w.id = uintptr_t(hwnd);
+			wins.push_back(w);
+		}
+#else
 	struct Ctx { std::vector<OverlayWall> *wins; std::map<HWND, RECT> *now; RECT sr; int sw, sh; } ctx{ &wins, &now, sr, sw, sh };
 	if (doWindows) EnumWindows([](HWND hwnd, LPARAM lp) -> BOOL {
 		auto &c = *(Ctx *)lp;
@@ -6334,6 +6755,7 @@ static void TickWindowWalls()
 		c.wins->push_back(w);
 		return TRUE;
 	}, LPARAM(&ctx));
+#endif
 	if (!wallRects.empty() && (fun.closeToss || fun.openShake))
 	{
 		auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); };
@@ -6373,6 +6795,22 @@ static void TickWindowWalls()
 	{
 		if (sim->currentTick % 30 == 0)
 		{
+#ifdef __APPLE__
+			static std::map<int, std::pair<double, double>> was; // pid: CPU time, when (seconds)
+			std::map<int, std::pair<double, double>> is;
+			double when = OverlayMac::Now();
+			busy.clear();
+			for (auto &[hwnd, r] : wallRects)
+			{
+				int pid = pids[hwnd];
+				if (!is.count(pid))
+					if (double cpu = OverlayMac::ProcessCpuSeconds(pid); cpu >= 0) is[pid] = { cpu, when };
+				auto a = is.find(pid), b = was.find(pid);
+				if (a != is.end() && b != was.end() && a->second.second > b->second.second)
+					busy[hwnd] = float((a->second.first - b->second.first) / (a->second.second - b->second.second));
+			}
+			was = std::move(is);
+#else
 			static std::map<DWORD, std::pair<ULONGLONG, ULONGLONG>> was; // pid: CPU time, when (100 ns)
 			std::map<DWORD, std::pair<ULONGLONG, ULONGLONG>> is;
 			auto u64 = [](FILETIME f) { return ULARGE_INTEGER{ { f.dwLowDateTime, f.dwHighDateTime } }.QuadPart; };
@@ -6395,6 +6833,7 @@ static void TickWindowWalls()
 					busy[hwnd] = float(a->second.first - b->second.first) / float(a->second.second - b->second.second);
 			}
 			was = std::move(is);
+#endif
 		}
 		auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); };
 		for (auto &[hwnd, cores] : busy)
@@ -6559,6 +6998,22 @@ static void TickWindowWalls()
 	// up from the text cursor, or from the top of the window being typed in where the app has no standard one
 	if (fun.typing)
 	{
+#ifdef __APPLE__
+		static double lastKey = 0; // when the last key went down
+		double keyAt = OverlayMac::Now() - OverlayMac::IdleSeconds(true);
+		bool typed = keyAt > lastKey + 0.005;
+		lastKey = keyAt;
+		POINT at{ -1, -1 };
+		if (typed && sim->rng.uniform01() < 0.4f)
+		{
+			double cx, cy;
+			// from the window's top: a caret is inside the window, and sparks can't start inside a wall
+			if (auto it = wallRects.find(GetForegroundWindow()); it != wallRects.end())
+				at = { OverlayMac::Caret(cx, cy) ? std::clamp(long(cx * MacScale()), it->second.left, it->second.right) : it->second.left + long(sim->rng.uniform01() * (it->second.right - it->second.left)), it->second.top };
+			else if (OverlayMac::Caret(cx, cy))
+				at = { long(cx * MacScale()), long(cy * MacScale()) };
+		}
+#else
 		static DWORD lastInput = 0;
 		static POINT lastPoint;
 		LASTINPUTINFO li{ sizeof(li) };
@@ -6576,6 +7031,7 @@ static void TickWindowWalls()
 			else if (auto it = wallRects.find(GetForegroundWindow()); it != wallRects.end())
 				at = { it->second.left + long(sim->rng.uniform01() * (it->second.right - it->second.left)), it->second.top };
 		}
+#endif
 		if (at.x >= 0)
 		{
 			auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); };
@@ -6586,6 +7042,9 @@ static void TickWindowWalls()
 	// The volcano: a stone cone on the taskbar left of the hourglass; it smokes while the PC's total CPU use is past the
 	// slider, and throws lava while it is 20% past it. Rebuilt where broken, like the hourglass
 	static float cpu = 0;
+#ifdef __APPLE__
+	if (fun.volcano > 0 && sim->currentTick % 30 == 0) cpu = OverlayMac::CpuLoad();
+#else
 	static ULONGLONG lastIdle = 0, lastTotal = 0;
 	if (fun.volcano > 0 && sim->currentTick % 30 == 0)
 	{
@@ -6598,6 +7057,7 @@ static void TickWindowWalls()
 			lastIdle = idleT, lastTotal = total;
 		}
 	}
+#endif
 	if (fun.volcano > 0)
 	{
 		RECT tr;
@@ -6663,6 +7123,22 @@ static void TickWindowWalls()
 		               std::min(XRES, px(r.right - sr.left, WINDOWW, sw)), std::min(YRES, px(r.bottom - sr.top, WINDOWH, sh)), 0, 0, {} };
 		if (w.x1 > w.x0 && w.y1 > w.y0) wins.push_back(w);
 	}
+#ifdef __APPLE__
+	if (windowWalls && dockKnown)
+	{
+		// The Dock itself: solid, rounded at its ends like the real one, and past them nothing, so what slides off falls to
+		// the void at the bottom of the screen
+		auto px = [&](double v, int n, double from, int nw) { return int(std::lround((v * MacScale() - from) * n / nw)); };
+		int x0 = px(dockL, WINDOWW, sr.left, sw), y0 = px(dockT, WINDOWH, sr.top, sh), x1 = px(dockR, WINDOWW, sr.left, sw), y1 = px(dockB, WINDOWH, sr.top, sh);
+		float radius = 18.f * float(MacScale()) * WINDOWW / sw;
+		OverlayWall w{ std::max(0, x0), std::max(0, y0), std::min(XRES, x1), std::min(YRES, y1), 0, 0, [=](int x, int y) {
+			float dx = std::max({ x0 + radius - x - 0.5f, x + 0.5f - (x1 - radius), 0.f }), dy = std::max({ y0 + radius - y - 0.5f, y + 0.5f - (y1 - radius), 0.f });
+			return dx * dx + dy * dy <= radius * radius;
+		} };
+		w.id = 4; // not a window handle
+		if (w.x1 > w.x0 && w.y1 > w.y0) wins.push_back(w);
+	}
+#endif
 	auto icons = doIcons ? DesktopIcons() : std::vector<DeskIcon>{};
 	static std::map<uintptr_t, RECT> iconRects; // where each icon was on the last tick
 	std::map<uintptr_t, RECT> iconsNow;
@@ -6698,6 +7174,32 @@ static void TickWindowWalls()
 	iconRects = std::move(iconsNow);
 
 	OverlayApplyWalls(sim, wins);
+#ifdef __APPLE__
+	// A Mac window's corners are round: past the curve is open, unless something else stands there. Done on the finished
+	// mask, so the walls' own passes keep their plain boxes.
+	if (sim->pixelWalls.size() == size_t(XRES) * YRES)
+	{
+		static const float cornerPoints = [] { return OverlayMac::SystemMajor() >= 26 ? 16.f : 10.f; }();
+		int r = int(std::lround(cornerPoints * MacScale() * WINDOWW / sw));
+		auto covered = [&](const OverlayWall &self, int x, int y) {
+			for (auto &o : wins)
+				if (&o != &self && x >= o.x0 && x < o.x1 && y >= o.y0 && y < o.y1 && (!o.solid || o.solid(x, y))) return true;
+			return false;
+		};
+		for (auto &w : wins)
+		{
+			if (!wallRects.count(HWND(w.id)) || w.x1 - w.x0 < 2 * r || w.y1 - w.y0 < 2 * r) continue;
+			for (int j = 0; j < r; j++)
+				for (int i = 0; i < r; i++)
+				{
+					float dx = r - i - 0.5f, dy = r - j - 0.5f;
+					if (dx * dx + dy * dy <= float(r * r)) continue;
+					for (auto [x, y] : { std::pair{ w.x0 + i, w.y0 + j }, { w.x1 - 1 - i, w.y0 + j }, { w.x0 + i, w.y1 - 1 - j }, { w.x1 - 1 - i, w.y1 - 1 - j } })
+						if (!covered(w, x, y)) sim->pixelWalls[size_t(y) * XRES + x] = 0;
+				}
+		}
+	}
+#endif
 
 	// Explosions shake the real windows they hit (off unless the Shake slider is up): a jolt that dies away, then the
 	// window goes back exactly where it was. Not maximised or full-screen ones, and a window you grab stops shaking.
@@ -6717,7 +7219,12 @@ static void TickWindowWalls()
 	{
 		auto &s = it->second;
 		RECT r;
+#ifdef __APPLE__
+		// the window server reports a move a beat late, so where it is says nothing: a held button says it's you
+		if (!IsWindow(it->first) || !GetWindowRect(it->first, &r) || GetAsyncKeyState(VK_LBUTTON) < 0)
+#else
 		if (!IsWindow(it->first) || !GetWindowRect(it->first, &r) || r.left != s.set.x || r.top != s.set.y)
+#endif
 		{
 			it = shaking.erase(it); // closed, or moved by someone else (you): leave it be
 			continue;
@@ -6974,6 +7481,7 @@ void OverlayWindows::SetPlayArea(int x, int y, int w, int h)
 }
 
 
+#ifdef _WIN32
 int OverlayWindows::Form(const String &title, const String &prompt, const std::vector<String> &options, int &choice, String &text,
                          const std::vector<String> &extras, std::function<bool(int, const String &)> valid, int limit)
 {
@@ -7225,74 +7733,66 @@ void OverlayWindows::HideConsole()
 {
 	if (console.wnd) ShowWindow(console.wnd, SW_HIDE);
 }
+#endif
+#ifdef __APPLE__
+// What the Windows side gets from Explorer, the registry and its own controls.
+ByteString Platform::WinNarrow(const std::wstring &source)
+{
+	return std::wstring_convert<std::codecvt_utf8<wchar_t>>().to_bytes(source);
+}
+
+std::wstring Platform::WinWiden(const ByteString &source)
+{
+	return std::wstring_convert<std::codecvt_utf8<wchar_t>>().from_bytes(source);
+}
+
+int OverlayWindows::Form(const String &title, const String &prompt, const std::vector<String> &options, int &choice, String &text,
+                         const std::vector<String> &extras, std::function<bool(int, const String &)> valid, int)
+{
+	if (!mainWindow) return -1;
+	std::vector<std::wstring> opts, more;
+	for (auto &o : options) opts.push_back(Wide(o));
+	for (auto &e : extras) more.push_back(Wide(e));
+	auto value = Wide(text);
+	int result = OverlayMac::Form(Wide(title), Wide(prompt), opts, choice, value, more, [&valid](int c, const std::wstring &v) {
+		return !valid || valid(c, Platform::WinNarrow(v).FromUtf8());
+	});
+	if (result >= 1) text = Platform::WinNarrow(value).FromUtf8();
+	return result;
+}
+
+namespace
+{
+	std::vector<std::wstring> consoleHistory;
+}
+
+bool OverlayWindows::ShowConsole()
+{
+	if (!mainWindow) return false;
+	OverlayMac::ConsoleOpen({
+		[](const std::wstring &cmd) {
+			if (cmd.empty()) return;
+			if (consoleHistory.empty() || consoleHistory.back() != cmd) consoleHistory.push_back(cmd);
+			OverlayMac::ConsoleAppend(L"> " + cmd, false);
+			auto *ci = GameController::Ref().GetCommandInterface();
+			int code = ci->Command(Platform::WinNarrow(cmd).FromUtf8());
+			auto result = Wide(ci->GetLastError());
+			if (result.size()) OverlayMac::ConsoleAppend(code && result != L"..." ? L"Error: " + result : result, code && result != L"...");
+		},
+		[](int back) { return back > 0 && size_t(back) <= consoleHistory.size() ? consoleHistory[consoleHistory.size() - back] : std::wstring(); },
+		[] { OverlayMac::FocusOverlay(); },
+	});
+	return true;
+}
+
+void OverlayWindows::HideConsole()
+{
+	OverlayMac::ConsoleClose();
+}
+#endif
 #else
 void OverlayWindows::Init(void *) {}
-#ifdef __APPLE__
-#include "Overlay.h"
-#include "OverlayMac.h"
-#include "gui/game/GameController.h"
-#include "gui/game/GameModel.h"
-#include "simulation/Simulation.h"
-#include "SimulationConfig.h"
-#include "prefs/GlobalPrefs.h"
-#include <SDL.h>
-#include <cmath>
-#include <map>
-
-// Other apps' windows are walls, as on Windows (TickWindowWalls there)
-void OverlayWindows::Tick()
-{
-	if (!&GameController::Ref()) return;
-	auto *sim = GameController::Ref().GetModel()->GetSimulation();
-	static int lastTick = -1, skipped = 0;
-	if (sim->currentTick == lastTick && ++skipped < 2) return;
-	lastTick = sim->currentTick, skipped = 0;
-	static std::map<uint32_t, OverlayMac::Rect> last; // where each window was on the last tick
-	std::map<uint32_t, OverlayMac::Rect> now;
-	std::vector<OverlayWall> walls;
-	auto me = OverlayMac::Window();
-	double sw = me.r - me.l, sh = me.b - me.t;
-	if (sw > 0 && sh > 0 && GlobalPrefs::Ref().Get("Overlay.WindowWalls", true))
-		for (auto &r : OverlayMac::OtherWindows())
-		{
-			auto px = [](double v, int n, double nw) { return int(std::lround(v * n / nw)); }; // screen -> sim pixels
-			OverlayWall w{ std::max(0, px(r.l - me.l, WINDOWW, sw)), std::max(0, px(r.t - me.t, WINDOWH, sh)),
-			               std::min(XRES, px(r.r - me.l, WINDOWW, sw)), std::min(YRES, px(r.b - me.t, WINDOWH, sh)), 0, 0, {} };
-			now[r.id] = r;
-			if (w.x1 <= w.x0 || w.y1 <= w.y0) continue;
-			if (auto it = last.find(r.id); it != last.end())
-			{
-				w.mx = px(r.l - it->second.l, WINDOWW, sw);
-				w.my = px(r.t - it->second.t, WINDOWH, sh);
-			}
-			w.id = r.id;
-			walls.push_back(w);
-		}
-	last = std::move(now);
-	OverlayApplyWalls(sim, walls);
-}
-
-void OverlayMacMenu(int item)
-{
-	auto &gc = GameController::Ref();
-	if (item < int(OverlayInput::Count)) OverlaySetInput(OverlayInput(item));
-	if (item == 10) gc.SetPaused(!gc.GetPaused());
-	if (item == 11) gc.ClearSim();
-	if (item == 99)
-	{
-		SDL_Event quit{};
-		quit.type = SDL_QUIT;
-		SDL_PushEvent(&quit);
-	}
-}
-
-bool OverlayMacChecked(int item)
-{
-	return item < int(OverlayInput::Count) ? int(OverlayGetInput()) == item : item == 10 && GameController::Ref().GetPaused();
-}
-#else
 void OverlayWindows::Tick() {}
-#endif
 void OverlayWindows::TogglePalette() {}
 void OverlayWindows::SetPassThrough(bool) {}
 void OverlayWindows::Notify(const char *) {}

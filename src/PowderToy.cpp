@@ -1,6 +1,9 @@
 #include "PowderToySDL.h"
 #include "Overlay.h"
 #include "OverlayWindows.h"
+#ifdef __APPLE__
+# include "OverlayMac.h"
+#endif
 #include "Format.h"
 #include "X86KillDenormals.h"
 #include "prefs/GlobalPrefs.h"
@@ -382,6 +385,11 @@ int Main(int argc, char *argv[])
 	// The Desktop Powder Toy: on the desktop unless told otherwise (overlay:off is plain TPT)
 #if defined(_WIN32) || defined(__APPLE__)
 	overlayMode = overlayWindowed || !arguments["overlay"].has_value() || trueArg(arguments["overlay"]);
+# ifdef __APPLE__
+	OverlayMac::EarlySetup();
+	// the Overlay tab's "Runs as"
+	overlayWindowed = overlayWindowed || (!arguments["overlay"].has_value() && prefs.Get("Overlay.Windowed", false));
+# endif
 #else
 	overlayMode = overlayWindowed || trueArg(arguments["overlay"]);
 #endif
@@ -421,7 +429,7 @@ int Main(int argc, char *argv[])
 		}
 	}
 
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
 	if (overlayMode) // overlay:window too: the sim is screen-sized and the resizable window shows part of it
 #else
 	if (overlayMode && !overlayWindowed)
@@ -614,7 +622,7 @@ int Main(int argc, char *argv[])
 	}
 
 	MainLoop();
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
 	if (overlayMode) OverlayWindows::SaveScene(); // the sand is still there next time
 #endif
 

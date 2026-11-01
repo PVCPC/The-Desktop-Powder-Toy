@@ -273,8 +273,8 @@ Assessment, in the order I'd do it (effort: S = an hour or two, M = a session, L
      see itself). Light or dark is judged from what shows through the glass; per bar (as macOS) not done.
 7. [x] Black particles inside the zoom window (S); menus fade when unused (S). Done 2026-10-30: the zoom box is opaque
    (a magnifier); TPT's own menus, when shown, fade out after 3 s without the mouse over them.
-8. [-] Other platforms: X11 / Wayland input regions, macOS (L; only if someone needs them). Deferred by the
-   user 2026-10-30.
+8. [-] Other platforms: X11 / Wayland input regions (L; only if someone needs them). Deferred by the user 2026-10-30.
+   macOS: done, see "macOS" below.
 
 Dropped: a Kingsway-style taskbar and start button. The tray icon plus the side window cover launching. Vista
 tray menu: the tray menu stays native on purpose.
@@ -508,6 +508,48 @@ On/off things are Fun toggles; things with an amount are More fun sliders.
   GetGUIThreadInfo caret or the window top (ColdSpark, shared with the trail). Typing untested live (needs keys).
 - [ ] Next for ~5x, all elements kept: (A) per-block particle slots so create/kill needs no lock; (B) RecalcFreeParticles
   on all cores (~5 ms); (C) review the rest one by one (PLNT, VINE, SPRK...); (D) sleeping regions, as a toggle.
+
+## macOS (0.8.6, native arm64)
+
+The Mac runs the same UI source as Windows: the side window and its tabs, every theme, hosted dialogs, toasts, the tray
+menu. `OverlayWindows.cpp` is one file for both; `OverlayMacCompat.h` and `OverlayMacWin32.h/.mm` give it the Win32 it is
+written against on AppKit (top-level windows with a message procedure, GDI text through CoreText, popup menus, monitors,
+the tray as a status item), and `OverlayMac.mm` holds the Mac's own overlay. Only what really differs is behind `#ifdef`.
+A check when touching it: `unifdef -D_WIN32 -U__APPLE__` old vs new shows exactly what changed for Windows.
+
+- **Units:** Win32 coordinates here are pixels, points x backing scale, so canvases are sharp on Retina.
+- **Frames:** a CAMetalLayer and its own thread (`DrawLoop`), Metal's copy of `GpuLoop`. Measured 107-118 presents/s on a
+  120 Hz panel with 60 sim ticks/s. The layer is sRGB-tagged, or TPT's colours oversaturate on P3 screens.
+- **Clicks:** it's all in the pixels, as on Windows, with one change: in Auto, bare desktop is always TPT's, not only while
+  TPT is in front (user 11-01: having to click a particle to get back to drawing). Walls, app windows and icons are alpha 0,
+  so their clicks go to them. Right-click on bare desktop is the secondary tool, and on a window or icon that thing's menu.
+  It also keeps macOS's "click wallpaper to reveal desktop" from firing.
+- **Icons:** walls take the exact pixels of Finder's desktop window (needs Screen Recording), thumbnails included, re-read
+  when an icon moves and every 4 s; without the permission, each file's own icon.
+- **Window corners** are round in the walls, 16 pt on macOS 26, 10 before: past the curve is cleared from the finished
+  mask unless something else stands there.
+- **Signing:** `tools/package-mac.sh` uses a self-signed certificate from `~/.config/desktop-powder-toy/` when there is
+  one, so macOS keeps permissions across updates. No Apple account. Not notarised, so Open Anyway on another Mac.
+- **Look:** defaults to the Mac's own theme, Liquid Glass with Screen Recording, else 11-15. The Windows looks stay choices.
+- **The Dock:** a solid wall in its real rounded shape, with void past its ends: the sim reaches the bottom of the screen,
+  behind the Dock. The hourglass and volcano stand on it. Without Accessibility, a flat floor where it starts.
+- **Permissions, all optional:** Accessibility = icons as walls, the Dock, the caret, Explosion shake. Screen Recording =
+  Liquid Glass's backdrop, what's behind holes, shard colours. System audio (14.2+) = Music bounce.
+- **Scene tiles** are 24 cells, not 255, on both systems: GameSave refuses a save larger than the sim, so 255 lost the scene
+  going to a smaller sim.
+
+- **Throw from the Dock:** while it's on, an event tap keeps Ctrl-presses on Dock icons from reaching the Dock, or it would
+  open the icon's menu and letting go over that would pick an item (needs Accessibility).
+
+Different on the Mac: Form and the console are AppKit, TPT's drop-downs are a small window of their own (`PopupList`,
+NSMenu would hold the main thread and the sim), and typing sparks start at the window's top edge over the caret, since
+sparks can't start inside a wall.
+
+Not done yet: one screen at a time, not spanning them (a window can't span displays when each has its own Space); Music
+bounce hasn't been run with permission granted; not notarised, by choice, so first launch needs Open Anyway, and macOS may
+ask for permissions again after an update.
+
+Multicore physics on the M5 Pro, 485k sand and water: 24 -> 50 ticks/s. Build: `tools/package-mac.sh`.
 
 ## Ideas
 

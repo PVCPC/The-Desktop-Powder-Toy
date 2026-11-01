@@ -136,9 +136,9 @@ powder_files = files(
 )
 if host_platform == 'darwin'
 	add_languages('objcpp', native: false)
-	powder_files += files('OverlayMac.mm')
+	powder_files += files('OverlayMac.mm', 'OverlayMacWin32.mm')
 	# ponytail: the font editor (build_font, off by default) links Overlay.cpp but not this; add it there if it's ever built on a Mac
-	powder_deps += dependency('appleframeworks', modules: [ 'AppKit', 'QuartzCore' ])
+	powder_deps += dependency('appleframeworks', modules: [ 'AppKit', 'QuartzCore', 'Metal', 'Carbon', 'ApplicationServices', 'CoreAudio', 'CoreVideo', 'CoreText' ])
 endif
 powder_external_files = []
 
