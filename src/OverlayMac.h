@@ -14,10 +14,17 @@ struct SDL_Window;
 namespace OverlayMac
 {
 	void Init(SDL_Window *window);
-	void InitMenu();                 // the menu bar item alone: all overlay:window wants of the above
+	double BackingScale();           // pixels per point
+	void InitMenu();                 // keeps macOS from napping the app: all overlay:window wants of the above
+	void EarlySetup();               // before SDL starts
+	void FocusOverlay();             // the keyboard goes back to TPT
+	void Shutdown();                 // stops this file's threads: before exit, while what they read still exists
 	void SetScreen(int index);       // which screen the overlay lives on, before anything asks its size
 	std::vector<std::string> ScreenNames();
-	void ScreenSize(int &w, int &h); // that screen's usable area, in points
+	// That screen under the menu bar, in points: down to the real bottom, behind the Dock (a solid shape in the sim, with void
+	// past its ends), or with belowDock false only above it (TPT's own menus have to stay visible).
+	void ScreenSize(int &w, int &h, bool behindDock = true);
+	double VisibleBottom();          // the bottom of the area windows may use, points from the top
 	void SetLayer(int layer);        // OverlayLayer as an int: on top, under windows, behind the icons
 
 	// The drawing thread carries a particle on from (x, y) at (vx, vy) sim pixels a frame, or lifts it with the window
@@ -42,7 +49,7 @@ namespace OverlayMac
 	// underneath. True if the mouse is over a pixel that catches.
 	bool UpdateClicks(const uint32_t *argb, int w, int h, bool catchAll, bool catchNone);
 	bool CatchesMouse();            // our window takes the mouse right now
-	bool Active();                  // the overlay is what's in front (the settings window doesn't count)
+	bool Active();                  // TPT is the app in front
 	void MouseFrom(double &x, double &y); // the pointer, screen points, top-left origin
 	double Now();                   // seconds, monotonic
 
@@ -84,6 +91,7 @@ namespace OverlayMac
 	void WantDesktop(bool icons, bool dock, bool caret);
 	std::vector<Icon> Icons();
 	std::vector<DockItem> DockItems();
+	bool DockFrame(double &l, double &t, double &r, double &b); // the Dock's own shape, points; false without Accessibility
 	bool Caret(double &x, double &y); // the text cursor, screen points; false when the focused app doesn't report one
 	bool MoveWindow(uint32_t id, double x, double y); // a real window (Explosion shake)
 
@@ -99,6 +107,7 @@ namespace OverlayMac
 		int w = 0, h = 0;
 		std::vector<uint32_t> px;
 	};
+	bool GrabBelow(uint32_t below, double l, double t, double w, double h, int pw, int ph, uint32_t *out); // the same, under a window of ours
 	void WantShots(const std::vector<uint32_t> &ids, double simPerPoint);
 	std::shared_ptr<const Shot> TakeShot(uint32_t id);
 	// The wallpaper filling the screen, seen through a w x h buffer laid over the window (0x00RRGGBB)
@@ -108,30 +117,4 @@ namespace OverlayMac
 	int TakeHotkey();                                      // the next one pressed, or -1
 	void Toast(const std::string &message);                // a short fading notice
 	bool Relaunch(const char *extraArg);                   // starts this app again; false if it couldn't
-
-	// The settings window. A row is laid out by kind; everything goes through the functions, so this file knows no TPT.
-	struct Row
-	{
-		enum Kind { Header, Note, Toggle, Slider, Choice, Text, Button } kind = Header;
-		std::string label, tip;
-		std::function<float()> get;       // Toggle, Slider, Choice (index)
-		std::function<void(float)> set;
-		float lo = 0, hi = 1;
-		std::function<std::string(float)> format; // Slider's value
-		std::vector<std::string> options;         // Choice
-		std::function<std::string()> getText;     // Text; Note if set
-		std::function<void(std::string)> setText;
-		std::function<void()> press;              // Button
-	};
-	struct Tab
-	{
-		std::string name;
-		std::vector<Row> rows;
-	};
-	void ToggleSettings(const std::vector<Tab> &tabs);
-	bool SettingsOpen();
 }
-
-// The menu bar item's entries (tags): 0 .. 2 input modes, 10 pause, 11 clear, 12 settings, 99 quit. In OverlayWindows.cpp.
-void OverlayMacMenu(int item);
-bool OverlayMacChecked(int item);

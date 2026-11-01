@@ -38,9 +38,8 @@
 #  define WS_EX_NOREDIRECTIONBITMAP 0x00200000L // SDL_syswm.h already pulled in windows.h for the XP target
 # endif
 #elif defined(__APPLE__)
-# include "OverlayMac.h"
+# include "OverlayMacWin32.h"
 # include "FpsLimit.h"
-# include "gui/game/GameView.h"
 namespace
 {
 	OverlayInput input = OverlayInput::Auto;
@@ -859,23 +858,14 @@ std::pair<Vec2<int>, int> OverlaySimSize(int scale)
 		}
 	}
 #elif defined(__APPLE__)
-	// TPT's own menus stay (no side window here), inside the usable area: the bottom row sits just above the Dock
 	auto &prefs = GlobalPrefs::Ref();
 	OverlayMac::SetScreen(prefs.Get("Overlay.Screen", 0));
+	bool menus = prefs.Get("Overlay.ShowTPTMenus", false);
 	int sw, sh;
-	OverlayMac::ScreenSize(sw, sh);
-	if (overlayWindowed)
-	{
-		// A normal window, menus and title bar included; 0: as big as fits
-		scale = std::max(scale, 1);
-		sh -= 32; // the title bar
-		int w = prefs.Get("Overlay.WindowedView.W", 612), h = prefs.Get("Overlay.WindowedView.H", 384);
-		auto most = (Vec2(sw, sh) / scale - Vec2(BARSIZE, MENUSIZE)) / CELL;
-		return { Vec2(std::clamp(w > 0 ? w / CELL : most.X, 32, most.X), std::clamp(h > 0 ? h / CELL : most.Y, 32, most.Y)), scale };
-	}
+	OverlayMac::ScreenSize(sw, sh, !menus);
 	for (scale = std::max(scale, 1); ; scale++)
 	{
-		auto cells = (Vec2(sw, sh) / scale - Vec2(BARSIZE, MENUSIZE)) / CELL;
+		auto cells = (Vec2(sw, sh) / scale - (menus ? Vec2(BARSIZE, MENUSIZE) : Vec2(0, 0))) / CELL; // hidden menus: off screen
 		if (int64_t(cells.X) * cells.Y * CELL * CELL <= (int64_t(1) << (31 - PMAPBITS)))
 		{
 			return { cells, scale };
@@ -918,7 +908,7 @@ void ApplyOverlay(SDL_Window *window)
 	else OverlayMac::Init(window);
 	auto &prefs = GlobalPrefs::Ref();
 	OverlayLoadKeys();
-	OverlayWindows::Init(nullptr);
+	OverlayWindows::Init(window);
 	overlayAutoPass = prefs.Get("Overlay.AutoPassThrough", true);
 	input = prefs.Get("Overlay.Input", OverlayInput::Count, OverlayInput::Auto);
 	layer = prefs.Get("Overlay.Layer", OverlayLayer::Count, OverlayLayer::OnTop);
@@ -1156,33 +1146,45 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 	}
 #elif defined(__APPLE__)
 	(void)window;
+	MacDockFloor(XRES, YRES, CELL, WINDOWW, WINDOWH);
 	TickFullScreen();
 	OverlayTickUI();
+	// Black is alpha 0: see-through, and clicks on it reach the desktop. Catching clicks gives it alpha 1 instead: still
+	// invisible, but it catches them. Auto: empty space catches clicks while TPT is the app in front, and passes them once
+	// another app is. As on Windows.
+	bool catchEmpty = input == OverlayInput::Locked || (input == OverlayInput::Auto && OverlayMac::Active());
+	uint32_t empty = catchEmpty ? 0x01000000 : 0;
 	argb.resize(size_t(w) * h);
 	OverlayBands(h, [&](int y0, int y1) {
 		for (int i = y0 * w; i < y1 * w; i++)
 		{
 			auto c = vid[i] & 0xFFFFFF;
-			argb[i] = c ? c | 0xFF000000 : 0; // black is see-through
+			argb[i] = c ? c | 0xFF000000 : empty;
 		}
 	});
 	float fade = 1; // TPT's menus
-	bool catchAll = (input == OverlayInput::Locked || (input == OverlayInput::Auto && OverlayMac::Active())) && !fullScreenApp;
 	if (w == WINDOWW && h == WINDOWH)
 	{
 		if (frameOccupied.size() < size_t(XRES) * YRES) frameOccupied.assign(size_t(XRES) * YRES, 0);
 		OverlayWindows::ApplySimMasks(argb.data(), w, frameOccupied.data());
 		auto *top = ui::Engine::Ref().GetWindow();
-		static uint32_t lastUse = SDL_GetTicks();
-		// They fade out after a few seconds without the mouse over them, and come back on hover; not while a dialog is up
-		// or TPT has the clicks anyway, when a tool strip that keeps vanishing would only get in the way.
-		if (!(top && top->InPlace))
+		static uint32_t lastUse = 0;
+		static bool wasShown = false;
+		bool shown = !(OverlayWindows::HideTPTMenus() && !(top && top->InPlace));
+		if (shown && !wasShown) lastUse = SDL_GetTicks(); // just turned on: start visible
+		wasShown = shown;
+		if (OverlayWindows::HideTPTMenus() && !(top && top->InPlace))
 		{
+			fade = 0; // all of them are in the side window
+		}
+		else if (!(top && top->InPlace))
+		{
+			// Shown: they fade out after a few seconds without the mouse over them, and come back on hover.
 			auto me = OverlayMac::Window();
 			double mx, my;
 			OverlayMac::MouseFrom(mx, my);
 			int cx = me.r > me.l ? int((mx - me.l) * w / (me.r - me.l)) : 0, cy = me.b > me.t ? int((my - me.t) * h / (me.b - me.t)) : 0;
-			if (catchAll || top != GameController::Ref().GetView() || (cx >= 0 && cy >= 0 && cx < w && cy < h && (cx >= XRES || cy >= YRES))) lastUse = SDL_GetTicks();
+			if (cx >= 0 && cy >= 0 && cx < w && cy < h && (cx >= XRES || cy >= YRES)) lastUse = SDL_GetTicks();
 			fade = std::clamp(1 - (int(SDL_GetTicks() - lastUse) - 3000) / 1000.f, 0.f, 1.f);
 		}
 		if (fade < 1)
@@ -1197,12 +1199,16 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 		}
 		OverlayWindows::DrawExtras(argb.data(), w, h);
 	}
-	bool overDrawn = OverlayMac::UpdateClicks(argb.data(), w, h, catchAll, input == OverlayInput::PassThrough || Shown() == OverlayLayer::BehindIcons || (fullScreenApp && !catchAll));
+	auto me = OverlayMac::Window();
+	double scale = OverlayMac::BackingScale();
+	OverlayWindows::ClearUnderWindows(argb.data(), w, h, int((me.r - me.l) * scale), int((me.b - me.t) * scale));
+	// which is which is all in the pixels: a wall or a window is alpha 0, so its clicks go to it, wherever the input is
+	bool overDrawn = OverlayMac::UpdateClicks(argb.data(), w, h, false, input == OverlayInput::PassThrough || fullScreenApp || Shown() == OverlayLayer::BehindIcons);
 	// Drawing at the screen's rate only pays while something moves: particles, a window, the menus fading, or TPT in
 	// use. Idle, a few frames a second keep up with slow changes and spot the next move, for a fraction of the CPU.
 	static double busyUntil = 0;
 	auto shifts = OverlayWindows::WindowShifts();
-	if (!moving.empty() || overDrawn || (fade > 0 && fade < 1) || !shifts.empty() || OverlayDebrisFlying())
+	if (!moving.empty() || catchEmpty || overDrawn || (fade > 0 && fade < 1) || !shifts.empty() || OverlayDebrisFlying())
 		busyUntil = Now() + 1;
 	overlayIdle = Now() >= busyUntil;
 	ui::Engine::Ref().SetDrawingFrequencyLimit(overlayIdle ? DrawLimit(DrawLimitExplicit{ 15 }) : DrawLimit(DrawLimitDisplay{}));
@@ -1218,7 +1224,7 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 				auto &px = argb[size_t(y) * w + x];
 				if (px >> 24 < 2) break; // the top of the pile
 				movers.push_back({ float(x), float(y), 0, 0, px, uint32_t(uintptr_t(s.id)) });
-				px = 0;
+				px = empty;
 			}
 	for (auto &m : moving)
 	{
@@ -1234,7 +1240,7 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 			open = !(o & OnWall) && (!(o & OnParticle) || (o & Moves));
 		}
 		movers.push_back({ m.x, m.y, open ? m.vx : 0, open ? m.vy : 0, px, 0 });
-		px = 0;
+		px = empty;
 	}
 	OverlayMac::Present(argb, w, h, std::move(movers), frameAt, framePeriod);
 #else

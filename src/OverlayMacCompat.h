@@ -4,8 +4,10 @@
 // and one copy of it is worth more than two that drift apart. The Windows side keeps its own calls untouched. A "window"
 // here is a CGWindowID in a pointer, with two made-up ones for the overlay and the Dock. Screen units are points.
 #include "OverlayMac.h"
+#include <cmath>
 #include <cstdint>
 #include <ctime>
+#include <unistd.h>
 
 using HWND = void *;
 using DWORD = uint32_t;
@@ -17,9 +19,14 @@ struct POINT { long x, y; };
 inline HWND const macOverlay = HWND(uintptr_t(0xFFFFFFF0));
 inline HWND const macDock = HWND(uintptr_t(0xFFFFFFF1));
 
+// Coordinates here are pixels, as Win32's are: the overlay's points times the screen's backing scale. The UI's canvases are
+// in the same pixels, which is what keeps its text and themes sharp on Retina.
+inline double MacScale() { return OverlayMac::BackingScale(); }
+
 inline RECT MacRect(const OverlayMac::Rect &r)
 {
-	return { long(std::lround(r.l)), long(std::lround(r.t)), long(std::lround(r.r)), long(std::lround(r.b)) };
+	double s = MacScale();
+	return { long(std::lround(r.l * s)), long(std::lround(r.t * s)), long(std::lround(r.r * s)), long(std::lround(r.b * s)) };
 }
 
 inline ULONGLONG GetTickCount64() { return ULONGLONG(OverlayMac::Now() * 1000); }
@@ -45,7 +52,7 @@ inline bool GetCursorPos(POINT *p)
 {
 	double x, y;
 	OverlayMac::MouseFrom(x, y);
-	*p = { long(std::lround(x)), long(std::lround(y)) };
+	*p = { long(std::lround(x * MacScale())), long(std::lround(y * MacScale())) };
 	return true;
 }
 
@@ -63,23 +70,14 @@ inline HWND GetForegroundWindow()
 }
 
 inline HWND FindWindowW(const wchar_t *, const wchar_t *) { return macDock; } // only ever asked for the taskbar
+inline int GetCurrentProcessId() { return getpid(); }
 
-bool GetWindowRect(HWND hwnd, RECT *out); // OverlayWindows.cpp: the Dock needs the sim's size
+bool GetWindowRect(HWND hwnd, RECT *out); // OverlayMacWin32.mm
 
-inline bool IsWindow(HWND hwnd)
-{
-	for (auto &r : OverlayMac::OtherWindows())
-		if (r.id == uint32_t(uintptr_t(hwnd))) return true;
-	return false;
-}
-
-inline bool IsZoomed(HWND) { return false; } // ponytail: a Mac window has no maximised state to leave alone
-
+bool IsWindow(HWND hwnd);
+bool IsZoomed(HWND hwnd);
 enum { SWP_NOSIZE = 1, SWP_NOZORDER = 4, SWP_NOACTIVATE = 16, SWP_ASYNCWINDOWPOS = 0x4000 };
-inline bool SetWindowPos(HWND hwnd, HWND, long x, long y, int, int, int)
-{
-	return OverlayMac::MoveWindow(uint32_t(uintptr_t(hwnd)), x, y);
-}
+bool SetWindowPos(HWND hwnd, HWND after, long x, long y, long w, long h, int flags);
 
 inline bool PtInRect(const RECT *r, POINT p)
 {

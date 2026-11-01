@@ -511,47 +511,34 @@ On/off things are Fun toggles; things with an amount are More fun sliders.
 
 ## macOS (0.8.6, native arm64)
 
-The Mac has the sim-side features of Windows from one source: the Fun, window-wall, mark and play-area code in
-`OverlayWindows.cpp` is shared, its few Win32 calls answered by `OverlayMacCompat.h` on top of `OverlayMac.mm`. A check
-when touching it: `unifdef -D_WIN32 -U__APPLE__` must keep giving Windows the code it had.
+The Mac runs the same UI source as Windows: the side window and its tabs, every theme, hosted dialogs, toasts, the tray
+menu. `OverlayWindows.cpp` is one file for both; `OverlayMacCompat.h` and `OverlayMacWin32.h/.mm` give it the Win32 it is
+written against on AppKit (top-level windows with a message procedure, GDI text through CoreText, popup menus, monitors,
+the tray as a status item), and `OverlayMac.mm` holds the Mac's own overlay. Only what really differs is behind `#ifdef`.
+A check when touching it: `unifdef -D_WIN32 -U__APPLE__` old vs new shows exactly what changed for Windows.
 
-- **Frames:** a CAMetalLayer and its own thread (`DrawLoop`), Metal's copy of `GpuLoop`: display-rate drawing, moving
-  particles carried on between sim ticks, windows slid with what's on them. Measured 112-118 presents/s on a 120 Hz
-  panel with 60 sim ticks/s. The layer is sRGB-tagged, or TPT's colours oversaturate on P3 screens.
-- **UI:** no side window; an AppKit settings window (`OverlayMac::ToggleSettings`, rows built in OverlayWindows.cpp's Mac
-  half), a menu bar item, TPT's own menus (fading) for elements, and TPT's own dialogs on the overlay with the sim running.
-- **Hotkeys:** Carbon RegisterEventHotKey, which needs no permission. Text fields on the Overlay tab, no recording.
-- **Permissions, all optional:** Accessibility = desktop icons as walls (Finder's AX tree, shapes from each file's icon),
-  the Dock (items, badges, running state, Trash), the text caret, Explosion shake. Screen Recording = what's behind holes
-  and shard colours; without it holes show the wallpaper. System audio (14.2+) = Music bounce through a process tap, only
-  the peak is kept.
-- **The Dock is not the taskbar:** it's below the sim, so the sim gets a floor wall (a `gaps` rect, or sand drains out of
-  the void edge), and the hourglass and volcano stand on that floor. Mac windows can cover it, hiding them; nothing
-  covers a taskbar. Notifications = a Dock badge going up; app opened = a Dock item starting to run.
-- **Scene tiles** are 24 cells, not 255: GameSave refuses a save larger than the sim, so 255 lost the scene going to a
-  smaller sim. Windows got the same change without being compiled or run; check it on the next Windows build.
-- **Window mode** (Overlay tab, "Runs as"; pref Overlay.Windowed): a normal window with TPT's own menus and a size chosen
-  from a list, since there's no side window to hold them. Changing either restarts with the scene. Not resizable by
-  dragging as on Windows.
-- **Typing sparks** start at the window's top edge, over the caret: a caret is inside the window, and ColdSpark refuses
-  walls. Windows has that same check, so sparks at its caret probably never show either (untested there).
-- **Stuck buttons:** SDL can miss a release; ReleaseStuckButtons compares it with what the system says is held.
+- **Units:** Win32 coordinates here are pixels, points x backing scale, so canvases are sharp on Retina.
+- **Frames:** a CAMetalLayer and its own thread (`DrawLoop`), Metal's copy of `GpuLoop`. Measured 107-118 presents/s on a
+  120 Hz panel with 60 sim ticks/s. The layer is sRGB-tagged, or TPT's colours oversaturate on P3 screens.
+- **Clicks:** as on Windows, it's all in the pixels: empty is alpha 1 while TPT is in front, walls and app windows are
+  alpha 0, so clicks on them go to them. macOS's "click wallpaper to reveal desktop" moves every window aside on a click
+  on bare wallpaper, and the next click only brings them back.
+- **Look:** defaults to the Mac's own theme, Liquid Glass with Screen Recording, else 11-15. The Windows looks stay choices.
+- **The Dock:** a solid wall in its real rounded shape, with void past its ends: the sim reaches the bottom of the screen,
+  behind the Dock. The hourglass and volcano stand on it. Without Accessibility, a flat floor where it starts.
+- **Permissions, all optional:** Accessibility = icons as walls, the Dock, the caret, Explosion shake. Screen Recording =
+  Liquid Glass's backdrop, what's behind holes, shard colours. System audio (14.2+) = Music bounce.
+- **Scene tiles** are 24 cells, not 255, on both systems: GameSave refuses a save larger than the sim, so 255 lost the scene
+  going to a smaller sim.
 
-Left out on purpose, with reasons:
-- Throw from the taskbar: Ctrl-clicking a Dock icon opens its menu and dragging one out can remove it from the Dock.
-- Native element palette, tools, saves and console tabs: TPT's own menus do the job.
+Different on the Mac: Form and the console are AppKit, drop-downs block the sim while open (AppKit's menus are main thread
+only), and typing sparks start at the window's top edge over the caret, since sparks can't start inside a wall.
 
-Not done yet:
-- One screen at a time, chosen on the Overlay tab, not spanning all of them (a window can't span displays when each has
-  its own Space, so that needs a window per display and forwarded input). The picker hasn't been run with a second display.
-- Not notarised, by choice: first launch needs Open Anyway. Ad hoc signing also means macOS may ask for permissions
-  again after an update.
+Not done yet: one screen at a time, not spanning them (a window can't span displays when each has its own Space); Music
+bounce hasn't been run with permission granted; not notarised, by choice, so first launch needs Open Anyway, and macOS may
+ask for permissions again after an update.
 
-Multicore physics on the M5 Pro, 485k sand and water: 24 -> 50 ticks/s. Moving OverlayParallel from a new set of threads
-per call to GCD didn't change that scene's tick rate; it stays because thousands of thread starts a second buy nothing.
-At idle, an empty full-screen sim costs ~40% of one core, nearly all of it TPT's air update.
-
-Build: `tools/package-mac.sh` (needs meson and ninja) gives `dist-mac/The-Desktop-Powder-Toy-<version>-macos-<arch>.zip`.
+Multicore physics on the M5 Pro, 485k sand and water: 24 -> 50 ticks/s. Build: `tools/package-mac.sh`.
 
 ## Ideas
 

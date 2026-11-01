@@ -34,7 +34,17 @@
 
 static NSWindow *window;
 static NSInteger windowLevel = NSFloatingWindowLevel; // SDL sets its always-on-top level back as it shows the window
+static std::atomic<bool> stopping{ false };
+static std::atomic<int> workers{ 0 };
+// counts a thread in and out, so Shutdown can wait for them
+struct Worker
+{
+	Worker() { workers++; }
+	~Worker() { workers--; }
+};
+
 static int screenIndex = 0;
+static bool overDock = true; // the window reaches the bottom of the screen, behind the Dock
 // The one the overlay lives on: never NSScreen.mainScreen, which is whichever has the keyboard and so changes under us
 static NSScreen *Screen()
 {
@@ -46,25 +56,6 @@ static double PrimaryHeight()
 {
 	return NSScreen.screens.firstObject.frame.size.height;
 }
-
-// ---------------------------------------------------------------------------------------------- the menu bar item
-
-@interface TDPTMenu : NSObject <NSMenuDelegate>
-@end
-@implementation TDPTMenu
-- (void)pick:(NSMenuItem *)item
-{
-	OverlayMacMenu(int(item.tag));
-}
-- (void)menuNeedsUpdate:(NSMenu *)menu
-{
-	for (NSMenuItem *item in menu.itemArray)
-		if (!item.isSeparatorItem) item.state = OverlayMacChecked(int(item.tag)) ? NSControlStateValueOn : NSControlStateValueOff;
-}
-@end
-
-static TDPTMenu *menuTarget;
-static NSStatusItem *statusItem;
 
 // ------------------------------------------------------------------------------------------------- the Metal frame
 
@@ -219,10 +210,11 @@ fragment float4 partF(V i [[stage_in]]) { return i.col; }
 	void DrawLoop()
 	{
 		pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+		Worker counted;
 		std::vector<Part> parts;
 		std::vector<uint32_t> frame;
 		int frameW = 0, frameH = 0, slot = 0;
-		for (;;)
+		while (!stopping)
 		{
 			@autoreleasepool
 			{
@@ -324,9 +316,11 @@ fragment float4 partF(V i [[stage_in]]) { return i.col; }
 	void KeepPlaced()
 	{
 		// centred on the usable area, its bottom (TPT's menus) just above the Dock; SDL moves it after Init
-		auto v = Screen().visibleFrame;
+		auto v = Screen().visibleFrame, whole = Screen().frame;
 		auto f = window.frame;
-		NSPoint at = NSMakePoint(v.origin.x + std::floor((v.size.width - f.size.width) / 2), v.origin.y);
+		NSPoint at = NSMakePoint(whole.origin.x + std::floor((whole.size.width - f.size.width) / 2), v.origin.y);
+		// behind the Dock, with hidden menus hanging off the edges as on Windows: the top-left corner stays on the screen's
+		if (overDock) at = NSMakePoint(whole.origin.x, v.origin.y + v.size.height - f.size.height);
 		if (f.origin.x != at.x || f.origin.y != at.y) [window setFrameOrigin:at];
 		if (window.level != windowLevel) window.level = windowLevel;
 		CGFloat scale = window.backingScaleFactor;
@@ -364,11 +358,18 @@ std::vector<std::string> OverlayMac::ScreenNames()
 	return names;
 }
 
-void OverlayMac::ScreenSize(int &w, int &h)
+void OverlayMac::ScreenSize(int &w, int &h, bool behindDock)
+{
+	overDock = behindDock;
+	auto v = Screen().visibleFrame, f = Screen().frame;
+	w = int(f.size.width);
+	h = int(behindDock ? v.origin.y + v.size.height - f.origin.y : v.size.height);
+}
+
+double OverlayMac::VisibleBottom()
 {
 	auto v = Screen().visibleFrame;
-	w = int(v.size.width);
-	h = int(v.size.height);
+	return PrimaryHeight() - v.origin.y;
 }
 
 void OverlayMac::Init(SDL_Window *sdl)
@@ -398,30 +399,6 @@ void OverlayMac::InitMenu()
 	pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
 	[[[NSProcessInfo processInfo] beginActivityWithOptions:NSActivityUserInitiatedAllowingIdleSystemSleep | NSActivityLatencyCritical
 	                                                reason:@"Particles on the desktop"] retain];
-
-	menuTarget = [[TDPTMenu alloc] init];
-	NSMenu *menu = [[NSMenu alloc] init];
-	menu.delegate = menuTarget;
-	auto add = [&](NSString *title, int tag) {
-		NSMenuItem *item = [[[NSMenuItem alloc] initWithTitle:title action:@selector(pick:) keyEquivalent:@""] autorelease];
-		item.target = menuTarget;
-		item.tag = tag;
-		[menu addItem:item];
-	};
-	add(@"Clicks: Auto (TPT while it's in front)", 0);
-	add(@"Clicks: Pass-through", 1);
-	add(@"Clicks: Locked to TPT", 2);
-	[menu addItem:NSMenuItem.separatorItem];
-	add(@"Settings…", 12);
-	add(@"Paused", 10);
-	add(@"Clear the sim", 11);
-	[menu addItem:NSMenuItem.separatorItem];
-	add(@"Quit The Desktop Powder Toy", 99);
-	statusItem = [[NSStatusBar.systemStatusBar statusItemWithLength:NSVariableStatusItemLength] retain];
-	NSImage *icon = [NSImage imageWithSystemSymbolName:@"hourglass.bottomhalf.filled" accessibilityDescription:@"The Desktop Powder Toy"];
-	if (icon) statusItem.button.image = icon;
-	else statusItem.button.title = @"TPT";
-	statusItem.menu = menu;
 }
 
 void OverlayMac::SetLayer(int layer)
@@ -542,7 +519,31 @@ bool OverlayMac::FrontFillsScreen()
 
 bool OverlayMac::Active()
 {
-	return NSApp.isActive && !(NSApp.keyWindow && NSApp.keyWindow != window);
+	return NSApp.isActive;
+}
+
+double OverlayMac::BackingScale()
+{
+	static double scale = 0;
+	if (!scale) scale = Screen().backingScaleFactor;
+	return scale;
+}
+
+void OverlayMac::EarlySetup()
+{
+	// no window restoration: there's nothing to restore, and after a crash macOS would hold up the next start asking about it
+	[NSUserDefaults.standardUserDefaults registerDefaults:@{ @"ApplePersistenceIgnoreState": @YES }];
+}
+
+void OverlayMac::Shutdown()
+{
+	stopping = true;
+	for (int i = 0; i < 100 && workers > 0; i++) usleep(10000); // the longest sleep in them is half a second
+}
+
+void OverlayMac::FocusOverlay()
+{
+	if (window) [window makeKeyWindow];
 }
 
 double OverlayMac::IdleSeconds(bool keysOnly)
@@ -643,6 +644,7 @@ namespace
 	std::mutex axLock;
 	std::vector<OverlayMac::Icon> axIcons;
 	std::vector<OverlayMac::DockItem> axDock;
+	CGRect axDockFrame = CGRectNull;
 	bool axHasCaret = false;
 	double axCaretX = 0, axCaretY = 0;
 	std::atomic<bool> wantIcons{ false }, wantDock{ false }, wantCaret{ false };
@@ -731,7 +733,7 @@ namespace
 						{
 							if (CFGetTypeID(url) == CFURLGetTypeID()) path = [(NSURL *)url path];
 						}
-						int size = int(r.size.width);
+						int size = int(r.size.width * OverlayMac::BackingScale()); // a pixel of the shape per pixel of the screen
 						out.push_back({ r.origin.x, r.origin.y, r.origin.x + r.size.width, r.origin.y + r.size.height,
 						                std::hash<std::string>{}(path ? path.UTF8String : ""), path ? IconShape(path, size, budget) : nullptr, size });
 						if (url) CFRelease(url);
@@ -749,12 +751,15 @@ namespace
 	void ReadDock(int dockPid)
 	{
 		std::vector<OverlayMac::DockItem> out;
+		CGRect frame = CGRectNull;
 		AXUIElementRef app = AXUIElementCreateApplication(dockPid);
 		AXUIElementSetMessagingTimeout(app, 0.5f);
 		CFTypeRef kids = Attr(app, kAXChildrenAttribute);
 		if (kids)
 			for (id list in (NSArray *)kids)
 			{
+				CGRect shape;
+				if (Bounds((AXUIElementRef)list, shape)) frame = CGRectUnion(frame, shape);
 				CFTypeRef items = Attr((AXUIElementRef)list, kAXChildrenAttribute);
 				if (!items) continue;
 				for (id item in (NSArray *)items)
@@ -778,6 +783,7 @@ namespace
 		CFRelease(app);
 		std::lock_guard lock(axLock);
 		axDock = std::move(out);
+		axDockFrame = frame;
 	}
 
 	void ReadCaret()
@@ -808,7 +814,8 @@ namespace
 	void AxLoop()
 	{
 		pthread_set_qos_class_self_np(QOS_CLASS_UTILITY, 0);
-		for (int pass = 0;; pass++)
+		Worker counted;
+		for (int pass = 0; !stopping; pass++)
 		{
 			@autoreleasepool
 			{
@@ -830,6 +837,7 @@ namespace
 				{
 					std::lock_guard lock(axLock);
 					axIcons.clear(), axDock.clear(), axHasCaret = false;
+					axDockFrame = CGRectNull;
 				}
 			}
 			usleep(250000);
@@ -883,6 +891,14 @@ std::vector<OverlayMac::DockItem> OverlayMac::DockItems()
 {
 	std::lock_guard lock(axLock);
 	return axDock;
+}
+
+bool OverlayMac::DockFrame(double &l, double &t, double &r, double &b)
+{
+	std::lock_guard lock(axLock);
+	if (CGRectIsNull(axDockFrame) || axDockFrame.size.width < 8 || axDockFrame.size.height < 8) return false;
+	l = axDockFrame.origin.x, t = axDockFrame.origin.y, r = l + axDockFrame.size.width, b = t + axDockFrame.size.height;
+	return true;
 }
 
 bool OverlayMac::Caret(double &x, double &y)
@@ -951,7 +967,8 @@ namespace
 	void ShotLoop()
 	{
 		pthread_set_qos_class_self_np(QOS_CLASS_UTILITY, 0);
-		for (;;)
+		Worker counted;
+		while (!stopping)
 		{
 			@autoreleasepool
 			{
@@ -1001,6 +1018,15 @@ bool OverlayMac::Grab(double l, double t, double w, double h, int pw, int ph, ui
 {
 	if (!window || !CGPreflightScreenCaptureAccess()) return false;
 	CGImageRef image = Capture(CGRectMake(l, t, w, h), CGWindowID(window.windowNumber));
+	bool ok = ScaledInto(image, pw, ph, out);
+	if (image) CGImageRelease(image);
+	return ok;
+}
+
+bool OverlayMac::GrabBelow(uint32_t below, double l, double t, double w, double h, int pw, int ph, uint32_t *out)
+{
+	if (!below || !CGPreflightScreenCaptureAccess()) return false;
+	CGImageRef image = Capture(CGRectMake(l, t, w, h), below);
 	bool ok = ScaledInto(image, pw, ph, out);
 	if (image) CGImageRelease(image);
 	return ok;
@@ -1191,259 +1217,4 @@ bool OverlayMac::Relaunch(const char *extraArg)
 	argv.push_back(nullptr);
 	pid_t pid;
 	return posix_spawn(&pid, path, nullptr, nullptr, argv.data(), *_NSGetEnviron()) == 0;
-}
-
-// --------------------------------------------------------------------------------------------- the settings window
-
-@interface TDPTFlipped : NSView
-@end
-@implementation TDPTFlipped
-- (BOOL)isFlipped
-{
-	return YES;
-}
-@end
-
-@interface TDPTSettings : NSObject <NSWindowDelegate, NSTextFieldDelegate>
-@end
-
-namespace
-{
-	NSPanel *settings;
-	TDPTSettings *settingsTarget;
-	std::deque<OverlayMac::Row> settingsRows; // a deque: the controls keep pointers (as tags) into it
-	struct Live
-	{
-		NSControl *control;
-		NSTextField *value;
-		size_t row;
-	};
-	std::vector<Live> settingsLive;
-	NSTimer *settingsTimer;
-}
-
-@implementation TDPTSettings
-- (void)changed:(NSControl *)sender
-{
-	auto &row = settingsRows[size_t(sender.tag)];
-	float value = 0;
-	if (row.kind == OverlayMac::Row::Toggle) value = ((NSButton *)sender).state == NSControlStateValueOn;
-	else if (row.kind == OverlayMac::Row::Slider) value = sender.floatValue;
-	else if (row.kind == OverlayMac::Row::Choice) value = float(((NSPopUpButton *)sender).indexOfSelectedItem);
-	if (row.set) row.set(value);
-	[self refresh];
-}
-- (void)pressed:(NSControl *)sender
-{
-	auto &row = settingsRows[size_t(sender.tag)];
-	if (row.press) row.press();
-	[self refresh];
-}
-- (void)controlTextDidEndEditing:(NSNotification *)note
-{
-	NSTextField *field = note.object;
-	auto &row = settingsRows[size_t(field.tag)];
-	if (row.setText) row.setText(field.stringValue.UTF8String);
-}
-- (void)refresh
-{
-	NSEvent *event = NSApp.currentEvent;
-	bool dragging = event && (event.type == NSEventTypeLeftMouseDragged || event.type == NSEventTypeLeftMouseDown);
-	for (auto &l : settingsLive)
-	{
-		auto &row = settingsRows[l.row];
-		if (row.kind == OverlayMac::Row::Note)
-		{
-			if (row.getText) ((NSTextField *)l.control).stringValue = @(row.getText().c_str());
-			continue;
-		}
-		if (row.kind == OverlayMac::Row::Text)
-		{
-			if (row.getText && l.control.currentEditor == nil) l.control.stringValue = @(row.getText().c_str());
-			continue;
-		}
-		float v = row.get ? row.get() : 0;
-		if (row.kind == OverlayMac::Row::Toggle) ((NSButton *)l.control).state = v != 0 ? NSControlStateValueOn : NSControlStateValueOff;
-		else if (row.kind == OverlayMac::Row::Choice) [(NSPopUpButton *)l.control selectItemAtIndex:NSInteger(v)];
-		else if (row.kind == OverlayMac::Row::Slider)
-		{
-			if (!dragging) l.control.floatValue = v;
-			if (l.value && row.format) l.value.stringValue = @(row.format(v).c_str());
-		}
-	}
-}
-- (BOOL)windowShouldClose:(NSWindow *)sender
-{
-	[sender orderOut:nil];
-	return NO;
-}
-@end
-
-namespace
-{
-	NSView *BuildTab(const OverlayMac::Tab &tab)
-	{
-		constexpr double width = 560, side = 20, valueWidth = 70, labelWidth = 190, rowHeight = 28;
-		TDPTFlipped *page = [[[TDPTFlipped alloc] initWithFrame:NSMakeRect(0, 0, width, 100)] autorelease];
-		double y = 12;
-		auto label = [&](NSString *text, NSRect at, bool bold) {
-			NSTextField *t = [NSTextField labelWithString:text];
-			t.frame = at;
-			t.font = bold ? [NSFont boldSystemFontOfSize:13] : [NSFont systemFontOfSize:12];
-			[page addSubview:t];
-			return t;
-		};
-		for (auto &source : tab.rows)
-		{
-			settingsRows.push_back(source);
-			size_t index = settingsRows.size() - 1;
-			auto &row = settingsRows.back();
-			NSString *text = @(row.label.c_str()), *tip = row.tip.empty() ? nil : @(row.tip.c_str());
-			using Row = OverlayMac::Row;
-			switch (row.kind)
-			{
-			case Row::Header:
-				y += 10;
-				label(text, NSMakeRect(side, y, width - 2 * side, 18), true);
-				y += 24;
-				break;
-			case Row::Note:
-			{
-				NSTextField *t = [NSTextField wrappingLabelWithString:row.getText ? @(row.getText().c_str()) : text];
-				t.font = [NSFont systemFontOfSize:12];
-				t.textColor = NSColor.secondaryLabelColor;
-				t.preferredMaxLayoutWidth = width - 2 * side;
-				auto size = [t.cell cellSizeForBounds:NSMakeRect(0, 0, width - 2 * side, 1000)];
-				t.frame = NSMakeRect(side, y, width - 2 * side, size.height);
-				[page addSubview:t];
-				if (row.getText) settingsLive.push_back({ t, nil, index });
-				y += size.height + 8;
-				break;
-			}
-			case Row::Toggle:
-			{
-				NSButton *b = [NSButton checkboxWithTitle:text target:settingsTarget action:@selector(changed:)];
-				b.frame = NSMakeRect(side, y, width - 2 * side, 22);
-				b.tag = NSInteger(index);
-				b.toolTip = tip;
-				[page addSubview:b];
-				settingsLive.push_back({ b, nil, index });
-				y += rowHeight - 4;
-				break;
-			}
-			case Row::Slider:
-			{
-				label(text, NSMakeRect(side, y + 3, labelWidth, 18), false).toolTip = tip;
-				NSSlider *s = [NSSlider sliderWithValue:row.lo minValue:row.lo maxValue:row.hi target:settingsTarget action:@selector(changed:)];
-				s.frame = NSMakeRect(side + labelWidth + 8, y, width - 2 * side - labelWidth - valueWidth - 16, 24);
-				s.tag = NSInteger(index);
-				s.toolTip = tip;
-				s.continuous = YES;
-				[page addSubview:s];
-				NSTextField *v = label(@"", NSMakeRect(width - side - valueWidth, y + 3, valueWidth, 18), false);
-				v.alignment = NSTextAlignmentRight;
-				v.font = [NSFont monospacedDigitSystemFontOfSize:12 weight:NSFontWeightRegular];
-				settingsLive.push_back({ s, v, index });
-				y += rowHeight;
-				break;
-			}
-			case Row::Choice:
-			{
-				label(text, NSMakeRect(side, y + 4, labelWidth, 18), false).toolTip = tip;
-				NSPopUpButton *p = [[[NSPopUpButton alloc] initWithFrame:NSMakeRect(side + labelWidth + 8, y, 220, 26) pullsDown:NO] autorelease];
-				for (auto &o : row.options) [p addItemWithTitle:@(o.c_str())];
-				p.target = settingsTarget;
-				p.action = @selector(changed:);
-				p.tag = NSInteger(index);
-				p.toolTip = tip;
-				[page addSubview:p];
-				settingsLive.push_back({ p, nil, index });
-				y += rowHeight + 2;
-				break;
-			}
-			case Row::Text:
-			{
-				label(text, NSMakeRect(side, y + 4, labelWidth, 18), false).toolTip = tip;
-				NSTextField *f = [NSTextField textFieldWithString:@""];
-				f.frame = NSMakeRect(side + labelWidth + 8, y, width - 2 * side - labelWidth - 8, 24);
-				f.tag = NSInteger(index);
-				f.delegate = settingsTarget;
-				f.toolTip = tip;
-				[page addSubview:f];
-				settingsLive.push_back({ f, nil, index });
-				y += rowHeight + 2;
-				break;
-			}
-			case Row::Button:
-			{
-				NSButton *b = [NSButton buttonWithTitle:text target:settingsTarget action:@selector(pressed:)];
-				[b sizeToFit];
-				b.frame = NSMakeRect(side, y, std::max(b.frame.size.width + 12, 120.0), 26);
-				b.tag = NSInteger(index);
-				b.toolTip = tip;
-				[page addSubview:b];
-				y += rowHeight + 2;
-				break;
-			}
-			}
-		}
-		page.frame = NSMakeRect(0, 0, width, y + 12);
-		NSScrollView *scroll = [[[NSScrollView alloc] initWithFrame:NSMakeRect(0, 0, width, 620)] autorelease];
-		scroll.hasVerticalScroller = YES;
-		scroll.drawsBackground = NO;
-		scroll.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-		scroll.documentView = page;
-		return scroll;
-	}
-}
-
-void OverlayMac::ToggleSettings(const std::vector<Tab> &tabs)
-{
-	@autoreleasepool
-	{
-		if (settings && settings.visible)
-		{
-			[settings orderOut:nil];
-			return;
-		}
-		if (!settings)
-		{
-			settingsTarget = [[TDPTSettings alloc] init];
-			settings = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, 600, 680)
-			                                      styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable
-			                                        backing:NSBackingStoreBuffered
-			                                          defer:NO];
-			settings.title = @"The Desktop Powder Toy";
-			settings.delegate = settingsTarget;
-			settings.floatingPanel = NO;
-			settings.becomesKeyOnlyIfNeeded = NO;
-			settings.hidesOnDeactivate = YES;      // it sits over the sim layer, so it mustn't stay over other apps
-			settings.level = NSFloatingWindowLevel + 1;
-			settings.minSize = NSMakeSize(600, 360);
-			settings.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorFullScreenAuxiliary;
-			settings.frameAutosaveName = @"TDPTSettings";
-			NSTabView *tabView = [[[NSTabView alloc] initWithFrame:settings.contentView.bounds] autorelease];
-			tabView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-			for (auto &tab : tabs)
-			{
-				NSTabViewItem *item = [[[NSTabViewItem alloc] initWithIdentifier:@(tab.name.c_str())] autorelease];
-				item.label = @(tab.name.c_str());
-				item.view = BuildTab(tab);
-				[tabView addTabViewItem:item];
-			}
-			[settings.contentView addSubview:tabView];
-			if (![settings setFrameUsingName:@"TDPTSettings"]) [settings center];
-			// hotkeys and the menu bar change the same things
-			settingsTimer = [[NSTimer timerWithTimeInterval:0.5 target:settingsTarget selector:@selector(refresh) userInfo:nil repeats:YES] retain];
-			[NSRunLoop.mainRunLoop addTimer:settingsTimer forMode:NSRunLoopCommonModes];
-		}
-		[settingsTarget refresh];
-		[NSApp activateIgnoringOtherApps:YES];
-		[settings makeKeyAndOrderFront:nil];
-	}
-}
-
-bool OverlayMac::SettingsOpen()
-{
-	return settings && settings.visible;
 }

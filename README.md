@@ -98,7 +98,7 @@ What's new
 |---|---|
 | ![Simulation window](https://raw.githubusercontent.com/PVCPC/The-Desktop-Powder-Toy/overlay/docs/overlay/simulation-window.png) | ![Display window](https://raw.githubusercontent.com/PVCPC/The-Desktop-Powder-Toy/overlay/docs/overlay/display-window.png) |
 
-Windows and macOS. Download it above, or build as below and run `powder.exe` (`powder` on the Mac; `tools/package-mac.sh` makes the app). The Mac version runs natively on Apple Silicon with Metal at the screen's full rate, and has the desktop physics and Fun features of Windows. Its settings are in a native window (hourglass in the menu bar, or Ctrl+Option+E), and TPT's own menus along the edges choose the elements; see [OVERLAY.md](OVERLAY.md) for the differences.
+Windows and macOS. Download it above, or build as below and run `powder.exe` (`powder` on the Mac; `tools/package-mac.sh` makes the app). The Mac version runs natively on Apple Silicon with Metal at the screen's full rate, from the same source as Windows, in Apple's look by default; see [OVERLAY.md](OVERLAY.md) for what differs.
 
 ---
 

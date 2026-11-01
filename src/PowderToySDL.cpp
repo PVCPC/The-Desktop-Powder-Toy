@@ -12,7 +12,7 @@
 #include "prefs/GlobalPrefs.h"
 #include <iostream>
 #include <algorithm>
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
 constexpr bool overlayResizable = true; // overlay:window's resizable sim view (blit)
 #else
 constexpr bool overlayResizable = false;
@@ -118,7 +118,7 @@ void blit(pixel *vid)
 	if (overlayWindowed)
 	{
 		OverlayTickUI();
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
 		// The resizable window shows the screen-sized sim's top-left corner; resizing it gives more or less room.
 		static Vec2<int> view{ 0, 0 };
 		static SDL_Renderer *viewFor = nullptr; // a remade renderer needs its logical size again

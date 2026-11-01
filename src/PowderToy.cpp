@@ -1,6 +1,9 @@
 #include "PowderToySDL.h"
 #include "Overlay.h"
 #include "OverlayWindows.h"
+#ifdef __APPLE__
+# include "OverlayMac.h"
+#endif
 #include "Format.h"
 #include "X86KillDenormals.h"
 #include "prefs/GlobalPrefs.h"
@@ -383,6 +386,7 @@ int Main(int argc, char *argv[])
 #if defined(_WIN32) || defined(__APPLE__)
 	overlayMode = overlayWindowed || !arguments["overlay"].has_value() || trueArg(arguments["overlay"]);
 # ifdef __APPLE__
+	OverlayMac::EarlySetup();
 	// the Overlay tab's "Runs as"
 	overlayWindowed = overlayWindowed || (!arguments["overlay"].has_value() && prefs.Get("Overlay.Windowed", false));
 # endif
