@@ -125,16 +125,21 @@ static void Step(Simulation *sim, int id, Ball &b)
 	b.vy += (sim->vy[ccy][ccx] - b.vy) * 0.04f;
 	b.vx *= 0.998f, b.vy *= 0.998f;
 
+	int other = 0; // another ball in the way, if that's what it hit
 	auto blocked = [&](int X, int Y, float &nx, float &ny) {
 		int n = 0;
 		nx = ny = 0;
+		other = 0;
 		for (auto &[j, o] : b.members)
 		{
 			int x = X + o.first, y = Y + o.second;
 			bool hit = x < 0 || y < 0 || x >= XRES || y >= YRES || sim->PixelWall(x, y) || sim->IsWallBlocking(x, y, PT_BALL);
 			if (!hit)
 				if (int r = sim->pmap[y][x]; r && !Mine(sim, r, id))
+				{
 					hit = !(SimulationData::CRef().elements[TYP(r)].Properties & TYPE_GAS);
+					if (TYP(r) == PT_BALL) other = sim->parts[ID(r)].tmp;
+				}
 			if (hit) nx -= o.first, ny -= o.second, n++;
 		}
 		float len = std::hypot(nx, ny);
@@ -161,13 +166,26 @@ static void Step(Simulation *sim, int id, Ball &b)
 				b.cx = tx, b.cy = ty;
 				continue;
 			}
-			// bounce off the surface, keep most of the sliding; rolling turns it
-			float vn = b.vx * nx + b.vy * ny;
-			if (vn < 0)
+			// another ball: knock it, both bounce by their sizes (pixel counts as mass)
+			auto hitBall = other ? balls.find(other) : balls.end();
+			if (hitBall != balls.end())
 			{
-				float e = std::abs(vn) > 1 ? 0.7f : 0; // small knocks just settle
+				auto &o = hitBall->second;
+				float rel = (b.vx - o.vx) * nx + (b.vy - o.vy) * ny;
+				if (rel < 0)
+				{
+					float ma = float(b.members.size()), mb = float(o.members.size());
+					float j = -1.8f * rel / (1 / ma + 1 / mb);
+					b.vx += j / ma * nx, b.vy += j / ma * ny;
+					o.vx -= j / mb * nx, o.vy -= j / mb * ny;
+				}
+			}
+			else if (float vn = b.vx * nx + b.vy * ny; vn < 0) // bounce off the surface; small knocks just settle
+			{
+				float e = std::abs(vn) > 1 ? 0.7f : 0;
 				b.vx -= (1 + e) * vn * nx, b.vy -= (1 + e) * vn * ny;
 			}
+			// keep most of the sliding; rolling turns it
 			float vt = b.vx * -ny + b.vy * nx;
 			b.vx -= vt * 0.01f * -ny, b.vy -= vt * 0.01f * nx; // rolling friction
 			b.angle += vt / b.radius;
