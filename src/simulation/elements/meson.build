@@ -198,6 +198,7 @@ simulation_elem_names = [
 	'BIRD',
 	'FISH',
 	'BALL',
+	'JOIN',
 ]
 
 simulation_elem_src = []
