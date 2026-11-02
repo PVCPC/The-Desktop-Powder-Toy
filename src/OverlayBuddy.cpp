@@ -26,8 +26,8 @@ namespace
 	Buddy *buddy = nullptr;
 	ByteString failed;            // the file that last failed to open: not retried until another is chosen
 	const uint32_t *frame = nullptr; // his newest frame, XRES x YRES premultiplied (null: nothing shown)
-	std::vector<uint8_t> ground;  // the sim around him, for tdpt_buddy_ground
-	std::vector<std::array<double, 5>> parts; // his body: x, y, radius, xv, yv (tdpt_buddy_parts)
+	std::vector<uint16_t> ground; // the sim around him, for tdpt_buddy_ground
+	std::vector<std::array<double, 6>> parts; // his body: x, y, radius, xv, yv, 1 burning (tdpt_buddy_parts)
 	bool Mine(int x, int y) // inside one of his own parts (his walls are not ground to himself)
 	{
 		for (auto &p : parts)
@@ -37,6 +37,22 @@ namespace
 	std::vector<float> air;       // and its air (velocity, pressure), for tdpt_buddy_air
 	bool held = false;            // a press that went to him, until its release
 	double heldX, heldY;          // where TPT's window last saw the mouse while held (it has the mouse captured)
+
+	// a blast in the sim at (x, y) sim pixels, power 1 about one of his game's bombs: pressure and a ball of fire
+	void Blast(Simulation *sim, double bx, double by, double power)
+	{
+		sim->petBuddy.scare = sim->currentTick + 120;
+		int R = std::max(2, int(4 * power)); // cells
+		for (int y = int(by) / CELL - R; y <= int(by) / CELL + R; y++)
+			for (int x = int(bx) / CELL - R; x <= int(bx) / CELL + R; x++)
+				if (double d = std::hypot(x - bx / CELL, y - by / CELL); x >= 0 && y >= 0 && x < XCELLS && y < YCELLS && d < R)
+					sim->pv[y][x] = std::min(256.0f, sim->pv[y][x] + float(40 * power * (1 - d / R)));
+		int F = int(8 * power); // pixels
+		for (int y = int(by) - F; y <= int(by) + F; y++)
+			for (int x = int(bx) - F; x <= int(bx) + F; x++)
+				if (x >= 0 && y >= 0 && x < XRES && y < YRES && std::hypot(x - bx, y - by) < F && sim->rng.chance(1, 3))
+					sim->create_part(-1, x, y, PT_FIRE);
+	}
 }
 
 bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
@@ -62,7 +78,8 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
 	// what he stands on: windows and icons (not their holes), powders and solids, and walls a powder can't pass (1);
 	// liquids as 2 + a quarter of their weight (water 30), which he floats in, acid as 31, VOID and black holes as 30,
 	// portals in as 29; then how hot it is (0x20 60 C+, 0x40
-	// 400 C+: sets him on fire, 0x60 -50 C or colder) and 0x80 a spark (shocks him)
+	// 400 C+: sets him on fire, 0x60 -50 C or colder), 0x80 a spark or electron (shocks him), 0x100 caustic gas, radiation
+	// or virus (hurts), 0x200 DEST, BOMB or a singularity (blows up on him); light (PHOT) warms him
 	int32_t r[4];
 	tdpt_buddy_area(buddy, r);
 	r[2] = std::clamp(r[2], 0, XRES * 2), r[3] = std::clamp(r[3], 0, YRES * 2);
@@ -75,19 +92,25 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
 		{
 			int p = sim->pmap[y][x];
 			auto &c = ground[size_t(y - r[1]) * r[2] + x - r[0]];
-			if ((sim->PixelWall(x, y) && !sim->HoleAt(x, y) && !Mine(x, y)) || sim->IsWallBlocking(x, y, PT_DUST)) c = 1;
-			else if (p && (elements[TYP(p)].Properties & (TYPE_PART | TYPE_SOLID))) c = 1;
-			else if (p && (elements[TYP(p)].Properties & TYPE_LIQUID)) c = uint8_t(2 + (std::clamp(elements[TYP(p)].Weight, 0, 100) + 2) / 4);
+			if (int e = TYP(sim->photons[y][x]); e == PT_ELEC) c |= 0x80;
+			else if (e == PT_NEUT || e == PT_PROT) c |= 0x100;
+			else if (e == PT_PHOT && !(c & 0x60)) c |= 0x20;
+			if ((sim->PixelWall(x, y) && !sim->HoleAt(x, y) && !Mine(x, y)) || sim->IsWallBlocking(x, y, PT_DUST)) c |= 1;
+			else if (p && (elements[TYP(p)].Properties & (TYPE_PART | TYPE_SOLID))) c |= 1;
+			else if (p && (elements[TYP(p)].Properties & TYPE_LIQUID)) c |= uint16_t(2 + (std::clamp(elements[TYP(p)].Weight, 0, 100) + 2) / 4);
 			if (!p) continue;
-			if (TYP(p) == PT_ACID) c = 31;
-			if (TYP(p) == PT_VOID || TYP(p) == PT_BHOL) c = 30;
+			if (TYP(p) == PT_ACID) c = (c & ~0x1F) | 31;
+			if (TYP(p) == PT_VOID || TYP(p) == PT_BHOL) c = (c & ~0x1F) | 30;
 			if (TYP(p) == PT_PRTI)
 			{
-				c = 29;
+				c = (c & ~0x1F) | 29;
 				channel = sim->parts[ID(p)].tmp;
 			}
-			auto t = sim->parts[ID(p)].temp - 273.15f;
-			c |= t >= 400 ? 0x40 : t >= 60 ? 0x20 : t <= -50 ? 0x60 : 0;
+			int t = TYP(p);
+			if (t == PT_CAUS || t == PT_VIRS || t == PT_VRSS || t == PT_VRSG) c |= 0x100;
+			if (t == PT_DEST || t == PT_BOMB || t == PT_SING) c |= 0x200;
+			auto temp = sim->parts[ID(p)].temp - 273.15f;
+			if (int f = temp >= 400 ? 0x40 : temp >= 60 ? 0x20 : temp <= -50 ? 0x60 : 0) c = uint16_t((c & ~0x60) | f);
 			if (TYP(p) == PT_SPRK) c |= 0x80;
 		}
 	tdpt_buddy_ground(buddy, r, ground.data());
@@ -123,21 +146,7 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
 	tdpt_buddy_gravity(buddy, gx, gy);
 	// the game's own explosions: a TPT blast there (pressure, power 1 about a bomb's, and a ball of fire)
 	double booms[16 * 3];
-	for (size_t i = 0, n = tdpt_buddy_booms(buddy, booms, 16); i < n; i++)
-	{
-		double bx = booms[i * 3], by = booms[i * 3 + 1], power = booms[i * 3 + 2];
-		sim->petBuddy.scare = sim->currentTick + 120;
-		int R = std::max(2, int(4 * power)); // cells
-		for (int y = int(by) / CELL - R; y <= int(by) / CELL + R; y++)
-			for (int x = int(bx) / CELL - R; x <= int(bx) / CELL + R; x++)
-				if (double d = std::hypot(x - bx / CELL, y - by / CELL); x >= 0 && y >= 0 && x < XCELLS && y < YCELLS && d < R)
-					sim->pv[y][x] = std::min(256.0f, sim->pv[y][x] + float(40 * power * (1 - d / R)));
-		int F = int(8 * power); // pixels
-		for (int y = int(by) - F; y <= int(by) + F; y++)
-			for (int x = int(bx) - F; x <= int(bx) + F; x++)
-				if (x >= 0 && y >= 0 && x < XRES && y < YRES && std::hypot(x - bx, y - by) < F && sim->rng.chance(1, 3))
-					sim->create_part(-1, x, y, PT_FIRE);
-	}
+	for (size_t i = 0, n = tdpt_buddy_booms(buddy, booms, 16); i < n; i++) Blast(sim, booms[i * 3], booms[i * 3 + 1], booms[i * 3 + 2]);
 	frame = held ? tdpt_buddy_frame(buddy, heldX, heldY, XRES, YRES) : tdpt_buddy_frame(buddy, mx, my, XRES, YRES);
 	if (!frame) return true;
 	// his premultiplied pixels over the frame's
@@ -165,10 +174,14 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 		return;
 	}
 	parts.resize(8);
+	static_assert(sizeof(parts[0]) == 6 * sizeof(double));
 	parts.resize(tdpt_buddy_parts(buddy, parts[0].data(), parts.size()));
 	if (parts.size() && GlobalPrefs::Ref().Get("Overlay.Fun.BuddyPets", false) && std::isfinite(parts[0][0] + parts[0][1]))
 		sim->petBuddy.x = int(parts[0][0]), sim->petBuddy.y = int(parts[0][1]), sim->petBuddy.speed = float(std::hypot(parts[0][3], parts[0][4]));
-	// he pushes the air he moves through (0.1 of his speed) and warms what touches him, slowly, toward 37 C
+	// he pushes the air he moves through (0.1 of his speed) and warms what touches him, slowly, toward 37 C; and what
+	// touches him reacts: acid is used up on him, DEST and bombs go off, a spark runs through him into metal he
+	// touches; and when he burns, so does what is next to him
+	std::vector<int> touching;
 	for (auto &p : parts)
 	{
 		if (!std::isfinite(p[0] + p[1] + p[2] + p[3] + p[4])) continue;
@@ -178,8 +191,38 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 		for (int y = std::max(0, int(p[1] - p[2]) - 2); y <= std::min(YRES - 1, int(p[1] + p[2]) + 2); y++)
 			for (int x = std::max(0, int(p[0] - p[2]) - 2); x <= std::min(XRES - 1, int(p[0] + p[2]) + 2); x++)
 				if (int q = sim->pmap[y][x]; q && std::hypot(x + 0.5 - p[0], y + 0.5 - p[1]) <= p[2] + 2)
+				{
 					sim->parts[ID(q)].temp += (310.15f - sim->parts[ID(q)].temp) * 0.002f;
+					touching.push_back(ID(q));
+				}
+		for (int k = 0; p[5] != 0 && k < 2; k++)
+		{
+			double a = sim->rng.uniform01() * 6.2832, d = p[2] + 1 + sim->rng.uniform01() * 2;
+			int x = int(p[0] + std::cos(a) * d), y = int(p[1] + std::sin(a) * d);
+			if (x >= 0 && y >= 0 && x < XRES && y < YRES && !sim->pmap[y][x] && sim->rng.chance(1, 3)) sim->create_part(-1, x, y, PT_FIRE);
+		}
 	}
+	auto &elements = SimulationData::CRef().elements;
+	bool spark = false;
+	for (int i : touching)
+	{
+		int t = sim->parts[i].type;
+		if (t == PT_SPRK) spark = true;
+		if (t == PT_ACID && sim->rng.chance(1, 8)) sim->kill_part(i);
+		if (t == PT_DEST || t == PT_BOMB || t == PT_SING)
+		{
+			float x = sim->parts[i].x, y = sim->parts[i].y;
+			sim->kill_part(i);
+			Blast(sim, x, y, 0.6);
+		}
+	}
+	for (int i : touching)
+		if (int t = sim->parts[i].type; spark && t != PT_SPRK && (elements[t].Properties & PROP_CONDUCTS) && sim->parts[i].life == 0)
+		{
+			sim->part_change_type(i, int(sim->parts[i].x + 0.5f), int(sim->parts[i].y + 0.5f), PT_SPRK);
+			sim->parts[i].life = 4;
+			sim->parts[i].ctype = t;
+		}
 	std::vector<OverlayWall> mine;
 	for (auto &p : parts)
 	{

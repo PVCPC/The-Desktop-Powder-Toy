@@ -111,10 +111,10 @@ fn open(path: &str, w: u32, h: u32) -> Result<Game, String> {
 // The sim around him, so he stands on it, floats in it and burns in it: one byte per sim pixel over rect (x, y, w, h sim
 // pixels, which are his stage pixels). Low 5 bits: 0 nothing, 1 solid for him, 2 + w/4 liquid of TPT weight w, ACID,
 // PORTAL, EATER; then
-// WARM, HOT or COLD (2 bits), and SPARK. Rect (x, y, w, h sim pixels, which are his stage pixels). TDPT fills it each frame with the part he asks for (want).
+// WARM, HOT or COLD (2 bits), SPARK, HURT and BANG. Rect (x, y, w, h sim pixels, which are his stage pixels). TDPT fills it each frame with the part he asks for (want).
 struct Ground {
     rect: [i32; 4],
-    cells: Vec<u8>,
+    cells: Vec<u16>,
     want: [i32; 4],
     last: (f64, f64), // his body, last frame
     air_rect: [i32; 4], // in sim cells (CELL pixels)
@@ -127,36 +127,39 @@ struct Ground {
     exit: Option<(f64, f64)>,     // where the portal in his reach comes out
     jumped: u32,                  // frames since he went through one (not straight back in)
     eaten: bool,                  // swallowed this frame: he comes back at the top
-    parts: Vec<[f64; 5]>,         // his parts after this frame: x, y, radius, xv, yv (for the sim to feel him)
+    parts: Vec<[f64; 6]>,         // his parts after this frame: x, y, radius, xv, yv, 1 burning (for the sim to feel him)
+    bang: Option<(f64, f64)>,     // a part touching something that blows up on him: the game's explode() there
     booms: Vec<[f64; 3]>,         // the game's explosions since TDPT last asked: x, y, power (1 = its bomb)
     game_grav: f64,               // the game's grav this frame, before that
 }
 
-const WARM: u8 = 0x20; // 60 C and up: hurts
-const HOT: u8 = 0x40; // 400 C and up: sets him on fire
-const COLD: u8 = 0x60; // -50 C and down: slows him, hurts
-const SPARK: u8 = 0x80; // electricity: shocks him
-const ACID: u8 = 31; // a kind: acid, a liquid (TPT weight 10) that eats him
-const EATER: u8 = 30; // a kind: VOID or a black hole, which swallows him (he comes back at the top)
-const PORTAL: u8 = 29; // a kind: a portal in, which moves him to its way out (Ground::exit)
+const WARM: u16 = 0x20; // 60 C and up: hurts
+const HOT: u16 = 0x40; // 400 C and up: sets him on fire
+const COLD: u16 = 0x60; // -50 C and down: slows him, hurts
+const SPARK: u16 = 0x80; // electricity (a spark or an electron): shocks him
+const HURT: u16 = 0x100; // caustic gas, radiation, virus: hurts like acid
+const BANG: u16 = 0x200; // DEST, BOMB, a singularity: blows up on him
+const ACID: u16 = 31; // a kind: acid, a liquid (TPT weight 10) that eats him
+const EATER: u16 = 30; // a kind: VOID or a black hole, which swallows him (he comes back at the top)
+const PORTAL: u16 = 29; // a kind: a portal in, which moves him to its way out (Ground::exit)
 const PARTS: [&str; 6] = ["body", "head", "lArm", "rArm", "lLeg", "rLeg"];
 // where his parts sit around the body when he stands (from the game), to put him back together
 const POSE: [(f64, f64); 6] = [(0.0, 0.0), (0.0, -39.4), (-22.1, -10.2), (22.1, -10.2), (-15.1, 32.0), (15.0, 32.0)];
 
 impl Default for Ground {
     fn default() -> Self {
-        Self { rect: [0; 4], cells: Vec::new(), want: [0; 4], last: (400.0, 300.0), air_rect: [0; 4], air: Vec::new(), cell: 4, before: ([0; 4], Vec::new()), calm: 0, zap: None, gravity: (0.0, 1.0), game_grav: 1.0, exit: None, jumped: 99, eaten: false, parts: Vec::new(), booms: Vec::new() }
+        Self { rect: [0; 4], cells: Vec::new(), want: [0; 4], last: (400.0, 300.0), air_rect: [0; 4], air: Vec::new(), cell: 4, before: ([0; 4], Vec::new()), calm: 0, zap: None, gravity: (0.0, 1.0), game_grav: 1.0, exit: None, jumped: 99, eaten: false, parts: Vec::new(), bang: None, booms: Vec::new() }
     }
 }
 
 impl Ground {
     fn kind(&self, x: i32, y: i32) -> u8 {
-        self.cell(x, y) & 0x1F
+        (self.cell(x, y) & 0x1F) as u8
     }
 
     // what a circle touches (within a pixel): 1 << WARM, HOT, COLD (as 1, 2, 3) for each one there, SPARK, 1 for
-    // acid, 0x10 a portal, 0x20 an eater
-    fn touch(&self, x: f64, y: f64, r: f64) -> u8 {
+    // acid, 0x10 a portal, 0x20 an eater, HURT, BANG
+    fn touch(&self, x: f64, y: f64, r: f64) -> u16 {
         let r = r + 1.0;
         let mut seen = 0;
         for py in (y - r).floor() as i32..=(y + r).ceil() as i32 {
@@ -164,15 +167,15 @@ impl Ground {
                 let (dx, dy) = (px as f64 + 0.5 - x, py as f64 + 0.5 - y);
                 if dx * dx + dy * dy <= r * r {
                     let c = self.cell(px, py);
-                    seen |= (1 << (c >> 5 & 3)) & 0x0E | c & SPARK | (c & 0x1F == ACID) as u8;
-                    seen |= (c & 0x1F == PORTAL) as u8 * 0x10 | (c & 0x1F == EATER) as u8 * 0x20;
+                    seen |= (1 << (c >> 5 & 3)) & 0x0E | c & (SPARK | HURT | BANG) | (c & 0x1F == ACID) as u16;
+                    seen |= (c & 0x1F == PORTAL) as u16 * 0x10 | (c & 0x1F == EATER) as u16 * 0x20;
                 }
             }
         }
         seen
     }
 
-    fn cell(&self, x: i32, y: i32) -> u8 {
+    fn cell(&self, x: i32, y: i32) -> u16 {
         let [rx, ry, w, h] = self.rect;
         let (u, v) = (x - rx, y - ry);
         if u >= 0 && v >= 0 && u < w && v < h { self.cells.get((v * w + u) as usize).copied().unwrap_or(0) } else { 0 }
@@ -228,9 +231,9 @@ impl Ground {
                 let (dx, dy) = (px as f64 + 0.5 - x, py as f64 + 0.5 - y);
                 if dx * dx + dy * dy <= r * r {
                     all += 1;
-                    if let c @ 2.. = self.kind(px, py) {
+                    if let c @ (2..=28 | 31) = self.kind(px, py) {
                         n += 1;
-                        w += if c == ACID { 10.0 } else { (c - 2) as f64 * 4.0 };
+                        w += if c as u16 == ACID { 10.0 } else { (c - 2) as f64 * 4.0 };
                     }
                 }
             }
@@ -343,7 +346,10 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
             let touch = g.touch(x, y, r);
             portal |= touch & 0x10 != 0;
             g.eaten |= touch & 0x20 != 0;
-            warm += (touch & 1) as u32 * 2; // acid hurts twice as much as heat
+            warm += (touch & 1 != 0 || touch & HURT != 0) as u32 * 2; // acid, caustic gas, radiation hurt twice as much as heat
+            if touch & BANG != 0 {
+                g.bang = Some((x, y));
+            }
             hot |= touch & 1 << (HOT >> 5) != 0;
             warm += (touch & (1 << (WARM >> 5) | 1 << (HOT >> 5)) != 0) as u32;
             doused |= touch & 1 << (HOT >> 5) == 0 && g.wet(x, y, r).0 > 0.3;
@@ -371,7 +377,8 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
                 }
             }
             standing |= part.ends_with("Leg") && out.is_some_and(|(_, ny)| ny < -0.5);
-            g.parts.push([x, y, r, xv, yv]);
+            let fire = v.get(&format!("{part}.onFire")) == Value::Bool(true);
+            g.parts.push([x, y, r, xv, yv, fire as u8 as f64]);
             let reach = r + 64.0 + xv.abs().max(yv.abs()) * 2.0; // what he can touch by the next frame
             bbox = [bbox[0].min(x - reach), bbox[1].min(y - reach), bbox[2].max(x + reach), bbox[3].max(y + reach)];
         }
@@ -533,6 +540,12 @@ fn frame(b: &mut Game, dt_ms: f64, mx: f64, my: f64, out: &mut [u32]) -> bool {
         // ponytail: the game's shock() also lights its toys near the mouse (it was the mouse's zapper); fine for now
         if let Some((x, y)) = g.zap.take() {
             p.call_root_method("shock", vec![x.into(), y.into()]).ok();
+        }
+        if g.calm == 0 && let Some((x, y)) = g.bang.take() {
+            OURS.store(true, Ordering::Relaxed);
+            p.call_root_method("explode", vec![x.into(), y.into(), 0.6.into()]).ok();
+            OURS.store(false, Ordering::Relaxed);
+            g.calm = 15;
         }
         if std::mem::take(&mut g.eaten) {
             p.call_root_method("setBuddyXY", vec![(b.size.0 as f64 / 2.0).into(), 100.into()]).ok();
@@ -865,11 +878,11 @@ pub unsafe extern "C" fn tdpt_buddy_area(b: *mut Buddy, rect: *mut i32) {
     unsafe { std::ptr::copy_nonoverlapping(want.as_ptr(), rect, 4) };
 }
 
-/// The sim over rect (x, y, w, h): w * h bytes, rows top down, as in Ground
+/// The sim over rect (x, y, w, h): w * h cells, rows top down, as in Ground
 /// # Safety
 /// b is from tdpt_buddy_open; rect has 4; cells has w * h.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tdpt_buddy_ground(b: *mut Buddy, rect: *const i32, cells: *const u8) {
+pub unsafe extern "C" fn tdpt_buddy_ground(b: *mut Buddy, rect: *const i32, cells: *const u16) {
     let b = unsafe { &mut *b };
     let rect: [i32; 4] = unsafe { std::ptr::read(rect as *const [i32; 4]) };
     let n = (rect[2].max(0) as usize) * (rect[3].max(0) as usize);
@@ -921,15 +934,15 @@ pub unsafe extern "C" fn tdpt_buddy_portal(b: *mut Buddy, has: i32, x: f64, y: f
     }
 }
 
-/// His body parts (up to max): x, y, radius, xv, yv each, stage pixels (per game frame); how many
+/// His body parts (up to max): x, y, radius, xv, yv, 1 burning each, stage pixels (per game frame); how many
 /// # Safety
-/// b is from tdpt_buddy_open; out has room for 5 * max.
+/// b is from tdpt_buddy_open; out has room for 6 * max.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tdpt_buddy_parts(b: *mut Buddy, out: *mut f64, max: usize) -> usize {
     let b = unsafe { &mut *b };
     let Ok(g) = b.ground.lock() else { return 0 };
     let n = g.parts.len().min(max);
-    unsafe { std::ptr::copy_nonoverlapping(g.parts.as_ptr() as *const f64, out, n * 5) };
+    unsafe { std::ptr::copy_nonoverlapping(g.parts.as_ptr() as *const f64, out, n * 6) };
     n
 }
 
@@ -1009,7 +1022,7 @@ mod tests {
     #[test]
     fn ground_push_out() {
         // a floor from y = 100 down
-        let g = super::Ground { rect: [0, 0, 200, 200], cells: (0..200 * 200).map(|i| (i / 200 >= 100) as u8).collect(), ..Default::default() };
+        let g = super::Ground { rect: [0, 0, 200, 200], cells: (0..200 * 200).map(|i| (i / 200 >= 100) as u16).collect(), ..Default::default() };
         let (mut x, mut y, mut xv, mut yv) = (50.0, 95.0, 1.0, 6.0);
         let n = g.push_out(&mut x, &mut y, &mut xv, &mut yv, 10.0).expect("in the floor");
         assert!(n.1 < -0.9 && y <= 90.5 && y > 88.0, "{n:?} {y}");
@@ -1033,7 +1046,7 @@ mod tests {
         let fill = |game: &super::Game| {
             let mut g = game.ground.lock().unwrap();
             let r = g.want;
-            g.cells = (0..r[2] * r[3]).map(|i| { let (x, y) = (r[0] + i % r[2], r[1] + i / r[2]); (y >= 400 && (300..900).contains(&x)) as u8 }).collect();
+            g.cells = (0..r[2] * r[3]).map(|i| { let (x, y) = (r[0] + i % r[2], r[1] + i / r[2]); (y >= 400 && (300..900).contains(&x)) as u16 }).collect();
             g.rect = r;
         };
         game.player.lock().unwrap().call_root_method("setBuddyXY", vec![600.into(), 200.into()]).unwrap();
@@ -1155,7 +1168,7 @@ mod tests {
         let mut game = super::open(path.to_str().unwrap(), 1280, 720).unwrap();
         let mut out = vec![0u32; 1280 * 720];
         while !super::frame(&mut game, 25.0, 0.0, 0.0, &mut out) {}
-        let floor = |game: &super::Game, c: u8| {
+        let floor = |game: &super::Game, c: u16| {
             let mut g = game.ground.lock().unwrap();
             let r = g.want;
             g.cells = (0..r[2] * r[3]).map(|i| if r[1] + i / r[2] >= 600 { c } else { 0 }).collect();
@@ -1185,7 +1198,7 @@ mod tests {
         let mut game = super::open(path.to_str().unwrap(), 1280, 720).unwrap();
         let mut out = vec![0u32; 1280 * 720];
         while !super::frame(&mut game, 25.0, 0.0, 0.0, &mut out) {}
-        let floor = |game: &super::Game, c: u8| {
+        let floor = |game: &super::Game, c: u16| {
             let mut g = game.ground.lock().unwrap();
             let r = g.want;
             g.cells = (0..r[2] * r[3]).map(|i| if r[1] + i / r[2] >= 600 { c } else { 0 }).collect();
@@ -1232,6 +1245,36 @@ mod tests {
         assert!(matches!(e, Value::Number(e) if e < -2.0), "acid didn't hurt: {e:?}");
     }
 
+    // caustic gas upsets him; a BOMB under him blows him up
+    #[test]
+    fn hurt_and_bang() {
+        let Some(path) = std::env::var_os("TDPT_BUDDY_SWF") else { return };
+        let mut game = super::open(path.to_str().unwrap(), 1280, 720).unwrap();
+        let mut out = vec![0u32; 1280 * 720];
+        while !super::frame(&mut game, 25.0, 0.0, 0.0, &mut out) {}
+        let n = |g: &super::Game, k: &str| match g.player.lock().unwrap().get_root_variable(k) { Value::Number(v) => v, o => panic!("{k} {o:?}") };
+        let floor = |game: &super::Game, c: u16| {
+            let mut g = game.ground.lock().unwrap();
+            let r = g.want;
+            g.cells = (0..r[2] * r[3]).map(|i| if r[1] + i / r[2] >= 600 { c } else { 0 }).collect();
+            g.rect = r;
+        };
+        for _ in 0..60 {
+            floor(&game, 1 | super::HURT);
+            super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+        }
+        let e = n(&game, "emotion");
+        assert!(e < -2.0, "caustic gas didn't hurt: {e}");
+        let mut top = f64::MAX;
+        for _ in 0..30 {
+            floor(&game, 1 | super::BANG);
+            super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+            top = top.min(n(&game, "body.y"));
+        }
+        println!("hurt: emotion {e:.0}; bang: body up to {top:.0}");
+        assert!(top < 500.0, "the bomb didn't throw him: {top}");
+    }
+
     // TPT gravity off: he hangs in the air; sideways: he falls sideways
     #[test]
     fn follows_tpt_gravity() {
@@ -1264,7 +1307,7 @@ mod tests {
         let mut out = vec![0u32; 1280 * 720];
         while !super::frame(&mut game, 25.0, 0.0, 0.0, &mut out) {}
         let n = |g: &super::Game, k: &str| match g.player.lock().unwrap().get_root_variable(k) { Value::Number(v) => v, o => panic!("{k} {o:?}") };
-        let floor = |game: &super::Game, c: u8| {
+        let floor = |game: &super::Game, c: u16| {
             let mut g = game.ground.lock().unwrap();
             let r = g.want;
             g.cells = (0..r[2] * r[3]).map(|i| { let (x, y) = (r[0] + i % r[2], r[1] + i / r[2]); if y >= 600 && x > 700 { c } else { 0 } }).collect();

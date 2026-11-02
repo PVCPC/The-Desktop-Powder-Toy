@@ -77,6 +77,9 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
 - [x] **Portals / void / black holes:** PRTI/PRTO carry him, VOID and black holes pull him in (and respawn).
       Done: PRTI is kind 29 (TDPT finds the PRTO on its channel and sends it), VOID/BHOL kind 30 (he comes back at
       the top middle via the game's setBuddyXY). NBHL's pull comes through the Newtonian gravity.
+- [x] **Other elements:** caustic gas, virus, neutrons and protons hurt him like acid; electrons shock him like sparks;
+      light (PHOT) warms him; DEST, BOMB and singularities blow up on him (the game's explode, plus a TPT blast).
+      Ground cells are 16 bits now (0x100 hurts, 0x200 blows up). VOID and portals no longer count as liquids.
 
 ## 3. Buddy -> Sim (the sim feels him)
 - [x] His body parts are moving solid shapes in the sim (like windows are): sand piles on his head, falls off his shoulders.
@@ -88,6 +91,9 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
       Done: 0.1 of each part's speed goes into the air cell it is in, every sim tick.
 - [x] His temperature: he warms what he touches a little (body heat), so snow melts on him slowly.
       Done: anything within 2 px of a part moves 0.2% a tick toward 37 C.
+- [x] **Reactions on his body:** acid is used up on him; a spark touching him runs through him into any conductor he
+      touches; while he burns, fire spreads from him into the sim. Checked in TDPT: 15 acid drops used up, a dropped
+      BOMB threw him across the screen, METL on his far side sparked the tick after its partner was sparked.
 - [x] The game's own projectiles and items (grenades, bombs) become sim events: their explosions make a TPT blast too.
       Done: a hook on the game's explode() sends its spot to TDPT (tdpt_buddy_booms): pressure 40 x power over
       4 x power cells and a ball of fire. TPT's own blasts that call explode() are not sent back (no loop).
