@@ -366,7 +366,8 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 	// the harder it hits (a small C-4 charge peaks ~6 in its own cells)
 	static std::vector<float> lastPressure;
 	lastPressure.resize(size_t(XCELLS) * YCELLS, 0.f);
-	// and shakes the windows it hits, by the biggest jump in pressure on or just around them
+	// and shakes the windows it hits, by the biggest jump in pressure on or just around them; only a blast's (over 3,
+	// as for holes): the mouse breeze or Buddy stirring the air reaches about 2 with jumps just over 1
 	overlayKicks.clear();
 	if (overlayFeel.shake > 0)
 		for (auto &w : walls)
@@ -374,7 +375,7 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 			float kick = 0;
 			for (int cy = std::max(0, w.y0 / CELL - 1); cy < std::min(YCELLS, w.y1 / CELL + 2); cy++)
 				for (int cx = std::max(0, w.x0 / CELL - 1); cx < std::min(XCELLS, w.x1 / CELL + 2); cx++)
-					kick = std::max(kick, sim->pv[cy][cx] - lastPressure[size_t(cy) * XCELLS + cx]);
+					if (sim->pv[cy][cx] > 3) kick = std::max(kick, sim->pv[cy][cx] - lastPressure[size_t(cy) * XCELLS + cx]);
 			if (w.id && kick > 1) overlayKicks[w.id] = std::max(overlayKicks[w.id], kick);
 		}
 	if (overlayFeel.destructible && overlayFeel.blast > 0)
