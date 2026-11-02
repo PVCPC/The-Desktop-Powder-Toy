@@ -42,7 +42,13 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
       a real mouse to try.
 - [x] Saves: the game's save (money, purchases) is a file in TPT's data folder, `buddy/`, written when he's turned
       off or TDPT closes.
-- [ ] Sound (none yet).
+- [ ] Sound (none yet): the game's own sounds through TDPT's audio (Ruffle's audio backend), with a volume / mute
+      row in the Buddy tab, off when TDPT is muted.
+- [ ] Saves also every few minutes (now only when he's turned off or TDPT closes: a crash loses money and purchases).
+- [ ] Clicks in overlay:window: dragging him, the Fist and right-click menus are untested there (window-relative
+      mouse while TPT has it captured).
+- [ ] Buddy tab next to Fun (it sits after Welcome now).
+- [ ] The game's zapper: shock() also lights its toys near the mouse, not only near the spark that touched him.
 - [x] Buddy tab (shown once his SWF is chosen in Fun): on/off + Choose SWF, size 25-300 % (the game's own
       __nativeSetBuddySize, so independent of TDPT's pixel size), active-window ledges, smoothing, speech bubbles and
       their size, toys at once (0 no limit), pets, wet/frosty. Prefs Overlay.Buddy.*, sent with tdpt_buddy_settings.
@@ -122,8 +128,29 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
       Done (Fun "Buddy gets wet and frosty"): cool liquid darkens a part for 10 s, -50 C or colder frosts it pale blue; fire dries him.
 - [ ] Wallpaper and window marks from his fire and acid, like the rest of the sim.
 
+## 4b. Elements he doesn't react to yet
+- [ ] Clone (CLNE, PCLN, BCLN, ACLN...): touching him copies nothing; decide (it can't clone him, so: solid, as now?).
+- [ ] Freezing solid: water that turns to ice around him should hold him (he's encased until it melts or he's
+      knocked out), not only slow him.
+- [ ] Room-temperature gases (GAS, CO2, OXYG, HYGN, smoke...): they pass through him; gases should drift around him
+      and push him a little like air, flammable ones catch from his fire.
+- [ ] Go through TPT's whole element list once and note each one's effect on him (or none), so nothing is missed.
+
 ## 5. Checks before merging into main
 - [x] Off = TDPT exactly as before (the one-core bench and acid checksums unchanged; checked 2026-11-02).
 - [ ] Game replay checks still match with the bridge loaded (no interaction while the sim is empty).
 - [ ] No SWF in git, release zips or caches; the user's file is only read, never copied.
 - [ ] Windows first, then the Mac (native arm64 Ruffle).
+- [ ] Off = TDPT exactly as before again after everything above (one-core bench and acid checksums).
+- [ ] Shipping size (section 0) measured and written in the release notes.
+- [ ] Welcome tab / README: what Buddy is, that each user picks their own copy of the game's SWF (none shipped).
+- [ ] Clean up: delete buddy/examples/zz_dump.rs (never committed) and the bytecode dumps used to write the bridge.
+
+## 6. Mac
+- [ ] Build buddy/ (Rust, Ruffle arm64) in the Mac build on the mini, and check the download size.
+- [ ] Choose SWF: the Mac file picker.
+- [ ] Right-click menus with submenus (the game's Items menu) on the Mac.
+- [ ] Fonts for the game's text (the Windows build finds them from the system).
+- [ ] OverlayWindows::WorkBottom (the Dock / bottom of the screen) and ActiveEdges (the front window's edges) on
+      the Mac; both are stubs now, so he has no taskbar floor and no window ledges there.
+- [ ] All the tests and a TDPT run on the mini, as on Windows.
