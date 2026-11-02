@@ -12,12 +12,15 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
 `setBuddyXY`, `cam` / `camx camy camz` (the game's camera), `fistDrag` (being dragged), `emotion`, `cash`, `item`.
 
 ## 0. Decisions first
-- [ ] **Where Ruffle runs.** Interactive Buddy Native builds Ruffle for 32-bit Windows so its maths matches Adobe's
+- [x] **Where Ruffle runs.** Interactive Buddy Native builds Ruffle for 32-bit Windows so its maths matches Adobe's
       player exactly; TDPT is 64-bit, so the two can't be linked into one program as they are. Options:
       - A. Buddy as a helper process (32-bit, exact), sharing memory with TDPT: frames, body parts, forces. Best for exactness.
       - B. Ruffle built 64-bit into TDPT as a Rust library. Simpler to ship, and the only option on the Mac (arm64),
         but the game's physics may drift slightly from Adobe's.
-      Pick one after a quick test: run the replay checks (`physics-test-*.swf`) on a 64-bit Ruffle and count differences.
+      **Tested 2026-11-02: B.** The 160-tick Adobe replay on 64-bit Ruffle: 5044 of 5600 values identical, the other 556
+      off in the 12th-15th digit (largest 1.0e-12 px, first at tick 79, not growing); end positions the same to the
+      thousandth of a pixel. Far below anything visible, and once the sim pushes him the sim's forces dominate anyway.
+      So Ruffle is built 64-bit into TDPT, the same way on Windows and the Mac.
 - [ ] Shipping size and build: Rust toolchain in the Windows and Mac builds; measure the added download size.
 
 ## 1. He's there (no interaction yet)
