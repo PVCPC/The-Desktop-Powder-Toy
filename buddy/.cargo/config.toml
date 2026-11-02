@@ -1,3 +1,8 @@
 # TDPT links the C runtime statically (meson b_vscrt=static_from_buildtype)
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]
+
+# the game tests share one save folder (buddy/ under the cwd): several players at once load each other's
+# half-made saves (TDPT only ever runs one)
+[env]
+RUST_TEST_THREADS = "1"

@@ -114,6 +114,9 @@ struct Ground {
     cells: Vec<u8>,
     want: [i32; 4],
     last: (f64, f64), // his body, last frame
+    air_rect: [i32; 4], // in sim cells (CELL pixels)
+    air: Vec<[f32; 2]>, // the sim's air velocity there
+    cell: i32,
 }
 
 const PARTS: [&str; 6] = ["body", "head", "lArm", "rArm", "lLeg", "rLeg"];
@@ -122,7 +125,7 @@ const POSE: [(f64, f64); 6] = [(0.0, 0.0), (0.0, -39.4), (-22.1, -10.2), (22.1, 
 
 impl Default for Ground {
     fn default() -> Self {
-        Self { rect: [0; 4], cells: Vec::new(), want: [0; 4], last: (400.0, 300.0) }
+        Self { rect: [0; 4], cells: Vec::new(), want: [0; 4], last: (400.0, 300.0), air_rect: [0; 4], air: Vec::new(), cell: 4 }
     }
 }
 
@@ -131,6 +134,16 @@ impl Ground {
         let [rx, ry, w, h] = self.rect;
         let (u, v) = (x - rx, y - ry);
         if u >= 0 && v >= 0 && u < w && v < h { self.cells.get((v * w + u) as usize).copied().unwrap_or(0) } else { 0 }
+    }
+
+    // the sim's air velocity at a pixel
+    fn wind(&self, x: f64, y: f64) -> (f64, f64) {
+        let [rx, ry, w, h] = self.air_rect;
+        let (u, v) = ((x as i32).div_euclid(self.cell.max(1)) - rx, (y as i32).div_euclid(self.cell.max(1)) - ry);
+        if u < 0 || v < 0 || u >= w || v >= h {
+            return (0.0, 0.0);
+        }
+        self.air.get((v * w + u) as usize).map_or((0.0, 0.0), |a| (a[0] as f64, a[1] as f64))
     }
 
     fn solid(&self, x: i32, y: i32) -> bool {
@@ -236,10 +249,10 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
         let grav = num(v, "grav");
         // a part the game lost (NaN: its own divide by 0, or a save that kept one) stays lost and is saved that way:
         // stand him up again where he last was
-        if PARTS.iter().any(|part| ["x", "y", "xv", "yv"].iter().any(|f| !num(v, &format!("{part}.{f}")).is_finite())) {
+        if PARTS.iter().any(|part| ["x", "y", "ox", "oy", "xv", "yv"].iter().any(|f| !num(v, &format!("{part}.{f}")).is_finite())) {
             let (bx, by) = g.last;
             for (part, (dx, dy)) in PARTS.iter().zip(POSE) {
-                for (f, n) in [("x", bx + dx), ("y", by + dy), ("xv", 0.0), ("yv", 0.0)] {
+                for (f, n) in [("x", bx + dx), ("y", by + dy), ("ox", bx + dx), ("oy", by + dy), ("xv", 0.0), ("yv", 0.0)] {
                     v.set(&format!("{part}.{f}"), Value::Number(n));
                 }
             }
@@ -254,8 +267,13 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
                 continue;
             }
             let wet = !held && grav.is_finite() && g.float(x, y, &mut xv, &mut yv, r, grav);
+            // the sim's air pushes him like a heavy powder (sand follows it at 0.7, he at 0.1); blasts throw him
+            let (ax, ay) = if held { (0.0, 0.0) } else { g.wind(x, y) };
+            let blown = ax != 0.0 || ay != 0.0;
+            xv += 0.1 * ax;
+            yv += 0.1 * ay;
             let out = if held { None } else { g.push_out(&mut x, &mut y, &mut xv, &mut yv, r) };
-            if wet || out.is_some() {
+            if wet || blown || out.is_some() {
                 for (f, n) in [("x", x), ("y", y), ("xv", xv), ("yv", yv)] {
                     v.set(&format!("{part}.{f}"), Value::Number(n));
                 }
@@ -303,7 +321,8 @@ impl ruffle_core::backend::storage::StorageBackend for Saves {
     }
     fn put(&mut self, name: &str, value: &[u8]) -> bool {
         // written beside, then moved over, so a crash mid-save keeps the last good one
-        let (file, part) = (self.file(name), self.file(&format!("{name}.part")));
+        // a temp file per writer: two players writing the same one mix their bytes into a broken save
+        let (file, part) = (self.file(name), self.file(&format!("{name}.{}.{:?}.part", std::process::id(), std::thread::current().id())));
         std::fs::create_dir_all(&self.0).is_ok() && std::fs::write(&part, value).is_ok() && std::fs::rename(&part, &file).is_ok()
     }
     fn remove_key(&mut self, name: &str) {
@@ -696,6 +715,22 @@ pub unsafe extern "C" fn tdpt_buddy_ground(b: *mut Buddy, rect: *const i32, cell
     }
 }
 
+/// The sim's air velocity over rect (x, y, w, h in cells of `cell` sim pixels): w * h pairs of vx, vy
+/// # Safety
+/// b is from tdpt_buddy_open; rect has 4; v has 2 * w * h.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tdpt_buddy_air(b: *mut Buddy, cell: i32, rect: *const i32, v: *const f32) {
+    let b = unsafe { &mut *b };
+    let rect: [i32; 4] = unsafe { std::ptr::read(rect as *const [i32; 4]) };
+    let n = (rect[2].max(0) as usize) * (rect[3].max(0) as usize);
+    if let Ok(mut g) = b.ground.lock() {
+        g.cell = cell;
+        g.air_rect = rect;
+        g.air.clear();
+        g.air.extend(unsafe { std::slice::from_raw_parts(v as *const [f32; 2], n) });
+    }
+}
+
 /// what: 1 left button down, 2 up, at (x, y) stage pixels
 /// # Safety
 /// b is from tdpt_buddy_open.
@@ -842,6 +877,28 @@ mod tests {
             let v = p.get_root_variable(&format!("{part}.y"));
             assert!(matches!(v, Value::Number(n) if n.is_finite()), "{part}.y = {v:?}");
         }
+    }
+
+    // a steady wind to the right blows him over to the right
+    #[test]
+    fn blown_by_air() {
+        let Some(path) = std::env::var_os("TDPT_BUDDY_SWF") else { return };
+        let mut game = super::open(path.to_str().unwrap(), 1280, 720).unwrap();
+        let mut out = vec![0u32; 1280 * 720];
+        while !super::frame(&mut game, 25.0, 0.0, 0.0, &mut out) {}
+        let x = |game: &super::Game| match game.player.lock().unwrap().get_root_variable("body.x") { Value::Number(v) => v, o => panic!("{o:?}") };
+        let x0 = x(&game);
+        {
+            let mut g = game.ground.lock().unwrap();
+            g.air_rect = [0, 0, 320, 180];
+            g.air = vec![[3.0, 0.0]; 320 * 180];
+        }
+        for _ in 0..60 {
+            super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+        }
+        let x1 = x(&game);
+        println!("wind: body {x0:.1} -> {x1:.1}");
+        assert!(x1 > x0 + 50.0, "not blown: {x0} -> {x1}");
     }
 
     #[test]
