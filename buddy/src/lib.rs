@@ -86,6 +86,8 @@ struct Game {
     mouse: (f64, f64),
     ready: bool,
     readback: Option<wgpu::Buffer>,
+    settings: [f64; 5], // from the Buddy tab: size %, speech on, speech size %, toys at once (0: no limit), smooth on
+    applied: [f64; 5],  // what the game has
 }
 
 fn open(path: &str, w: u32, h: u32) -> Result<Game, String> {
@@ -105,7 +107,7 @@ fn open(path: &str, w: u32, h: u32) -> Result<Game, String> {
         .with_storage(Box::new(Saves("buddy".into())))
         .build();
     load_fonts(&mut player.lock().unwrap());
-    Ok(Game { player, ground: Default::default(), size: (w, h), mouse: (-1.0, -1.0), ready: false, readback: None })
+    Ok(Game { player, ground: Default::default(), size: (w, h), mouse: (-1.0, -1.0), ready: false, readback: None, settings: SETTINGS, applied: [f64::NAN; 5] })
 }
 
 // The sim around him, so he stands on it, floats in it and burns in it: one byte per sim pixel over rect (x, y, w, h sim
@@ -642,9 +644,26 @@ fn frame(b: &mut Game, dt_ms: f64, mx: f64, my: f64, out: &mut [u32]) -> bool {
         b.ready = true;
         p.set_window_mode("transparent");
         p.call_root_method("__hostMenuCommand", vec!["surface|desktop".into()]).ok();
-        p.set_root_variable("__hostSmooth", "true".into()).ok();
         hook_ground(&mut p, &b.ground);
     }
+    // the Buddy tab's settings, as the desktop app sets them (each only when it changed: a new toy limit clears his toys)
+    let (s, a) = (b.settings, b.applied);
+    if s[0] != a[0] {
+        p.call_root_method("__nativeSetBuddySize", vec![s[0].into()]).ok();
+    }
+    if s[1] != a[1] {
+        p.set_root_variable("__hostSpeechEnabled", if s[1] != 0.0 { "true" } else { "false" }.into()).ok();
+    }
+    if s[2] != a[2] {
+        p.set_root_variable("__hostSpeechScale", Value::String(s[2].to_string().into())).ok();
+    }
+    if s[3] != a[3] {
+        p.call_root_method("__nativeSetObjectLimit", vec![s[3].into()]).ok();
+    }
+    if s[4] != a[4] {
+        p.set_root_variable("__hostSmooth", if s[4] != 0.0 { "true" } else { "false" }.into()).ok();
+    }
+    b.applied = s;
     p.call_root_method("__hostRender", vec![]).ok();
     p.render();
     p.call_root_method("__hostRestore", vec![]).ok();
@@ -774,8 +793,12 @@ fn flatten(xml: &str, category: &str, out: &mut String) {
 }
 
 // What the TDPT thread and the game's thread share
+// the desktop app's defaults: normal size, speech on at 100%, 6 toys at once (the game's own), smoothing on
+const SETTINGS: [f64; 5] = [100.0, 1.0, 100.0, 6.0, 1.0];
+
 #[derive(Default)]
 struct Shared {
+    settings: [f64; 5],
     size: (u32, u32),
     mouse: (f64, f64),
     clicks: Vec<PlayerEvent>,
@@ -808,6 +831,7 @@ fn run(mut game: Game, shared: Arc<Mutex<Shared>>) {
                 return;
             }
             game.size = s.size;
+            game.settings = s.settings;
             (s.mouse, std::mem::take(&mut s.clicks), std::mem::take(&mut s.commands))
         };
         let dt = last.elapsed().as_secs_f64() * 1e3;
@@ -871,7 +895,7 @@ fn say(error: *mut c_char, len: usize, text: &str) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tdpt_buddy_open(path: *const c_char, w: u32, h: u32, error: *mut c_char, error_len: usize) -> *mut Buddy {
     let path = unsafe { CStr::from_ptr(path) }.to_string_lossy().into_owned();
-    let shared = Arc::new(Mutex::new(Shared { size: (w, h), mouse: (-1.0, -1.0), ..Default::default() }));
+    let shared = Arc::new(Mutex::new(Shared { size: (w, h), mouse: (-1.0, -1.0), settings: SETTINGS, ..Default::default() }));
     // the player can't change threads, so it starts on the game's, which reports back how that went
     let (tell, told) = std::sync::mpsc::channel();
     let thread = {
@@ -948,6 +972,18 @@ pub unsafe extern "C" fn tdpt_buddy_command(b: *mut Buddy, command: *const c_cha
     let command = unsafe { CStr::from_ptr(command) }.to_string_lossy().into_owned();
     if let Ok(mut s) = b.shared.lock() {
         s.commands.push(command);
+    }
+}
+
+/// The Buddy tab's settings: his size (25-300 %), speech bubbles (0 off), their size (25-200 %), toys at once (0: no
+/// limit) and smoothing (0 off), as the desktop app had them
+/// # Safety
+/// b is from tdpt_buddy_open.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tdpt_buddy_settings(b: *mut Buddy, size: f64, speech: i32, speech_size: f64, toys: i32, smooth: i32) {
+    let b = unsafe { &mut *b };
+    if let Ok(mut s) = b.shared.lock() {
+        s.settings = [size.clamp(25.0, 300.0), (speech != 0) as u8 as f64, speech_size.clamp(25.0, 200.0), toys.max(0) as f64, (smooth != 0) as u8 as f64];
     }
 }
 
@@ -1521,6 +1557,24 @@ mod tests {
         }
         println!("sides: rightmost {right:.1}");
         assert!(right < 702.0, "went into the window: {right}");
+    }
+
+    // the Buddy tab's size: 200% doubles his parts, back to 100% restores them
+    #[test]
+    fn buddy_size() {
+        let Some(path) = std::env::var_os("TDPT_BUDDY_SWF") else { return };
+        let mut game = super::open(path.to_str().unwrap(), 1280, 720).unwrap();
+        let mut out = vec![0u32; 1280 * 720];
+        while !super::frame(&mut game, 25.0, 0.0, 0.0, &mut out) {}
+        let n = |g: &super::Game, k: &str| match g.player.lock().unwrap().get_root_variable(k) { Value::Number(v) => v, o => panic!("{k} {o:?}") };
+        let normal = n(&game, "body.rad");
+        game.settings[0] = 200.0;
+        super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+        let big = n(&game, "body.rad");
+        game.settings[0] = 100.0;
+        super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+        println!("size: {normal} -> {big} -> {}", n(&game, "body.rad"));
+        assert!((big / normal - 2.0).abs() < 0.01 && (n(&game, "body.rad") - normal).abs() < 0.01);
     }
 
     #[test]

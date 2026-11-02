@@ -31,6 +31,9 @@ extern "C"
 	void tdpt_buddy_portal(Buddy *b, int32_t has, double x, double y);
 	// the active window's edges he can stand on (sim pixels): left, right, its top edge and its inside bottom edge
 	// (NaN: that one is off); id 0: none. He rides it when it moves under him.
+	// the Buddy tab: his size (25-300 %), speech bubbles (0 off), their size (25-200 %), toys at once (0: no limit),
+	// smoothing (0 off)
+	void tdpt_buddy_settings(Buddy *b, double size, int32_t speech, double speechSize, int32_t toys, int32_t smooth);
 	void tdpt_buddy_ledge(Buddy *b, uint64_t id, double left, double right, double top, double bottom);
 	// his body parts (up to max): x, y, radius, xv, yv, 1 burning each (stage pixels, per game frame); how many
 	size_t tdpt_buddy_parts(Buddy *b, double *out, size_t max);

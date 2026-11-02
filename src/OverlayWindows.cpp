@@ -52,6 +52,7 @@
 #include "gui/interface/Slider.h"
 #include "gui/interface/Textbox.h"
 #include <algorithm>
+#include <span>
 #include <cstring>
 #include <cwctype>
 #include <atomic>
@@ -201,11 +202,15 @@ namespace
 		bool buddy = false;                      // Interactive Buddy (OverlayBuddy; his file: Overlay.Fun.BuddySwf)
 		bool buddyPets = false;                  // the pets notice him (OverlayBuddy reads Overlay.Fun.BuddyPets)
 		bool buddyLooks = false;                 // he looks wet and frosted (Overlay.Fun.BuddyLooks)
+		// the Buddy tab (OverlayBuddy reads them from the prefs): his size and speech bubbles' (%), toys at once (0: no
+		// limit), standing on the active window, smoothing, speech
+		float buddySize = 100, buddySpeechSize = 100, buddyToys = 6;
+		bool buddyLedges = true, buddySmooth = true, buddySpeech = true;
 		std::vector<HWND> flashed; // windows that flashed their taskbar button (a new message) since the last tick
 	} fun;
 	// The Fun tab's rows, by group, and the pref each is saved as. A row with no tip starts a group (name = heading);
 	// a row with neither b nor v is the weather kind. Slider units: 0 %, 1 count, 2 minutes, 3 seconds (10 s steps),
-	// 4 clock hour, 5 px, 6 seconds (0 off), 7 an hour
+	// 4 clock hour, 5 px, 6 seconds (0 off), 7 an hour, 8 a percentage, 9 count (0 no limit)
 	struct FunRow { const wchar_t *name, *tip = nullptr; bool *b = nullptr; float *v = nullptr; float lo = 0, hi = 0; const char *pref = ""; int unit = 0; };
 	FunRow Check(const wchar_t *name, const wchar_t *tip, bool *b, const char *pref) { return { name, tip, b, nullptr, 0, 0, pref }; }
 	FunRow Slide(const wchar_t *name, const wchar_t *tip, float *v, float lo, float hi, const char *pref, int unit = 0) { return { name, tip, nullptr, v, lo, hi, pref, unit }; }
@@ -299,10 +304,25 @@ namespace
 		Check(L"Holidays", L"Pumpkins roll about on Halloween, jelly hearts fall on Valentine's Day, fireworks go up after midnight on New Year's", &fun.holidays, "Overlay.Fun.Holidays"),
 
 		{ L"Interactive Buddy" },
-		Check(L"Interactive Buddy", L"The buddy from the Flash game Interactive Buddy lives on your desktop in front of the sim: drag him, throw him, give him toys. Bring your own copy of the game (Interactive Buddy v1.01, a .swf file; it isn't included) and pick it with Choose SWF", &fun.buddy, "Overlay.Fun.Buddy"),
+		Check(L"Interactive Buddy", L"The buddy from the Flash game Interactive Buddy lives on your desktop in front of the sim: drag him, throw him, give him toys. Bring your own copy of the game (Interactive Buddy v1.01, a .swf file; it isn't included) and pick it with Choose SWF. Once his file is chosen, his own settings are in the Buddy tab", &fun.buddy, "Overlay.Fun.Buddy"),
+	};
+	// The Buddy tab (shown once his file is chosen): the desktop Interactive Buddy's own settings, then the sim's
+	FunRow buddyRows[] = {
+		{ L"Buddy" },
+		Check(L"Interactive Buddy", L"Turns him on or off. The game file is your own copy of Interactive Buddy v1.01 (a .swf file; it isn't included)", &fun.buddy, "Overlay.Fun.Buddy"),
+		Slide(L"Size", L"How big Buddy is, whatever the sim's pixel size (100% is the game's own size)", &fun.buddySize, 25, 300, "Overlay.Buddy.Size", 8),
+		Check(L"Stand on the active window", L"As in the desktop Interactive Buddy: he can stand on the top edge of the window you're using, and on its bottom edge from inside it, and rides along when you move it", &fun.buddyLedges, "Overlay.Buddy.Ledges"),
+		Check(L"Smooth motion", L"The game's 120 Hz smoothing of his movement", &fun.buddySmooth, "Overlay.Buddy.Smooth"),
+		{ L"Speech" },
+		Check(L"Speech bubbles", L"What Buddy says shows in a bubble over him", &fun.buddySpeech, "Overlay.Buddy.Speech"),
+		Slide(L"Speech bubble size", L"How big his speech bubbles are", &fun.buddySpeechSize, 25, 200, "Overlay.Buddy.SpeechSize", 8),
+		{ L"Toys" },
+		Slide(L"Toys at once", L"How many of the game's toys and objects can be out at the same time (the game's own default is 6). Changing it clears the ones out now. Far left: no limit", &fun.buddyToys, 0, 100, "Overlay.Buddy.Toys", 9),
+		{ L"Buddy and the sim" },
 		Check(L"Pets meet Buddy", L"The pets walk over to Buddy and hop hello, and run when he is thrown past them or something blows up by him", &fun.buddyPets, "Overlay.Fun.BuddyPets"),
 		Check(L"Buddy gets wet and frosty", L"Water and rain leave Buddy darker for a while, and anything below -50 C (cryo, liquid nitrogen) frosts him pale blue", &fun.buddyLooks, "Overlay.Fun.BuddyLooks"),
 	};
+	bool BuddyTabShown() { return !GlobalPrefs::Ref().Get("Overlay.Fun.BuddySwf", ByteString("")).empty(); }
 	// Interactive Buddy's file: the game's .swf, from the user (turns him on)
 	void ChooseBuddySwf()
 	{
@@ -2430,8 +2450,8 @@ namespace
 		std::wstring query; // Elements tab search: tools from every section whose name or description has it
 		bool typing = false; // a search box has the keyboard
 		std::wstring *typed = &query; // which one: the elements' or the online saves'
-		static constexpr const wchar_t *tabNames[] = { L"Elements", L"Tools", L"Simulation", L"Display", L"Saves", L"Overlay", L"Fun", L"Welcome" };
-		static constexpr int toolsTab = 1, welcomeTab = 7;
+		static constexpr const wchar_t *tabNames[] = { L"Elements", L"Tools", L"Simulation", L"Display", L"Saves", L"Overlay", L"Fun", L"Welcome", L"Buddy" };
+		static constexpr int toolsTab = 1, welcomeTab = 7, buddyTab = 8; // Buddy: only once his file is chosen
 
 		SideWindow()
 		{
@@ -2937,18 +2957,19 @@ namespace
 
 		// Brush, replace mode and decoration colour (TPT keeps them in its tool strip and keys).
 		// The Fun tab: what the sim does with the desktop, by topic, each setting with its description under it.
-		void PaintFun()
+		// (and the Buddy tab, the same way)
+		void PaintFun(FunRow *rows, size_t n)
 		{
 			auto c = Content();
 			int x = c.left + S(10), w = c.right - c.left - S(20), y = c.top + S(8) - scroll;
 			const Text::Style note{ 11, FW_NORMAL, false, false, 0x6D6D6D };
-			for (size_t i = 0; i < std::size(funRows);)
+			for (size_t i = 0; i < n;)
 			{
-				const wchar_t *title = funRows[i++].name;
+				const wchar_t *title = rows[i++].name;
 				int top = y + text->Measure(title).cy + S(4), ry = top;
-				for (; i < std::size(funRows) && funRows[i].tip; i++)
+				for (; i < n && rows[i].tip; i++)
 				{
-					auto &f = funRows[i];
+					auto &f = rows[i];
 					int nx = x + S(12);
 					if (f.b)
 					{
@@ -3001,6 +3022,8 @@ namespace
 			else if (f.unit == 5) swprintf(val, 16, *f.v >= 1 ? L"%d px" : L"off", int(*f.v));
 			else if (f.unit == 6) swprintf(val, 16, *f.v >= 1 ? L"%d s" : L"off", int(*f.v));
 			else if (f.unit == 7) swprintf(val, 16, *f.v >= 1 ? L"%d / h" : L"off", int(*f.v));
+			else if (f.unit == 8) swprintf(val, 16, L"%d%%", int(*f.v));
+			else if (f.unit == 9) swprintf(val, 16, *f.v >= 1 ? L"%d" : L"no limit", int(*f.v));
 			else swprintf(val, 16, *f.v > 0 ? L"%d%%" : L"off", int(std::lround(*f.v * 100)));
 			Caption(x + w - S(60), ry, val);
 			Slider(x + S(160), ry, w - S(232), *f.v, f.lo, f.hi, [&f](float v) {
@@ -3902,12 +3925,18 @@ namespace
 			if (fixedTab < 0)
 			{
 				int names = 0;
-				for (auto *n : tabNames) names += text->Measure(n).cx + S(1);
+				for (int i = 0; i < int(std::size(tabNames)); i++)
+					if (i != buddyTab || BuddyTabShown()) names += text->Measure(tabNames[i]).cx + S(1);
 				pad = std::clamp((cv.w - 2 * tx - names) / int(std::size(tabNames)), S(6), S(20));
 			}
 			for (int i = 0; i < int(std::size(tabNames)); i++)
 			{
 				if (fixedTab >= 0 && i != fixedTab) continue;
+				if (i == buddyTab && !BuddyTabShown())
+				{
+					if (tab == buddyTab) tab = 6; // his file was taken away: back to Fun
+					continue;
+				}
 				int tw = text->Measure(tabNames[i]).cx + pad;
 				bool on = i == tab;
 				RECT rc{ tx, titleH + (on ? S(2) : S(4)), tx + tw, titleH + tabH + (on ? 1 : 0) };
@@ -3928,7 +3957,7 @@ namespace
 				for (int i = sx + 1; i < sx + text->Measure(tabNames[tab]).cx + pad - S(1); i++) cv.Blend(i, c.top, theme->page, 255);
 
 			// Form pages scroll: rows outside the page are put back after, and controls there dropped.
-			bool form = tab >= 1 && tab <= 6;
+			bool form = (tab >= 1 && tab <= 6) || tab == buddyTab;
 			size_t firstPageHit = hits.size();
 			size_t topEnd = size_t(c.top + 1) * cv.w, bottomStart = size_t(c.bottom) * cv.w;
 			std::vector<uint32_t> above(cv.px.begin(), cv.px.begin() + topEnd), below(cv.px.begin() + bottomStart, cv.px.end());
@@ -3939,7 +3968,8 @@ namespace
 			case 3: PaintDisplay(); break;
 			case 4: PaintSaves(); break;
 			case 5: PaintOverlay(); break;
-			case 6: PaintFun(); break;
+			case 6: PaintFun(funRows, std::size(funRows)); break;
+			case buddyTab: PaintFun(buddyRows, std::size(buddyRows)); break;
 			case welcomeTab: PaintWelcome(); break;
 			case toolsTab: PaintTools(); break;
 			}
@@ -5196,7 +5226,8 @@ void OverlayWindows::Init(void *mainHwnd)
 	for (auto [v, name] : { std::pair{ &overlayFeel.grip, "Grip" }, { &overlayFeel.fling, "Fling" }, { &overlayFeel.push, "Push" }, { &overlayFeel.wind, "Wind" }, { &overlayFeel.scorch, "Scorch" }, { &overlayFeel.frost, "Frost" }, { &overlayFeel.acid, "Acid" }, { &overlayFeel.water, "Water" }, { &overlayFeel.acidEat, "AcidEat" }, { &overlayFeel.blast, "Blast" }, { &overlayFeel.holeOpacity, "HoleSolid" }, { &overlayFeel.shards, "Shards" }, { &overlayFeel.shardSize, "ShardSize" }, { &overlayFeel.blackHole, "BlackHole" }, { &overlayFeel.shake, "Shake" } })
 		*v = prefs.Get(ByteString("Overlay.Feel.") + name, *v);
 	fun.weatherKind = prefs.Get("Overlay.Fun.WeatherKind", 0);
-	for (auto &f : funRows)
+	for (auto rows : { std::span<FunRow>(funRows), std::span<FunRow>(buddyRows) })
+	for (auto &f : rows)
 	{
 		if (f.b) *f.b = prefs.Get(f.pref, *f.b);
 		if (f.v) *f.v = prefs.Get(f.pref, *f.v);

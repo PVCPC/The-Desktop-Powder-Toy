@@ -40,6 +40,9 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
 - [x] Saves: the game's save (money, purchases) is a file in TPT's data folder, `buddy/`, written when he's turned
       off or TDPT closes.
 - [ ] Sound (none yet).
+- [x] Buddy tab (shown once his SWF is chosen in Fun): on/off + Choose SWF, size 25-300 % (the game's own
+      __nativeSetBuddySize, so independent of TDPT's pixel size), active-window ledges, smoothing, speech bubbles and
+      their size, toys at once (0 no limit), pets, wet/frosty. Prefs Overlay.Buddy.*, sent with tdpt_buddy_settings.
 - [ ] One coordinate mapping: game stage <-> sim pixels (accounting for the game camera `camx/camy/camz` and the TDPT pixel size).
 
 ## 2. Sim -> Buddy (he feels the sim)
