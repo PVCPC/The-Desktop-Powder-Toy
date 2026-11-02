@@ -43,8 +43,11 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
 - [ ] One coordinate mapping: game stage <-> sim pixels (accounting for the game camera `camx/camy/camz` and the TDPT pixel size).
 
 ## 2. Sim -> Buddy (he feels the sim)
-- [ ] **Solid ground:** solids and powders under/around each body part stop it (like PlatformBridge, but against the
+- [x] **Solid ground:** solids and powders under/around each body part stop it (like PlatformBridge, but against the
       sim's pmap, every part, every direction). He stands on sand piles, walls, windows and icons.
+      Done: Ruffle wraps the game's `doBodyPhysics`/`setBasicVars` with a native hook (`hook_after_root_function`);
+      each part is pushed out of solid pixels and bounces like the game's floor, legs on solid set `onGround`. TDPT
+      fills the ground map around him each frame (`tdpt_buddy_area`/`tdpt_buddy_ground`). Not while the fist drags him.
 - [ ] **Buoyancy and drag:** parts in liquid float and slow down by density; heavy liquids (mercury) float him higher.
 - [ ] **Air:** the sim's air velocity (vx/vy) and pressure gradient push each part; pressure blasts throw him.
 - [ ] **Explosions:** TPT explosions near him call the game's own `explode()` at that spot, scaled.
