@@ -3,6 +3,8 @@
 
 void OverlayWindows::Init(void *) {}
 void OverlayWindows::Tick() {}
+int OverlayWindows::WorkBottom(int) { return YRES; }
+bool OverlayWindows::ActiveEdges(uintptr_t &, int &, int &, int &, int &) { return false; }
 void OverlayWindows::TogglePalette() {}
 void OverlayWindows::SetPassThrough(bool) {}
 void OverlayWindows::Notify(const char *) {}

@@ -200,6 +200,7 @@ namespace
 		float meteors = 0;                       // big meteors an hour at night
 		bool buddy = false;                      // Interactive Buddy (OverlayBuddy; his file: Overlay.Fun.BuddySwf)
 		bool buddyPets = false;                  // the pets notice him (OverlayBuddy reads Overlay.Fun.BuddyPets)
+		bool buddyLooks = false;                 // he looks wet and frosted (Overlay.Fun.BuddyLooks)
 		std::vector<HWND> flashed; // windows that flashed their taskbar button (a new message) since the last tick
 	} fun;
 	// The Fun tab's rows, by group, and the pref each is saved as. A row with no tip starts a group (name = heading);
@@ -300,6 +301,7 @@ namespace
 		{ L"Interactive Buddy" },
 		Check(L"Interactive Buddy", L"The buddy from the Flash game Interactive Buddy lives on your desktop in front of the sim: drag him, throw him, give him toys. Bring your own copy of the game (Interactive Buddy v1.01, a .swf file; it isn't included) and pick it with Choose SWF", &fun.buddy, "Overlay.Fun.Buddy"),
 		Check(L"Pets meet Buddy", L"The pets walk over to Buddy and hop hello, and run when he is thrown past them or something blows up by him", &fun.buddyPets, "Overlay.Fun.BuddyPets"),
+		Check(L"Buddy gets wet and frosty", L"Water and rain leave Buddy darker for a while, and anything below -50 C (cryo, liquid nitrogen) frosts him pale blue", &fun.buddyLooks, "Overlay.Fun.BuddyLooks"),
 	};
 	// Interactive Buddy's file: the game's .swf, from the user (turns him on)
 	void ChooseBuddySwf()
@@ -5223,6 +5225,54 @@ void OverlayWindows::Init(void *mainHwnd)
 static void TickRecording();
 static void TickWindowWalls();
 
+int OverlayWindows::WorkBottom(int x)
+{
+#ifdef _WIN32
+	RECT sr;
+	if (!mainWindow || !GetWindowRect(mainWindow, &sr) || sr.right <= sr.left || sr.bottom <= sr.top) return YRES;
+	int sw = sr.right - sr.left, sh = sr.bottom - sr.top;
+	MONITORINFO mi{ sizeof(mi) };
+	if (!GetMonitorInfoW(MonitorFromPoint({ int(sr.left + x * sw / WINDOWW), int(sr.bottom - 1) }, MONITOR_DEFAULTTONEAREST), &mi)) return YRES;
+	return std::clamp(int((mi.rcWork.bottom - sr.top) * WINDOWH / sh), 1, YRES);
+#else
+	return YRES; // ponytail: the Mac's Dock isn't asked yet
+#endif
+}
+
+bool OverlayWindows::ActiveEdges(uintptr_t &id, int &left, int &right, int &top, int &bottom)
+{
+#ifdef _WIN32
+	// as the desktop Interactive Buddy did it: the active window, or the last one that wasn't ours
+	static HWND last;
+	HWND h = GetForegroundWindow();
+	DWORD pid = 0;
+	if (h) GetWindowThreadProcessId(h, &pid);
+	if (h && pid != GetCurrentProcessId()) last = h;
+	h = last;
+	wchar_t cls[32] = {};
+	RECT sr, outer, client;
+	if (!mainWindow || !h || !IsWindow(h) || !IsWindowVisible(h) || IsIconic(h) || !GetWindowRect(mainWindow, &sr) ||
+	    sr.right <= sr.left || sr.bottom <= sr.top || !GetWindowRect(h, &outer)) return false;
+	GetClassNameW(h, cls, 32);
+	if (!wcscmp(cls, L"Progman") || !wcscmp(cls, L"WorkerW") || !wcscmp(cls, L"Shell_TrayWnd")) return false;
+	DwmGetWindowAttribute(h, DWMWA_EXTENDED_FRAME_BOUNDS, &outer, sizeof(outer));
+	GetClientRect(h, &client);
+	POINT b{ 0, client.bottom };
+	ClientToScreen(h, &b);
+	MONITORINFO mi{ sizeof(mi) };
+	GetMonitorInfoW(MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST), &mi);
+	auto sx = [&](int x) { return int((x - sr.left) * WINDOWW / (sr.right - sr.left)); };
+	auto sy = [&](int y) { return int((y - sr.top) * WINDOWH / (sr.bottom - sr.top)); };
+	id = uintptr_t(h);
+	left = sx(outer.left), right = sx(outer.right);
+	top = outer.top - mi.rcWork.top >= 90 ? sy(outer.top) : -1;
+	bottom = b.y < mi.rcWork.bottom - 1 && b.y > mi.rcWork.top ? sy(b.y) : -1;
+	return right > left;
+#else
+	return false; // ponytail: the Mac's active window isn't asked yet
+#endif
+}
+
 void OverlayWindows::Tick()
 {
 	if (!mainWindow || !&GameController::Ref())
@@ -7828,6 +7878,8 @@ void OverlayWindows::HideConsole()
 #else
 void OverlayWindows::Init(void *) {}
 void OverlayWindows::Tick() {}
+int OverlayWindows::WorkBottom(int) { return YRES; }
+bool OverlayWindows::ActiveEdges(uintptr_t &, int &, int &, int &, int &) { return false; }
 void OverlayWindows::TogglePalette() {}
 void OverlayWindows::SetPassThrough(bool) {}
 void OverlayWindows::Notify(const char *) {}

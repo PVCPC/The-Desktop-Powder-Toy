@@ -21,7 +21,7 @@ extern "C"
 	// the sim over rect: w * h cells, rows top down; low 5 bits 0 nothing, 1 solid for him, 2 + weight/4 liquid, 31 acid, 30 VOID or
 	// black hole, 29 portal in;
 	// 0x20 60 C or hotter, 0x40 400 C or hotter, 0x60 -50 C or colder; 0x80 a spark or electron; 0x100 hurts (caustic gas,
-	// radiation, virus); 0x200 blows up on him (DEST, BOMB, singularity)
+	// radiation, virus); 0x200 blows up on him (DEST, BOMB, singularity); 0x400 a window or icon (its sides stop him)
 	void tdpt_buddy_ground(Buddy *b, const int32_t rect[4], const uint16_t *cells);
 	// the sim's air over rect (x, y, w, h in cells of `cell` sim pixels): w * h of vx, vy, pressure
 	void tdpt_buddy_air(Buddy *b, int32_t cell, const int32_t rect[4], const float *v);
@@ -29,6 +29,9 @@ extern "C"
 	void tdpt_buddy_gravity(Buddy *b, double gx, double gy);
 	// where the portal in his reach comes out (sim pixels); has = 0: none
 	void tdpt_buddy_portal(Buddy *b, int32_t has, double x, double y);
+	// the active window's edges he can stand on (sim pixels): left, right, its top edge and its inside bottom edge
+	// (NaN: that one is off); id 0: none. He rides it when it moves under him.
+	void tdpt_buddy_ledge(Buddy *b, uint64_t id, double left, double right, double top, double bottom);
 	// his body parts (up to max): x, y, radius, xv, yv, 1 burning each (stage pixels, per game frame); how many
 	size_t tdpt_buddy_parts(Buddy *b, double *out, size_t max);
 	// the game's explosions since the last call (up to max): x, y, power each (1 = its bomb); how many

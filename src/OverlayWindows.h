@@ -10,6 +10,11 @@ namespace OverlayWindows
 {
 	void Init(void *mainHwnd);
 	void Tick(); // once per frame, from the main thread
+	// The bottom of the screen's work area (the taskbar's top) under sim column x, in sim pixels; YRES: none
+	int WorkBottom(int x);
+	// The active app window's edges in sim pixels (the last one when TDPT itself is active): left, right, its top edge
+	// (-1: too near the top for him) and its client area's bottom edge (-1: off screen). False: none.
+	bool ActiveEdges(uintptr_t &id, int &left, int &right, int &top, int &bottom);
 	void TogglePalette();
 	void SaveScene(); // for the next run (on quitting)
 	void ClearSim(); // the clear hotkey

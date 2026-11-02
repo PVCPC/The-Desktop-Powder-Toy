@@ -25,16 +25,19 @@ namespace
 {
 	Buddy *buddy = nullptr;
 	ByteString failed;            // the file that last failed to open: not retried until another is chosen
-	const uint32_t *frame = nullptr; // his newest frame, XRES x YRES premultiplied (null: nothing shown)
+	const uint32_t *frame = nullptr; // his newest frame, fw x fh premultiplied (null: nothing shown)
+	int fw = XRES, fh = YRES;     // his stage: TDPT's play area (from the top left), so his floor is the sand's floor
+	int wb = YRES;                // the taskbar's top (sim pixels): he stands on it, as in the desktop app
 	std::vector<uint16_t> ground; // the sim around him, for tdpt_buddy_ground
 	std::vector<std::array<double, 6>> parts; // his body: x, y, radius, xv, yv, 1 burning (tdpt_buddy_parts)
-	bool Mine(int x, int y) // inside one of his own parts (his walls are not ground to himself)
+	bool Mine(int x, int y, double margin = 1) // in or near one of his own parts (his walls are not ground to himself)
 	{
 		for (auto &p : parts)
-			if ((x + 0.5 - p[0]) * (x + 0.5 - p[0]) + (y + 0.5 - p[1]) * (y + 0.5 - p[1]) <= (p[2] + 1) * (p[2] + 1)) return true;
+			if ((x + 0.5 - p[0]) * (x + 0.5 - p[0]) + (y + 0.5 - p[1]) * (y + 0.5 - p[1]) <= (p[2] + margin) * (p[2] + margin)) return true;
 		return false;
 	}
 	std::vector<float> air;       // and its air (velocity, pressure), for tdpt_buddy_air
+	int wet[8], frost[8];         // ticks each part still looks wet / frosted (Overlay.Fun.BuddyLooks)
 	bool held = false;            // a press that went to him, until its release
 	double heldX, heldY;          // where TPT's window last saw the mouse while held (it has the mouse captured)
 
@@ -75,7 +78,8 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
 		}
 	}
 	if (!buddy) return false;
-	// what he stands on: windows and icons (not their holes), powders and solids, and walls a powder can't pass (1);
+	// what he stands on: powders and solids, and walls a powder can't pass (1); windows and icons (not their holes,
+	// not the taskbar) stop him from the side (0x400), and he stands on the active window's edges (tdpt_buddy_ledge);
 	// liquids as 2 + a quarter of their weight (water 30), which he floats in, acid as 31, VOID and black holes as 30,
 	// portals in as 29; then how hot it is (0x20 60 C+, 0x40
 	// 400 C+: sets him on fire, 0x60 -50 C or colder), 0x80 a spark or electron (shocks him), 0x100 caustic gas, radiation
@@ -95,7 +99,8 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
 			if (int e = TYP(sim->photons[y][x]); e == PT_ELEC) c |= 0x80;
 			else if (e == PT_NEUT || e == PT_PROT) c |= 0x100;
 			else if (e == PT_PHOT && !(c & 0x60)) c |= 0x20;
-			if ((sim->PixelWall(x, y) && !sim->HoleAt(x, y) && !Mine(x, y)) || sim->IsWallBlocking(x, y, PT_DUST)) c |= 1;
+			if (y < wb && sim->PixelWall(x, y) && !sim->HoleAt(x, y) && !Mine(x, y, 4)) c |= 0x400;
+			if (sim->IsWallBlocking(x, y, PT_DUST)) c |= 1;
 			else if (p && (elements[TYP(p)].Properties & (TYPE_PART | TYPE_SOLID))) c |= 1;
 			else if (p && (elements[TYP(p)].Properties & TYPE_LIQUID)) c |= uint16_t(2 + (std::clamp(elements[TYP(p)].Weight, 0, 100) + 2) / 4);
 			if (!p) continue;
@@ -147,20 +152,55 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
 	// the game's own explosions: a TPT blast there (pressure, power 1 about a bomb's, and a ball of fire)
 	double booms[16 * 3];
 	for (size_t i = 0, n = tdpt_buddy_booms(buddy, booms, 16); i < n; i++) Blast(sim, booms[i * 3], booms[i * 3 + 1], booms[i * 3 + 2]);
-	frame = held ? tdpt_buddy_frame(buddy, heldX, heldY, XRES, YRES) : tdpt_buddy_frame(buddy, mx, my, XRES, YRES);
+	auto play = sim->PlayRect();
+	// his stage: the play area, ending 10 px into the taskbar as the desktop app's did (the game's floor is 7 px up: feet just on it)
+	fw = std::clamp(play.pos.X + play.size.X, 1, XRES), fh = std::clamp(play.pos.Y + play.size.Y, 1, YRES);
+	wb = OverlayWindows::WorkBottom(parts.size() ? int(parts[0][0]) : XRES / 2);
+	fh = std::min(fh, wb + 10);
+	uintptr_t id = 0;
+	int el, er, et, eb;
+	if (OverlayWindows::ActiveEdges(id, el, er, et, eb))
+		tdpt_buddy_ledge(buddy, id, el, er, et < 0 ? NAN : et, eb < 0 ? NAN : eb);
+	else
+		tdpt_buddy_ledge(buddy, 0, 0, 0, NAN, NAN);
+	frame = held ? tdpt_buddy_frame(buddy, heldX, heldY, fw, fh) : tdpt_buddy_frame(buddy, mx, my, fw, fh);
 	if (!frame) return true;
+	bool looks = GlobalPrefs::Ref().Get("Overlay.Fun.BuddyLooks", false);
 	// his premultiplied pixels over the frame's
-	OverlayBands(YRES, [&](int y0, int y1) {
+	OverlayBands(fh, [&](int y0, int y1) {
 		for (int y = y0; y < y1; y++)
-			for (int x = 0; x < XRES; x++)
+			for (int x = 0; x < fw; x++)
 			{
-				uint32_t s = frame[size_t(y) * XRES + x], a = s >> 24;
+				uint32_t s = frame[size_t(y) * fw + x], a = s >> 24;
 				if (!a) continue;
 				auto &d = argb[size_t(y) * w + x];
 				uint32_t k = 256 - a;
 				d = s + ((((d & 0xFF00FF) * k) >> 8) & 0xFF00FF) + ((((d & 0xFF00) * k) >> 8) & 0xFF00) + ((((d >> 24) * k) >> 8) << 24);
 			}
 	});
+	// wet parts look darker, frosted ones paler blue, fading over 10 s: his own pixels there, recoloured in place
+	for (size_t n = 0; looks && n < parts.size(); n++)
+	{
+		auto &p = parts[n];
+		float dark = 0.3f * wet[n] / 600, ice = 0.5f * frost[n] / 600;
+		if ((!dark && !ice) || !std::isfinite(p[0] + p[1] + p[2])) continue;
+		for (int y = std::max(0, int(p[1] - p[2]) - 2); y <= std::min(fh - 1, int(p[1] + p[2]) + 2); y++)
+			for (int x = std::max(0, int(p[0] - p[2]) - 2); x <= std::min(fw - 1, int(p[0] + p[2]) + 2); x++)
+			{
+				uint32_t s = frame[size_t(y) * fw + x], a = s >> 24;
+				if (!a || std::hypot(x + 0.5 - p[0], y + 0.5 - p[1]) > p[2] + 2) continue;
+				auto &d = argb[size_t(y) * w + x];
+				uint32_t out = d & 0xFF000000;
+				for (int c = 0; c < 3; c++)
+				{
+					float sc = float(s >> (c * 8) & 0xFF), want = sc * (1 - dark);
+					want += (a * (c == 0 ? 0.95f : c == 1 ? 0.85f : 0.75f) - want) * ice; // toward pale blue (b, g, r)
+					int v = int(d >> (c * 8) & 0xFF) - int(sc) + int(want);
+					out |= uint32_t(std::clamp(v, 0, 255)) << (c * 8);
+				}
+				d = out;
+			}
+	}
 	return true;
 }
 
@@ -178,15 +218,18 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 	parts.resize(tdpt_buddy_parts(buddy, parts[0].data(), parts.size()));
 	if (parts.size() && GlobalPrefs::Ref().Get("Overlay.Fun.BuddyPets", false) && std::isfinite(parts[0][0] + parts[0][1]))
 		sim->petBuddy.x = int(parts[0][0]), sim->petBuddy.y = int(parts[0][1]), sim->petBuddy.speed = float(std::hypot(parts[0][3], parts[0][4]));
-	// he pushes the air he moves through (0.1 of his speed) and warms what touches him, slowly, toward 37 C; and what
+	// he pushes the air he moves through fast (0.1 of his speed) and warms what touches him, slowly, toward 37 C; and what
 	// touches him reacts: acid is used up on him, DEST and bombs go off, a spark runs through him into metal he
 	// touches; and when he burns, so does what is next to him
 	std::vector<int> touching;
-	for (auto &p : parts)
+	for (size_t k = 0; k < parts.size(); k++)
 	{
+		auto &p = parts[k];
+		wet[k] = p[5] != 0 ? 0 : std::max(0, wet[k] - 1), frost[k] = std::max(0, frost[k] - 1); // fire dries him
 		if (!std::isfinite(p[0] + p[1] + p[2] + p[3] + p[4])) continue;
 		int cx = int(p[0]) / CELL, cy = int(p[1]) / CELL;
-		if (p[0] >= 0 && p[1] >= 0 && cx < XCELLS && cy < YCELLS)
+		// only fast moves (kicks, throws): he feels the air too, so a slow drift would feed itself and float him away
+		if (p[0] >= 0 && p[1] >= 0 && cx < XCELLS && cy < YCELLS && std::hypot(p[3], p[4]) > 4)
 			sim->vx[cy][cx] += 0.1f * float(p[3]), sim->vy[cy][cx] += 0.1f * float(p[4]);
 		for (int y = std::max(0, int(p[1] - p[2]) - 2); y <= std::min(YRES - 1, int(p[1] + p[2]) + 2); y++)
 			for (int x = std::max(0, int(p[0] - p[2]) - 2); x <= std::min(XRES - 1, int(p[0] + p[2]) + 2); x++)
@@ -194,6 +237,9 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 				{
 					sim->parts[ID(q)].temp += (310.15f - sim->parts[ID(q)].temp) * 0.002f;
 					touching.push_back(ID(q));
+					auto &t = sim->parts[ID(q)];
+					if (t.temp < 223.15f) frost[k] = 600;
+					else if (t.type != PT_ACID && t.temp < 333.15f && (SimulationData::CRef().elements[t.type].Properties & TYPE_LIQUID)) wet[k] = 600;
 				}
 		for (int k = 0; p[5] != 0 && k < 2; k++)
 		{

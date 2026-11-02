@@ -131,6 +131,27 @@ struct Ground {
     bang: Option<(f64, f64)>,     // a part touching something that blows up on him: the game's explode() there
     booms: Vec<[f64; 3]>,         // the game's explosions since TDPT last asked: x, y, power (1 = its bomb)
     game_grav: f64,               // the game's grav this frame, before that
+    ledge: Option<Ledge>,         // the active window's edges he can stand on (as in the desktop app)
+    carry: (f64, f64),            // how far that window moved while he stood on it, not yet applied
+    support: u8,                  // what he stands on: 0 nothing, 1 its top edge, 2 its bottom edge
+}
+
+// The desktop app's one-way ledges (PlatformBridge.as): the active window's top edge from outside and its bottom
+// edge from inside, stage pixels; a row is NaN when it's off screen or too near the top
+#[derive(Clone, Copy, PartialEq)]
+struct Ledge {
+    id: u64,
+    left: f64,
+    right: f64,
+    rows: [f64; 2],
+}
+
+impl Ledge {
+    // which row (1 top, 2 bottom) a foot rests on: within 4 px, not going up fast
+    fn foot(&self, x: f64, y: f64, r: f64, yv: f64) -> u8 {
+        let over = x + r > self.left && x - r < self.right && yv >= -2.0;
+        (1..=2).find(|&k| over && (y + r - self.rows[k as usize - 1]).abs() <= 4.0).unwrap_or(0)
+    }
 }
 
 const WARM: u16 = 0x20; // 60 C and up: hurts
@@ -139,6 +160,7 @@ const COLD: u16 = 0x60; // -50 C and down: slows him, hurts
 const SPARK: u16 = 0x80; // electricity (a spark or an electron): shocks him
 const HURT: u16 = 0x100; // caustic gas, radiation, virus: hurts like acid
 const BANG: u16 = 0x200; // DEST, BOMB, a singularity: blows up on him
+const WINDOW: u16 = 0x400; // a window or icon: its sides stop him like they stop powder; he's in front of it otherwise
 const ACID: u16 = 31; // a kind: acid, a liquid (TPT weight 10) that eats him
 const EATER: u16 = 30; // a kind: VOID or a black hole, which swallows him (he comes back at the top)
 const PORTAL: u16 = 29; // a kind: a portal in, which moves him to its way out (Ground::exit)
@@ -148,7 +170,7 @@ const POSE: [(f64, f64); 6] = [(0.0, 0.0), (0.0, -39.4), (-22.1, -10.2), (22.1, 
 
 impl Default for Ground {
     fn default() -> Self {
-        Self { rect: [0; 4], cells: Vec::new(), want: [0; 4], last: (400.0, 300.0), air_rect: [0; 4], air: Vec::new(), cell: 4, before: ([0; 4], Vec::new()), calm: 0, zap: None, gravity: (0.0, 1.0), game_grav: 1.0, exit: None, jumped: 99, eaten: false, parts: Vec::new(), bang: None, booms: Vec::new() }
+        Self { rect: [0; 4], cells: Vec::new(), want: [0; 4], last: (400.0, 300.0), air_rect: [0; 4], air: Vec::new(), cell: 4, before: ([0; 4], Vec::new()), calm: 0, zap: None, gravity: (0.0, 1.0), game_grav: 1.0, exit: None, jumped: 99, eaten: false, parts: Vec::new(), bang: None, booms: Vec::new(), ledge: None, carry: (0.0, 0.0), support: 0 }
     }
 }
 
@@ -221,6 +243,27 @@ impl Ground {
 
     fn solid(&self, x: i32, y: i32) -> bool {
         self.kind(x, y) == 1
+    }
+
+    // a part's circle touches a window
+    fn window(&self, x: f64, y: f64, r: f64) -> bool {
+        let r2 = r * r;
+        (-(r as i32)..=r as i32).any(|dy| (-(r as i32)..=r as i32).any(|dx| (dx * dx + dy * dy) as f64 <= r2 && self.cell(x as i32 + dx, y as i32 + dy) & WINDOW != 0))
+    }
+
+    // the window the desktop app let him stand on changed or moved: if he stood on it, he rides it
+    fn set_ledge(&mut self, next: Option<Ledge>) {
+        if let (Some(old), Some(new)) = (self.ledge, next)
+            && old.id == new.id
+            && self.support != 0
+            && old.rows[self.support as usize - 1].is_finite()
+            && new.rows[self.support as usize - 1].is_finite()
+        {
+            let k = self.support as usize - 1;
+            self.carry.0 += new.left - old.left;
+            self.carry.1 += new.rows[k] - old.rows[k];
+        }
+        self.ledge = next;
     }
 
     // how much of a circle is in liquid (0-1), and that liquid's mean TPT weight
@@ -330,6 +373,19 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
                 }
             }
         }
+        // the window he stands on moved: he moves with it (all of him, speed kept)
+        let (cx, cy) = std::mem::take(&mut g.carry);
+        if !held && (cx != 0.0 || cy != 0.0) {
+            for part in PARTS {
+                for (f, d) in [("x", cx), ("y", cy), ("ox", cx), ("oy", cy), ("oox", cx), ("ooy", cy)] {
+                    let n = num(v, &format!("{part}.{f}"));
+                    if n.is_finite() {
+                        v.set(&format!("{part}.{f}"), Value::Number(n + d));
+                    }
+                }
+            }
+        }
+        g.support = 0;
         g.last = (num(v, "body.x"), num(v, "body.y"));
         let mut bbox = [f64::MAX, f64::MAX, f64::MIN, f64::MIN];
         let mut standing = false;
@@ -370,8 +426,27 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
                 xv += g.game_grav * g.gravity.0;
             }
             let blown = blown || g.gravity.0 != 0.0;
+            // a window's side stops him going into it sideways (powder too); from above he's in front of it
+            let (ox, oy) = (num(v, &format!("{part}.ox")), num(v, &format!("{part}.oy")));
+            let side = !held && ox.is_finite() && oy.is_finite() && (x - ox).abs() <= xv.abs() + 10.0 && g.window(x, oy, r) && !g.window(ox, oy, r);
+            if side {
+                x = ox;
+                xv *= -0.3;
+            }
             let out = if held { None } else { g.push_out(&mut x, &mut y, &mut xv, &mut yv, r) };
-            if wet || blown || cold > 0 || out.is_some() {
+            // landing on the active window's top or bottom edge from above, as in the desktop app (not when put
+            // somewhere: setBuddyXY, a portal)
+            let mut landed = side;
+            if let Some(l) = g.ledge.filter(|_| !held && yv >= 0.0 && oy.is_finite() && x + r > 0.0) {
+                if let Some(k) = (0..2).find(|&k| x + r > l.left && x - r < l.right && oy + r <= l.rows[k] + 2.0 && y + r >= l.rows[k] && y - oy <= yv.abs() + 10.0) {
+                    y = l.rows[k] - r;
+                    yv = if yv.abs() < 2.0 { 0.0 } else { -yv * 0.25 };
+                    g.support = k as u8 + 1;
+                    landed = true;
+                }
+            }
+            standing |= part.ends_with("Leg") && landed;
+            if wet || blown || cold > 0 || out.is_some() || landed {
                 for (f, n) in [("x", x), ("y", y), ("xv", xv), ("yv", yv)] {
                     v.set(&format!("{part}.{f}"), Value::Number(n));
                 }
@@ -381,6 +456,14 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
             g.parts.push([x, y, r, xv, yv, fire as u8 as f64]);
             let reach = r + 64.0 + xv.abs().max(yv.abs()) * 2.0; // what he can touch by the next frame
             bbox = [bbox[0].min(x - reach), bbox[1].min(y - reach), bbox[2].max(x + reach), bbox[3].max(y + reach)];
+        }
+        if let Some(l) = g.ledge.filter(|_| !held) {
+            for leg in ["lLeg", "rLeg"] {
+                let f = l.foot(num(v, &format!("{leg}.x")), num(v, &format!("{leg}.y")), num(v, &format!("{leg}.rad")), num(v, &format!("{leg}.yv")));
+                if f != 0 {
+                    g.support = f;
+                }
+            }
         }
         if standing {
             v.set("onGround", Value::Bool(true));
@@ -437,7 +520,7 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
         }
         let on = ["lLeg", "rLeg"].iter().any(|leg| {
             let (x, y, r) = (num(v, &format!("{leg}.x")), num(v, &format!("{leg}.y")), num(v, &format!("{leg}.rad")));
-            x.is_finite() && y.is_finite() && r > 0.0 && g.under(x, y, r)
+            x.is_finite() && y.is_finite() && r > 0.0 && (g.under(x, y, r) || g.ledge.is_some_and(|l| l.foot(x, y, r, num(v, &format!("{leg}.yv"))) != 0))
         });
         if on {
             v.set("onGround", Value::Bool(true));
@@ -934,6 +1017,18 @@ pub unsafe extern "C" fn tdpt_buddy_portal(b: *mut Buddy, has: i32, x: f64, y: f
     }
 }
 
+/// The active window's edges he can stand on, stage pixels: its left and right, its top edge and its inside bottom edge
+/// (NaN: that one is off); id 0: none (as in the desktop app, only the active window)
+/// # Safety
+/// b is from tdpt_buddy_open.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tdpt_buddy_ledge(b: *mut Buddy, id: u64, left: f64, right: f64, top: f64, bottom: f64) {
+    let b = unsafe { &mut *b };
+    if let Ok(mut g) = b.ground.lock() {
+        g.set_ledge((id != 0 && left.is_finite() && right > left).then_some(Ledge { id, left, right, rows: [top, bottom] }));
+    }
+}
+
 /// His body parts (up to max): x, y, radius, xv, yv, 1 burning each, stage pixels (per game frame); how many
 /// # Safety
 /// b is from tdpt_buddy_open; out has room for 6 * max.
@@ -1346,6 +1441,86 @@ mod tests {
         game.player.lock().unwrap().call_root_method("explode", vec![300.into(), 400.into(), 1.into()]).unwrap();
         super::OURS.store(false, super::Ordering::Relaxed);
         assert!(game.ground.lock().unwrap().booms.is_empty());
+    }
+
+    // a shorter stage (TDPT's play area ending at the taskbar) is a higher floor: he stands on its bottom
+    #[test]
+    fn floor_follows_stage() {
+        let Some(path) = std::env::var_os("TDPT_BUDDY_SWF") else { return };
+        let mut game = super::open(path.to_str().unwrap(), 1280, 720).unwrap();
+        let mut out = vec![0u32; 1280 * 720];
+        while !super::frame(&mut game, 25.0, 0.0, 0.0, &mut out) {}
+        game.size = (1280, 600);
+        let mut out = vec![0u32; 1280 * 600];
+        for _ in 0..120 {
+            super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+        }
+        let n = |k: &str| match game.player.lock().unwrap().get_root_variable(k) { Value::Number(v) => v, o => panic!("{k} {o:?}") };
+        let (ly, lr) = (n("lLeg.y"), n("lLeg.rad"));
+        println!("stage 600: foot bottom {:.1}", ly + lr);
+        assert!((585.0..=600.0).contains(&(ly + lr)), "not standing on the stage bottom: {}", ly + lr);
+    }
+
+    // the active window: he lands on its top edge, inside it on its bottom edge, and rides it when it moves
+    #[test]
+    fn window_ledges() {
+        let Some(path) = std::env::var_os("TDPT_BUDDY_SWF") else { return };
+        let mut game = super::open(path.to_str().unwrap(), 1280, 720).unwrap();
+        let mut out = vec![0u32; 1280 * 720];
+        while !super::frame(&mut game, 25.0, 0.0, 0.0, &mut out) {}
+        let n = |g: &super::Game, k: &str| match g.player.lock().unwrap().get_root_variable(k) { Value::Number(v) => v, o => panic!("{k} {o:?}") };
+        let ledge = |game: &super::Game, dy: f64| game.ground.lock().unwrap().set_ledge(Some(super::Ledge { id: 7, left: 300.0, right: 900.0, rows: [400.0 + dy, 600.0 + dy] }));
+        game.player.lock().unwrap().call_root_method("setBuddyXY", vec![600.into(), 200.into()]).unwrap();
+        for _ in 0..90 {
+            ledge(&game, 0.0);
+            super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+        }
+        let on = n(&game, "lLeg.y") + n(&game, "lLeg.rad");
+        for i in 1..=30 {
+            ledge(&game, -2.0 * i as f64);
+            super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+        }
+        let rode = n(&game, "lLeg.y") + n(&game, "lLeg.rad");
+        game.player.lock().unwrap().call_root_method("setBuddyXY", vec![600.into(), 480.into()]).unwrap();
+        for _ in 0..90 {
+            ledge(&game, -60.0);
+            super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+        }
+        let inside = n(&game, "lLeg.y") + n(&game, "lLeg.rad");
+        println!("ledges: on top {on:.1}, rode up to {rode:.1}, inside on {inside:.1}");
+        assert!((on - 400.0).abs() < 3.0, "not on the window: {on}");
+        assert!((rode - 340.0).abs() < 5.0, "didn't ride it up: {rode}");
+        assert!((inside - 540.0).abs() < 3.0, "not on its bottom edge: {inside}");
+    }
+
+    // a window's side stops him like it stops powder: thrown at it, he stays out
+    #[test]
+    fn window_sides() {
+        let Some(path) = std::env::var_os("TDPT_BUDDY_SWF") else { return };
+        let mut game = super::open(path.to_str().unwrap(), 1280, 720).unwrap();
+        let mut out = vec![0u32; 1280 * 720];
+        while !super::frame(&mut game, 25.0, 0.0, 0.0, &mut out) {}
+        let n = |g: &super::Game, k: &str| match g.player.lock().unwrap().get_root_variable(k) { Value::Number(v) => v, o => panic!("{k} {o:?}") };
+        game.player.lock().unwrap().call_root_method("setBuddyXY", vec![500.into(), 600.into()]).unwrap();
+        let mut right = 0f64;
+        for i in 0..120 {
+            {
+                let mut g = game.ground.lock().unwrap();
+                let r = g.want;
+                g.cells = (0..r[2] * r[3]).map(|i| if r[0] + i % r[2] >= 700 { super::WINDOW } else { 0 }).collect();
+                g.rect = r;
+            }
+            if (30..60).contains(&i) {
+                let mut p = game.player.lock().unwrap();
+                for part in super::PARTS {
+                    p.set_root_variable(&format!("{part}.xv"), 15.0.into()).unwrap();
+                }
+            }
+            super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+            right = right.max(super::PARTS.iter().map(|p| n(&game, &format!("{p}.x")) + n(&game, &format!("{p}.rad"))).fold(0.0, f64::max));
+        }
+        println!("sides: rightmost {right:.1}");
+        assert!(right < 702.0, "went into the window: {right}");
     }
 
     #[test]

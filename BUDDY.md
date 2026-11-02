@@ -81,6 +81,10 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
       light (PHOT) warms him; DEST, BOMB and singularities blow up on him (the game's explode, plus a TPT blast).
       Ground cells are 16 bits now (0x100 hurts, 0x200 blows up). VOID and portals no longer count as liquids.
 
+- [x] **Desktop floor and windows like the desktop app:** his stage ends 10 px into the taskbar (feet on it, as the
+      app's did); he stands on the active window's top edge and, inside it, its bottom edge, and rides it when it moves
+      (PlatformBridge.as's rules); every window's and icon's sides stop him like they stop powder.
+
 ## 3. Buddy -> Sim (the sim feels him)
 - [x] His body parts are moving solid shapes in the sim (like windows are): sand piles on his head, falls off his shoulders.
       Done: each part is a round moving wall in front of the windows (OverlayBuddy::Walls), also when window and
@@ -103,7 +107,8 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
       Done (Fun "Pets meet Buddy"): they walk over and hop hello when he is calm (then leave him 15 s), and run
       when he flies past (speed > 8) or a game explosion goes off (2 s). Pets already run from his fire.
 - [ ] He sits in TDPT puddles, slides down sand slopes, gets buried and digs out.
-- [ ] Weather hits him: snow piles on his head, rain makes him wet (darker tint).
+- [x] Weather hits him: snow piles on his head, rain makes him wet (darker tint).
+      Done (Fun "Buddy gets wet and frosty"): cool liquid darkens a part for 10 s, -50 C or colder frosts it pale blue; fire dries him.
 - [ ] Wallpaper and window marks from his fire and acid, like the rest of the sim.
 
 ## 5. Checks before merging into main
