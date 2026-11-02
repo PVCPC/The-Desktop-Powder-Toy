@@ -3,7 +3,7 @@
 //! frame. C interface in tdpt_buddy.h.
 use ruffle_core::events::{MouseButton, PlayerEvent};
 use ruffle_core::external::Value;
-use ruffle_core::{FloatDuration, Player, PlayerBuilder, StageAlign, StageScaleMode, ViewportDimensions};
+use ruffle_core::{FloatDuration, Player, PlayerBuilder, RootVars, StageAlign, StageScaleMode, ViewportDimensions};
 use ruffle_render_wgpu::{backend::WgpuRenderBackend, target::TextureTarget, wgpu};
 use sha2::{Digest, Sha256};
 use std::ffi::{CStr, c_char};
@@ -80,6 +80,7 @@ fn patch(mut swf: Vec<u8>) -> Result<Vec<u8>, String> {
 // the game, on its own thread
 struct Game {
     player: Arc<Mutex<Player>>,
+    ground: Arc<Mutex<Ground>>,
     size: (u32, u32),
     mouse: (f64, f64),
     ready: bool,
@@ -103,7 +104,128 @@ fn open(path: &str, w: u32, h: u32) -> Result<Game, String> {
         .with_storage(Box::new(Saves("buddy".into())))
         .build();
     load_fonts(&mut player.lock().unwrap());
-    Ok(Game { player, size: (w, h), mouse: (-1.0, -1.0), ready: false, readback: None })
+    Ok(Game { player, ground: Default::default(), size: (w, h), mouse: (-1.0, -1.0), ready: false, readback: None })
+}
+
+// The sim around him, so he stands on it: one byte per sim pixel (nonzero: solid for him) over rect (x, y, w, h sim
+// pixels, which are his stage pixels). TDPT fills it each frame with the part he asks for (want).
+#[derive(Default)]
+struct Ground {
+    rect: [i32; 4],
+    cells: Vec<u8>,
+    want: [i32; 4],
+}
+
+const PARTS: [&str; 6] = ["body", "head", "lArm", "rArm", "lLeg", "rLeg"];
+
+impl Ground {
+    fn solid(&self, x: i32, y: i32) -> bool {
+        let [rx, ry, w, h] = self.rect;
+        let (u, v) = (x - rx, y - ry);
+        u >= 0 && v >= 0 && u < w && v < h && self.cells.get((v * w + u) as usize).is_some_and(|&c| c != 0)
+    }
+
+    // the solid pixels inside a circle: how many, and the sum of their offsets from its centre
+    fn overlap(&self, x: f64, y: f64, r: f64) -> (u32, f64, f64) {
+        let (mut n, mut sx, mut sy) = (0, 0.0, 0.0);
+        for py in (y - r).floor() as i32..=(y + r).ceil() as i32 {
+            for px in (x - r).floor() as i32..=(x + r).ceil() as i32 {
+                let (dx, dy) = (px as f64 + 0.5 - x, py as f64 + 0.5 - y);
+                if dx * dx + dy * dy <= r * r && self.solid(px, py) {
+                    n += 1;
+                    sx += dx;
+                    sy += dy;
+                }
+            }
+        }
+        (n, sx, sy)
+    }
+
+    // A body part (circle) inside solid: out the way away from the solid, a pixel at a time, and its speed into the
+    // surface bounced like the game's own floor (half back, small speeds stop). The way out, if it was in.
+    // ponytail: a part buried deeper than its size stays put (sand dumped on him); dig out if that looks wrong
+    fn push_out(&self, x: &mut f64, y: &mut f64, xv: &mut f64, yv: &mut f64, r: f64) -> Option<(f64, f64)> {
+        let (n, sx, sy) = self.overlap(*x, *y, r);
+        if n == 0 {
+            return None;
+        }
+        let len = sx.hypot(sy);
+        let (nx, ny) = if len > 1e-9 { (-sx / len, -sy / len) } else { (0.0, -1.0) };
+        for _ in 0..(2.0 * r) as usize + 2 {
+            if self.overlap(*x, *y, r).0 == 0 {
+                break;
+            }
+            *x += nx;
+            *y += ny;
+        }
+        let into = *xv * nx + *yv * ny;
+        if into < 0.0 {
+            let k = if into > -2.0 { 1.0 } else { 1.5 };
+            *xv -= k * into * nx;
+            *yv -= k * into * ny;
+            if ny < -0.5 {
+                *xv *= 0.9; // friction on what he lands on
+            }
+        }
+        Some((nx, ny))
+    }
+
+    // something solid just under a foot (within 2 pixels)
+    fn under(&self, x: f64, y: f64, r: f64) -> bool {
+        (-(r as i32) / 2..=(r as i32) / 2).any(|dx| (1..=2).any(|dy| self.solid(x as i32 + dx, (y + r) as i32 + dy)))
+    }
+}
+
+fn num(v: &mut dyn RootVars, name: &str) -> f64 {
+    match v.get(name) {
+        Value::Number(n) => n,
+        _ => f64::NAN,
+    }
+}
+
+// After the game moves his parts each frame, the sim pushes them out of itself; standing on it counts as standing.
+fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
+    let g = ground.clone();
+    p.hook_after_root_function("doBodyPhysics", Box::new(move |v| {
+        let Ok(mut g) = g.lock() else { return };
+        let held = v.get("fistDrag") == Value::Number(1.0); // held: he goes where the hand goes
+        let mut bbox = [f64::MAX, f64::MAX, f64::MIN, f64::MIN];
+        let mut standing = false;
+        for part in PARTS {
+            let (mut x, mut y) = (num(v, &format!("{part}.x")), num(v, &format!("{part}.y")));
+            let (mut xv, mut yv, r) = (num(v, &format!("{part}.xv")), num(v, &format!("{part}.yv")), num(v, &format!("{part}.rad")));
+            if [x, y, xv, yv, r].iter().any(|n| !n.is_finite()) || r <= 0.0 {
+                continue;
+            }
+            if !held && let Some((_, ny)) = g.push_out(&mut x, &mut y, &mut xv, &mut yv, r) {
+                for (f, n) in [("x", x), ("y", y), ("xv", xv), ("yv", yv)] {
+                    v.set(&format!("{part}.{f}"), Value::Number(n));
+                }
+                standing |= part.ends_with("Leg") && ny < -0.5;
+            }
+            let reach = r + 64.0 + xv.abs().max(yv.abs()) * 2.0; // what he can touch by the next frame
+            bbox = [bbox[0].min(x - reach), bbox[1].min(y - reach), bbox[2].max(x + reach), bbox[3].max(y + reach)];
+        }
+        if standing {
+            v.set("onGround", Value::Bool(true));
+        }
+        if bbox[0] <= bbox[2] {
+            g.want = [bbox[0] as i32, bbox[1] as i32, (bbox[2] - bbox[0]) as i32 + 1, (bbox[3] - bbox[1]) as i32 + 1];
+        }
+    }))
+    .ok();
+    let g = ground.clone();
+    p.hook_after_root_function("setBasicVars", Box::new(move |v| {
+        let Ok(g) = g.lock() else { return };
+        let on = ["lLeg", "rLeg"].iter().any(|leg| {
+            let (x, y, r) = (num(v, &format!("{leg}.x")), num(v, &format!("{leg}.y")), num(v, &format!("{leg}.rad")));
+            x.is_finite() && y.is_finite() && r > 0.0 && g.under(x, y, r)
+        });
+        if on {
+            v.set("onGround", Value::Bool(true));
+        }
+    }))
+    .ok();
 }
 
 // The game's saves (his money, what's been bought), a file each in this folder: TPT runs in its data folder, so
@@ -183,6 +305,7 @@ fn frame(b: &mut Game, dt_ms: f64, mx: f64, my: f64, out: &mut [u32]) -> bool {
         p.set_window_mode("transparent");
         p.call_root_method("__hostMenuCommand", vec!["surface|desktop".into()]).ok();
         p.set_root_variable("__hostSmooth", "true".into()).ok();
+        hook_ground(&mut p, &b.ground);
     }
     p.call_root_method("__hostRender", vec![]).ok();
     p.render();
@@ -329,6 +452,7 @@ struct Shared {
 
 pub struct Buddy {
     shared: Arc<Mutex<Shared>>,
+    ground: Arc<Mutex<Ground>>,
     thread: Option<std::thread::JoinHandle<()>>,
     front: Vec<u32>, // the frame TDPT is drawing
 }
@@ -418,7 +542,7 @@ pub unsafe extern "C" fn tdpt_buddy_open(path: *const c_char, w: u32, h: u32, er
         std::thread::Builder::new().name("buddy".into()).stack_size(16 << 20).spawn(move || {
             match catch_unwind(|| open(&path, w, h)) {
                 Ok(Ok(game)) => {
-                    tell.send(Ok(())).ok();
+                    tell.send(Ok(game.ground.clone())).ok();
                     run(game, shared);
                 }
                 Ok(Err(e)) => drop(tell.send(Err(e))),
@@ -426,8 +550,8 @@ pub unsafe extern "C" fn tdpt_buddy_open(path: *const c_char, w: u32, h: u32, er
             }
         })
     };
-    match thread.map_err(|e| e.to_string()).and_then(|t| told.recv().map_err(|e| e.to_string())?.map(|()| t)) {
-        Ok(t) => Box::into_raw(Box::new(Buddy { shared, thread: Some(t), front: Vec::new() })),
+    match thread.map_err(|e| e.to_string()).and_then(|t| told.recv().map_err(|e| e.to_string())?.map(|g| (t, g))) {
+        Ok((t, ground)) => Box::into_raw(Box::new(Buddy { shared, ground, thread: Some(t), front: Vec::new() })),
         Err(e) => {
             say(error, error_len, &e);
             std::ptr::null_mut()
@@ -486,6 +610,31 @@ pub unsafe extern "C" fn tdpt_buddy_command(b: *mut Buddy, command: *const c_cha
     let command = unsafe { CStr::from_ptr(command) }.to_string_lossy().into_owned();
     if let Ok(mut s) = b.shared.lock() {
         s.commands.push(command);
+    }
+}
+
+/// The part of the sim he needs next, for tdpt_buddy_ground: rect = x, y, w, h (sim pixels, maybe partly off the sim)
+/// # Safety
+/// b is from tdpt_buddy_open; rect has room for 4.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tdpt_buddy_area(b: *mut Buddy, rect: *mut i32) {
+    let b = unsafe { &mut *b };
+    let want = b.ground.lock().map(|g| g.want).unwrap_or_default();
+    unsafe { std::ptr::copy_nonoverlapping(want.as_ptr(), rect, 4) };
+}
+
+/// The sim over rect (x, y, w, h): w * h bytes, rows top down, nonzero where it's solid for him
+/// # Safety
+/// b is from tdpt_buddy_open; rect has 4; cells has w * h.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tdpt_buddy_ground(b: *mut Buddy, rect: *const i32, cells: *const u8) {
+    let b = unsafe { &mut *b };
+    let rect: [i32; 4] = unsafe { std::ptr::read(rect as *const [i32; 4]) };
+    let n = (rect[2].max(0) as usize) * (rect[3].max(0) as usize);
+    if let Ok(mut g) = b.ground.lock() {
+        g.rect = rect;
+        g.cells.clear();
+        g.cells.extend_from_slice(unsafe { std::slice::from_raw_parts(cells, n) });
     }
 }
 
@@ -550,6 +699,49 @@ mod tests {
     }
 
     #[test]
+    fn ground_push_out() {
+        // a floor from y = 100 down
+        let g = super::Ground { rect: [0, 0, 200, 200], cells: (0..200 * 200).map(|i| (i / 200 >= 100) as u8).collect(), want: [0; 4] };
+        let (mut x, mut y, mut xv, mut yv) = (50.0, 95.0, 1.0, 6.0);
+        let n = g.push_out(&mut x, &mut y, &mut xv, &mut yv, 10.0).expect("in the floor");
+        assert!(n.1 < -0.9 && y <= 90.5 && y > 88.0, "{n:?} {y}");
+        assert!(yv < 0.0 && xv < 1.0, "bounces up with friction: {xv} {yv}");
+        assert!(g.under(x, y, 10.0));
+        assert!(g.push_out(&mut x, &mut y, &mut xv, &mut yv, 10.0).is_none());
+    }
+
+    // a block under him: he lands on it and stands there instead of falling to the bottom of the stage
+    #[test]
+    fn stands_on_a_pile() {
+        let Some(path) = std::env::var_os("TDPT_BUDDY_SWF") else { return };
+        let mut game = super::open(path.to_str().unwrap(), 1280, 720).unwrap();
+        let mut out = vec![0u32; 1280 * 720];
+        let mut n = 0;
+        while !super::frame(&mut game, 25.0, 0.0, 0.0, &mut out) {
+            n += 1;
+            assert!(n < 400, "never ready");
+        }
+        // a 600 px wide block, top at y = 400, filled in wherever he asks for
+        let fill = |game: &super::Game| {
+            let mut g = game.ground.lock().unwrap();
+            let r = g.want;
+            g.cells = (0..r[2] * r[3]).map(|i| { let (x, y) = (r[0] + i % r[2], r[1] + i / r[2]); (y >= 400 && (300..900).contains(&x)) as u8 }).collect();
+            g.rect = r;
+        };
+        game.player.lock().unwrap().call_root_method("setBuddyXY", vec![600.into(), 200.into()]).unwrap();
+        for _ in 0..200 {
+            fill(&game);
+            super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+        }
+        let mut p = game.player.lock().unwrap();
+        let y = |p: &mut ruffle_core::Player, n: &str| match p.get_root_variable(n) { Value::Number(v) => v, o => panic!("{n} {o:?}") };
+        let (ly, lr, by) = (y(&mut p, "lLeg.y"), y(&mut p, "lLeg.rad"), y(&mut p, "body.y"));
+        println!("lLeg bottom {:.1}, body {by:.1}, onGround {:?}, cam {:?} {:?} {:?}", ly + lr, p.get_root_variable("onGround"), p.get_root_variable("camx"), p.get_root_variable("camy"), p.get_root_variable("camz"));
+        assert!((ly + lr - 400.0).abs() < 4.0, "feet not on the block: {}", ly + lr);
+        assert!(by < 400.0, "body sank: {by}");
+    }
+
+    #[test]
     fn hit_shapes() {
         let h = super::hits("e,10,20,100,100;u,150,0,30,40;c,170,0,10,10,42;e,0,0,NaN,10;junk;");
         assert_eq!(h.len(), 3);
@@ -583,8 +775,9 @@ mod tests {
         for _ in 0..80 {
             super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
         }
-        // ease the fist onto him from above, then let it rest
+        // ease the fist onto him from above, then let it rest (a bit off his centre: right on it, the game divides by 0)
         let (x, y) = body(&game);
+        let x = x + 3.0;
         for i in (0..=60).rev() {
             super::frame(&mut game, 25.0, x, y - 2.0 * i as f64, &mut out);
         }

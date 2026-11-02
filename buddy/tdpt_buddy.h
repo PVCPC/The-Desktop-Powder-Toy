@@ -16,5 +16,9 @@ extern "C"
 	// into out (cut short to len); returns the length needed
 	size_t tdpt_buddy_menus(Buddy *b, char *out, size_t len);
 	void tdpt_buddy_command(Buddy *b, const char *command); // a command from those lines, for the game
+	// the part of the sim he needs next: rect = x, y, w, h sim pixels (maybe partly off the sim)
+	void tdpt_buddy_area(Buddy *b, int32_t rect[4]);
+	// the sim over rect: w * h bytes, rows top down, nonzero where it's solid for him
+	void tdpt_buddy_ground(Buddy *b, const int32_t rect[4], const uint8_t *cells);
 	void tdpt_buddy_close(Buddy *b);
 }

@@ -1,8 +1,34 @@
+diff --git a/core/src/avm1.rs b/core/src/avm1.rs
+index 857fe50d..293d9fda 100644
+--- a/core/src/avm1.rs
++++ b/core/src/avm1.rs
+@@ -32,7 +32,7 @@ pub use activation::{Activation, ActivationIdentifier};
+ pub use debug::VariableDumper;
+ pub use error::Error;
+ pub use flv::FlvValueAvm1Ext;
+-pub use function::ExecutionReason;
++pub use function::{ExecutionReason, FunctionObject, NativeFunction};
+ pub use globals::array::ArrayBuilder;
+ pub use globals::context_menu::make_context_menu_state;
+ pub use globals::sound::start as start_sound;
+diff --git a/core/src/lib.rs b/core/src/lib.rs
+index d76c1cba..5f568843 100644
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -62,7 +62,7 @@ pub use context_menu::ContextMenuItem;
+ pub use events::PlayerEvent;
+ pub use indexmap;
+ pub use loader::LoadBehavior;
+-pub use player::{Player, PlayerBuilder, PlayerMode, PlayerRuntime, StaticCallstack};
++pub use player::{Player, PlayerBuilder, PlayerMode, PlayerRuntime, RootVars, StaticCallstack};
+ pub use ruffle_common::duration::FloatDuration;
+ pub use ruffle_render::backend::ViewportDimensions;
+ pub use swf;
 diff --git a/core/src/player.rs b/core/src/player.rs
-index c3756621..143da9b6 100644
+index c3756621..c6d9c3dd 100644
 --- a/core/src/player.rs
 +++ b/core/src/player.rs
-@@ -2520,6 +2520,56 @@ impl Player {
+@@ -2520,6 +2520,85 @@ impl Player {
          });
      }
  
@@ -56,6 +82,89 @@ index c3756621..143da9b6 100644
 +        })
 +    }
 +
++    /// Runs `hook` right after every call of the root ActionScript function `name` (up to 4 hooks per thread), inside
++    /// the game's own frame: a native wrapper calls the original, then the hook, which reads and writes root variables.
++    pub fn hook_after_root_function(&mut self, name: &str, hook: Box<dyn FnMut(&mut dyn RootVars)>) -> Result<(), String> {
++        let slot = HOST_HOOKS.with(|h| h.borrow().len());
++        let native: crate::avm1::NativeFunction = match slot {
++            0 => host_hooked::<0>,
++            1 => host_hooked::<1>,
++            2 => host_hooked::<2>,
++            3 => host_hooked::<3>,
++            _ => return Err("Too many host hooks".into()),
++        };
++        self.update(|context| {
++            let root = context.stage.root_clip().ok_or("Missing root movie")?;
++            let object = root.object1().ok_or("Root movie is not AVM1")?;
++            let mut activation = Activation::from_nothing(
++                context, ActivationIdentifier::root("Native host hook"), root,
++            );
++            let key = AvmString::new_utf8(activation.gc(), name);
++            let original = object.get(key, &mut activation).map_err(|error| format!("{error:?}"))?;
++            let saved = AvmString::new_utf8(activation.gc(), format!("__hostOriginal{slot}"));
++            object.set(saved, original, &mut activation).map_err(|error| format!("{error:?}"))?;
++            let fn_proto = activation.resolve_prototype([AvmString::new_utf8(activation.gc(), "Function")]);
++            let function = crate::avm1::FunctionObject::native(native).build(activation.strings(), fn_proto, None);
++            object.set(key, function, &mut activation).map_err(|error| format!("{error:?}"))
++        })?;
++        HOST_HOOKS.with(|h| h.borrow_mut().push(hook));
++        Ok(())
++    }
++
      pub fn call_internal_interface(
          &mut self,
          name: &str,
+@@ -2624,6 +2703,53 @@ impl Player {
+     }
+ }
+ 
++/// Root variables, for a host hook (Player::hook_after_root_function); names as in get_root_variable.
++pub trait RootVars {
++    fn get(&mut self, name: &str) -> ExternalValue;
++    fn set(&mut self, name: &str, value: ExternalValue);
++}
++
++thread_local! {
++    static HOST_HOOKS: std::cell::RefCell<Vec<Box<dyn FnMut(&mut dyn RootVars)>>> = Default::default();
++}
++
++struct HostVars<'a, 'b, 'gc>(&'a mut Activation<'b, 'gc>);
++
++impl RootVars for HostVars<'_, '_, '_> {
++    fn get(&mut self, name: &str) -> ExternalValue {
++        let key = AvmString::new_utf8(self.0.gc(), format!("_root.{name}"));
++        self.0.get_variable(key)
++            .and_then(|value| ExternalValue::from_avm1(self.0, value.into()))
++            .unwrap_or(ExternalValue::Undefined)
++    }
++
++    fn set(&mut self, name: &str, value: ExternalValue) {
++        let key = AvmString::new_utf8(self.0.gc(), format!("_root.{name}"));
++        let value = value.into_avm1(self.0);
++        self.0.set_variable(key, value).ok();
++    }
++}
++
++fn host_hooked<'gc, const N: usize>(
++    activation: &mut Activation<'_, 'gc>,
++    _this: Object<'gc>,
++    args: &[Value<'gc>],
++) -> Result<Value<'gc>, crate::avm1::Error<'gc>> {
++    let Some(root) = activation.context.stage.root_clip().and_then(|root| root.object1()) else {
++        return Ok(Value::Undefined);
++    };
++    let saved = AvmString::new_utf8(activation.gc(), format!("__hostOriginal{N}"));
++    let result = root.call_method(saved, args, activation, crate::avm1::ExecutionReason::Special)?;
++    HOST_HOOKS.with(|hooks| {
++        if let Ok(mut hooks) = hooks.try_borrow_mut() {
++            if let Some(hook) = hooks.get_mut(N) {
++                hook(&mut HostVars(activation));
++            }
++        }
++    });
++    Ok(result)
++}
++
+ impl Drop for Player {
+     fn drop(&mut self) {
+         self.flush_shared_objects();

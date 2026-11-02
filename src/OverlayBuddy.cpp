@@ -2,6 +2,12 @@
 #include "Overlay.h"
 #include "OverlayWindows.h"
 #include "SimulationConfig.h"
+#include "gui/game/GameController.h"
+#include "gui/game/GameModel.h"
+#include "simulation/Simulation.h"
+#include "simulation/SimulationData.h"
+#include "simulation/ElementClasses.h"
+#include <algorithm>
 #include "prefs/GlobalPrefs.h"
 #include "../buddy/tdpt_buddy.h"
 #ifdef _WIN32
@@ -9,14 +15,15 @@
 #include <SDL.h>
 #include <SDL_syswm.h>
 #include <windows.h>
-#include <vector>
 #endif
+#include <vector>
 
 namespace
 {
 	Buddy *buddy = nullptr;
 	ByteString failed;            // the file that last failed to open: not retried until another is chosen
 	const uint32_t *frame = nullptr; // his newest frame, XRES x YRES premultiplied (null: nothing shown)
+	std::vector<uint8_t> ground;  // the sim around him, for tdpt_buddy_ground
 	bool held = false;            // a press that went to him, until its release
 	double heldX, heldY;          // where TPT's window last saw the mouse while held (it has the mouse captured)
 }
@@ -41,6 +48,21 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
 		}
 	}
 	if (!buddy) return false;
+	// what he stands on: windows and icons (not their holes), powders and solids, and walls a powder can't pass
+	int32_t r[4];
+	tdpt_buddy_area(buddy, r);
+	r[2] = std::clamp(r[2], 0, XRES * 2), r[3] = std::clamp(r[3], 0, YRES * 2);
+	ground.assign(size_t(r[2]) * r[3], 0);
+	auto *sim = GameController::Ref().GetModel()->GetSimulation();
+	auto &elements = SimulationData::CRef().elements;
+	for (int y = std::max(r[1], 0); y < std::min(r[1] + r[3], YRES); y++)
+		for (int x = std::max(r[0], 0); x < std::min(r[0] + r[2], XRES); x++)
+		{
+			int p = sim->pmap[y][x];
+			ground[size_t(y - r[1]) * r[2] + x - r[0]] = (sim->PixelWall(x, y) && !sim->HoleAt(x, y)) ||
+				(p && (elements[TYP(p)].Properties & (TYPE_PART | TYPE_SOLID))) || sim->IsWallBlocking(x, y, PT_DUST);
+		}
+	tdpt_buddy_ground(buddy, r, ground.data());
 	frame = held ? tdpt_buddy_frame(buddy, heldX, heldY, XRES, YRES) : tdpt_buddy_frame(buddy, mx, my, XRES, YRES);
 	if (!frame) return true;
 	// his premultiplied pixels over the frame's
