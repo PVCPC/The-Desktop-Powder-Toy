@@ -1,5 +1,8 @@
 #pragma once
 #include <cstdint>
+#include <vector>
+
+struct OverlayWall;
 
 // Interactive Buddy (Fun tab, Overlay.Fun.Buddy): the user's own copy of the game run by Ruffle (buddy/), drawn over
 // the sim in sim pixels, so his stage is the sim's XRES x YRES and the two share coordinates.
@@ -14,6 +17,8 @@ namespace OverlayBuddy
 	// A right-click at (x, y) frame pixels on him: the game's own menus (Items picks the Fist, which drags him). True
 	// when it was his.
 	bool Menu(int x, int y);
+	// His body parts as solids the sim feels (put in front of walls): sand rests on him, he shoves what he moves into
+	void Walls(std::vector<OverlayWall> &walls);
 	// Shuts him down, which writes the game's saves (TDPT's exit)
 	void Close();
 }

@@ -8,6 +8,7 @@ use ruffle_render_wgpu::{backend::WgpuRenderBackend, target::TextureTarget, wgpu
 use sha2::{Digest, Sha256};
 use std::ffi::{CStr, c_char};
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -126,6 +127,8 @@ struct Ground {
     exit: Option<(f64, f64)>,     // where the portal in his reach comes out
     jumped: u32,                  // frames since he went through one (not straight back in)
     eaten: bool,                  // swallowed this frame: he comes back at the top
+    parts: Vec<[f64; 5]>,         // his parts after this frame: x, y, radius, xv, yv (for the sim to feel him)
+    booms: Vec<[f64; 3]>,         // the game's explosions since TDPT last asked: x, y, power (1 = its bomb)
     game_grav: f64,               // the game's grav this frame, before that
 }
 
@@ -142,7 +145,7 @@ const POSE: [(f64, f64); 6] = [(0.0, 0.0), (0.0, -39.4), (-22.1, -10.2), (22.1, 
 
 impl Default for Ground {
     fn default() -> Self {
-        Self { rect: [0; 4], cells: Vec::new(), want: [0; 4], last: (400.0, 300.0), air_rect: [0; 4], air: Vec::new(), cell: 4, before: ([0; 4], Vec::new()), calm: 0, zap: None, gravity: (0.0, 1.0), game_grav: 1.0, exit: None, jumped: 99, eaten: false }
+        Self { rect: [0; 4], cells: Vec::new(), want: [0; 4], last: (400.0, 300.0), air_rect: [0; 4], air: Vec::new(), cell: 4, before: ([0; 4], Vec::new()), calm: 0, zap: None, gravity: (0.0, 1.0), game_grav: 1.0, exit: None, jumped: 99, eaten: false, parts: Vec::new(), booms: Vec::new() }
     }
 }
 
@@ -329,6 +332,7 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
         let mut standing = false;
         let (mut hot, mut warm, mut doused, mut cold, mut zap) = (false, 0, false, 0, None);
         let mut portal = false;
+        g.parts.clear();
         for part in PARTS {
             let (mut x, mut y) = (num(v, &format!("{part}.x")), num(v, &format!("{part}.y")));
             let (mut xv, mut yv, r) = (num(v, &format!("{part}.xv")), num(v, &format!("{part}.yv")), num(v, &format!("{part}.rad")));
@@ -367,6 +371,7 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
                 }
             }
             standing |= part.ends_with("Leg") && out.is_some_and(|(_, ny)| ny < -0.5);
+            g.parts.push([x, y, r, xv, yv]);
             let reach = r + 64.0 + xv.abs().max(yv.abs()) * 2.0; // what he can touch by the next frame
             bbox = [bbox[0].min(x - reach), bbox[1].min(y - reach), bbox[2].max(x + reach), bbox[3].max(y + reach)];
         }
@@ -432,7 +437,23 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
         }
     }))
     .ok();
+    // the game's own explosions (bombs, grenades, scripts) go to TPT as a blast; not the ones TPT itself set off
+    let g = ground.clone();
+    p.hook_after_root_function("explode", Box::new(move |v| {
+        if OURS.load(Ordering::Relaxed) {
+            return;
+        }
+        let Ok(mut g) = g.lock() else { return };
+        let (x, y, power) = (num(v, "explodex"), num(v, "explodey"), num(v, "explodep"));
+        if x.is_finite() && y.is_finite() && power > 0.0 && g.booms.len() < 16 {
+            g.booms.push([x, y, power.min(5.0)]);
+            g.calm = 30; // its pressure isn't another explosion for him
+        }
+    }))
+    .ok();
 }
+
+static OURS: AtomicBool = AtomicBool::new(false); // TPT's blast is calling the game's explode()
 
 // The game's saves (his money, what's been bought), a file each in this folder: TPT runs in its data folder, so
 // they sit next to its own.
@@ -505,7 +526,9 @@ fn frame(b: &mut Game, dt_ms: f64, mx: f64, my: f64, out: &mut [u32]) -> bool {
     }
     if b.ready && let Ok(mut g) = b.ground.lock() {
         if let Some((x, y, power)) = g.blast() {
+            OURS.store(true, Ordering::Relaxed);
             p.call_root_method("explode", vec![x.into(), y.into(), power.into()]).ok();
+            OURS.store(false, Ordering::Relaxed);
         }
         // ponytail: the game's shock() also lights its toys near the mouse (it was the mouse's zapper); fine for now
         if let Some((x, y)) = g.zap.take() {
@@ -898,6 +921,31 @@ pub unsafe extern "C" fn tdpt_buddy_portal(b: *mut Buddy, has: i32, x: f64, y: f
     }
 }
 
+/// His body parts (up to max): x, y, radius, xv, yv each, stage pixels (per game frame); how many
+/// # Safety
+/// b is from tdpt_buddy_open; out has room for 5 * max.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tdpt_buddy_parts(b: *mut Buddy, out: *mut f64, max: usize) -> usize {
+    let b = unsafe { &mut *b };
+    let Ok(g) = b.ground.lock() else { return 0 };
+    let n = g.parts.len().min(max);
+    unsafe { std::ptr::copy_nonoverlapping(g.parts.as_ptr() as *const f64, out, n * 5) };
+    n
+}
+
+/// The game's explosions since the last call (up to max): x, y, power each (1 = its bomb); how many
+/// # Safety
+/// b is from tdpt_buddy_open; out has room for 3 * max.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tdpt_buddy_booms(b: *mut Buddy, out: *mut f64, max: usize) -> usize {
+    let b = unsafe { &mut *b };
+    let Ok(mut g) = b.ground.lock() else { return 0 };
+    let n = g.booms.len().min(max);
+    unsafe { std::ptr::copy_nonoverlapping(g.booms.as_ptr() as *const f64, out, n * 3) };
+    g.booms.clear();
+    n
+}
+
 /// what: 1 left button down, 2 up, at (x, y) stage pixels
 /// # Safety
 /// b is from tdpt_buddy_open.
@@ -1239,6 +1287,22 @@ mod tests {
             back |= n(&game, "body.y") < 200.0 && (n(&game, "body.x") - 640.0).abs() < 60.0;
         }
         assert!(back, "never came back after the void");
+    }
+
+    // the game's own bomb is passed on to TDPT; TPT's blast calling explode() is not
+    #[test]
+    fn game_booms() {
+        let Some(path) = std::env::var_os("TDPT_BUDDY_SWF") else { return };
+        let mut game = super::open(path.to_str().unwrap(), 1280, 720).unwrap();
+        let mut out = vec![0u32; 1280 * 720];
+        while !super::frame(&mut game, 25.0, 0.0, 0.0, &mut out) {}
+        game.player.lock().unwrap().call_root_method("explode", vec![300.into(), 400.into(), 1.into()]).unwrap();
+        let booms = std::mem::take(&mut game.ground.lock().unwrap().booms);
+        assert_eq!(booms, vec![[300.0, 400.0, 1.0]]);
+        super::OURS.store(true, super::Ordering::Relaxed);
+        game.player.lock().unwrap().call_root_method("explode", vec![300.into(), 400.into(), 1.into()]).unwrap();
+        super::OURS.store(false, super::Ordering::Relaxed);
+        assert!(game.ground.lock().unwrap().booms.is_empty());
     }
 
     #[test]

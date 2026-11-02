@@ -28,5 +28,9 @@ extern "C"
 	void tdpt_buddy_gravity(Buddy *b, double gx, double gy);
 	// where the portal in his reach comes out (sim pixels); has = 0: none
 	void tdpt_buddy_portal(Buddy *b, int32_t has, double x, double y);
+	// his body parts (up to max): x, y, radius, xv, yv each (stage pixels, per game frame); how many
+	size_t tdpt_buddy_parts(Buddy *b, double *out, size_t max);
+	// the game's explosions since the last call (up to max): x, y, power each (1 = its bomb); how many
+	size_t tdpt_buddy_booms(Buddy *b, double *out, size_t max);
 	void tdpt_buddy_close(Buddy *b);
 }

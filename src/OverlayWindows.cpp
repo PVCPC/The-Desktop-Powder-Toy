@@ -2,6 +2,7 @@
 // software with per-pixel alpha. The look is a Theme (Windows Vista, 7, 8, 10, Classic Mac, macOS).
 #include "OverlayWindows.h"
 #include "OverlayWalls.h"
+#include "OverlayBuddy.h"
 #ifdef _WIN32
 #undef _WIN32_WINNT
 #define _WIN32_WINNT 0x0602 // IFolderView2 for the desktop icons, IDesktopWallpaper for holes (the build targets XP)
@@ -6724,8 +6725,11 @@ static void TickWindowWalls()
 #endif
 	if (overlayWindowed || (!doWindows && !doIcons && gaps.empty() && !broom) || sw <= 0 || sh <= 0)
 	{
-		sim->pixelWalls.clear();
 		wallRects.clear();
+		std::vector<OverlayWall> him;
+		OverlayBuddy::Walls(him); // he is still solid
+		if (him.empty()) sim->pixelWalls.clear();
+		else OverlayApplyWalls(sim, him);
 		return;
 	}
 	std::map<HWND, RECT> now;
@@ -7200,6 +7204,7 @@ static void TickWindowWalls()
 			if (w.x1 > w.x0 && w.y1 > w.y0) wins.push_back(w);
 		}
 	iconRects = std::move(iconsNow);
+	OverlayBuddy::Walls(wins); // his body, in front
 
 	OverlayApplyWalls(sim, wins);
 #ifdef __APPLE__

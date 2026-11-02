@@ -79,11 +79,18 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
       the top middle via the game's setBuddyXY). NBHL's pull comes through the Newtonian gravity.
 
 ## 3. Buddy -> Sim (the sim feels him)
-- [ ] His body parts are moving solid shapes in the sim (like windows are): sand piles on his head, falls off his shoulders.
-- [ ] Moving parts shove particles (his speed into theirs), so kicking or throwing him splashes water and scatters sand.
-- [ ] He displaces air as he moves (a small push into the air grid).
-- [ ] His temperature: he warms what he touches a little (body heat), so snow melts on him slowly.
-- [ ] The game's own projectiles and items (grenades, bombs) become sim events: their explosions make a TPT blast too.
+- [x] His body parts are moving solid shapes in the sim (like windows are): sand piles on his head, falls off his shoulders.
+      Done: each part is a round moving wall in front of the windows (OverlayBuddy::Walls), also when window and
+      icon walls are off. Checked in TDPT: up to 100 grains rest on him, none inside, they slide off as he walks.
+- [x] Moving parts shove particles (his speed into theirs), so kicking or throwing him splashes water and scatters sand.
+      Done: the walls carry his speed, so the windows' own shove moves what he moves onto (with that speed).
+- [x] He displaces air as he moves (a small push into the air grid).
+      Done: 0.1 of each part's speed goes into the air cell it is in, every sim tick.
+- [x] His temperature: he warms what he touches a little (body heat), so snow melts on him slowly.
+      Done: anything within 2 px of a part moves 0.2% a tick toward 37 C.
+- [x] The game's own projectiles and items (grenades, bombs) become sim events: their explosions make a TPT blast too.
+      Done: a hook on the game's explode() sends its spot to TDPT (tdpt_buddy_booms): pressure 40 x power over
+      4 x power cells and a ball of fire. TPT's own blasts that call explode() are not sent back (no loop).
 
 ## 4. Fun extras (each a toggle, off by default)
 - [ ] Pets react to him (wave, run away when he explodes).

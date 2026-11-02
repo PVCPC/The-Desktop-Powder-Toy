@@ -2,6 +2,8 @@
 #include "Overlay.h"
 #include "OverlayWindows.h"
 #include "SimulationConfig.h"
+#include "OverlayWalls.h"
+#include <cmath>
 #include "gui/game/GameController.h"
 #include "gui/game/GameModel.h"
 #include "simulation/Simulation.h"
@@ -17,6 +19,7 @@
 #include <windows.h>
 #endif
 #include <vector>
+#include <array>
 
 namespace
 {
@@ -24,6 +27,13 @@ namespace
 	ByteString failed;            // the file that last failed to open: not retried until another is chosen
 	const uint32_t *frame = nullptr; // his newest frame, XRES x YRES premultiplied (null: nothing shown)
 	std::vector<uint8_t> ground;  // the sim around him, for tdpt_buddy_ground
+	std::vector<std::array<double, 5>> parts; // his body: x, y, radius, xv, yv (tdpt_buddy_parts)
+	bool Mine(int x, int y) // inside one of his own parts (his walls are not ground to himself)
+	{
+		for (auto &p : parts)
+			if ((x + 0.5 - p[0]) * (x + 0.5 - p[0]) + (y + 0.5 - p[1]) * (y + 0.5 - p[1]) <= (p[2] + 1) * (p[2] + 1)) return true;
+		return false;
+	}
 	std::vector<float> air;       // and its air (velocity, pressure), for tdpt_buddy_air
 	bool held = false;            // a press that went to him, until its release
 	double heldX, heldY;          // where TPT's window last saw the mouse while held (it has the mouse captured)
@@ -65,7 +75,7 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
 		{
 			int p = sim->pmap[y][x];
 			auto &c = ground[size_t(y - r[1]) * r[2] + x - r[0]];
-			if ((sim->PixelWall(x, y) && !sim->HoleAt(x, y)) || sim->IsWallBlocking(x, y, PT_DUST)) c = 1;
+			if ((sim->PixelWall(x, y) && !sim->HoleAt(x, y) && !Mine(x, y)) || sim->IsWallBlocking(x, y, PT_DUST)) c = 1;
 			else if (p && (elements[TYP(p)].Properties & (TYPE_PART | TYPE_SOLID))) c = 1;
 			else if (p && (elements[TYP(p)].Properties & TYPE_LIQUID)) c = uint8_t(2 + (std::clamp(elements[TYP(p)].Weight, 0, 100) + 2) / 4);
 			if (!p) continue;
@@ -111,6 +121,22 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
 	int cx = std::clamp(r[0] + r[2] / 2, 0, XRES - 1), cy = std::clamp(r[1] + r[3] / 2, 0, YRES - 1);
 	if (r[2] > 0) sim->GetGravityField(cx, cy, 1.0f, 10.0f, gx, gy);
 	tdpt_buddy_gravity(buddy, gx, gy);
+	// the game's own explosions: a TPT blast there (pressure, power 1 about a bomb's, and a ball of fire)
+	double booms[16 * 3];
+	for (size_t i = 0, n = tdpt_buddy_booms(buddy, booms, 16); i < n; i++)
+	{
+		double bx = booms[i * 3], by = booms[i * 3 + 1], power = booms[i * 3 + 2];
+		int R = std::max(2, int(4 * power)); // cells
+		for (int y = int(by) / CELL - R; y <= int(by) / CELL + R; y++)
+			for (int x = int(bx) / CELL - R; x <= int(bx) / CELL + R; x++)
+				if (double d = std::hypot(x - bx / CELL, y - by / CELL); x >= 0 && y >= 0 && x < XCELLS && y < YCELLS && d < R)
+					sim->pv[y][x] = std::min(256.0f, sim->pv[y][x] + float(40 * power * (1 - d / R)));
+		int F = int(8 * power); // pixels
+		for (int y = int(by) - F; y <= int(by) + F; y++)
+			for (int x = int(bx) - F; x <= int(bx) + F; x++)
+				if (x >= 0 && y >= 0 && x < XRES && y < YRES && std::hypot(x - bx, y - by) < F && sim->rng.chance(1, 3))
+					sim->create_part(-1, x, y, PT_FIRE);
+	}
 	frame = held ? tdpt_buddy_frame(buddy, heldX, heldY, XRES, YRES) : tdpt_buddy_frame(buddy, mx, my, XRES, YRES);
 	if (!frame) return true;
 	// his premultiplied pixels over the frame's
@@ -128,12 +154,48 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
 	return true;
 }
 
+void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
+{
+	if (!buddy || !frame)
+	{
+		parts.clear();
+		return;
+	}
+	parts.resize(8);
+	parts.resize(tdpt_buddy_parts(buddy, parts[0].data(), parts.size()));
+	// he pushes the air he moves through (0.1 of his speed) and warms what touches him, slowly, toward 37 C
+	auto *sim = GameController::Ref().GetModel()->GetSimulation();
+	for (auto &p : parts)
+	{
+		if (!std::isfinite(p[0] + p[1] + p[2] + p[3] + p[4])) continue;
+		int cx = int(p[0]) / CELL, cy = int(p[1]) / CELL;
+		if (p[0] >= 0 && p[1] >= 0 && cx < XCELLS && cy < YCELLS)
+			sim->vx[cy][cx] += 0.1f * float(p[3]), sim->vy[cy][cx] += 0.1f * float(p[4]);
+		for (int y = std::max(0, int(p[1] - p[2]) - 2); y <= std::min(YRES - 1, int(p[1] + p[2]) + 2); y++)
+			for (int x = std::max(0, int(p[0] - p[2]) - 2); x <= std::min(XRES - 1, int(p[0] + p[2]) + 2); x++)
+				if (int q = sim->pmap[y][x]; q && std::hypot(x + 0.5 - p[0], y + 0.5 - p[1]) <= p[2] + 2)
+					sim->parts[ID(q)].temp += (310.15f - sim->parts[ID(q)].temp) * 0.002f;
+	}
+	std::vector<OverlayWall> mine;
+	for (auto &p : parts)
+	{
+		OverlayWall w;
+		w.x0 = std::clamp(int(std::floor(p[0] - p[2])), 0, XRES), w.x1 = std::clamp(int(std::ceil(p[0] + p[2])) + 1, 0, XRES);
+		w.y0 = std::clamp(int(std::floor(p[1] - p[2])), 0, YRES), w.y1 = std::clamp(int(std::ceil(p[1] + p[2])) + 1, 0, YRES);
+		w.mx = int(std::lround(p[3])), w.my = int(std::lround(p[4]));
+		w.solid = [x = p[0], y = p[1], r2 = p[2] * p[2]](int px, int py) { return (px + 0.5 - x) * (px + 0.5 - x) + (py + 0.5 - y) * (py + 0.5 - y) <= r2; };
+		if (w.x1 > w.x0 && w.y1 > w.y0) mine.push_back(w);
+	}
+	walls.insert(walls.begin(), mine.begin(), mine.end());
+}
+
 void OverlayBuddy::Close()
 {
 	tdpt_buddy_close(buddy);
 	buddy = nullptr;
 	frame = nullptr;
 	held = false;
+	parts.clear();
 }
 
 bool OverlayBuddy::Mouse(int x, int y, int what)
