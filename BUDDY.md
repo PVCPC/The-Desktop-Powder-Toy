@@ -22,13 +22,24 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
       thousandth of a pixel. Far below anything visible, and once the sim pushes him the sim's forces dominate anyway.
       So Ruffle is built 64-bit into TDPT, the same way on Windows and the Mac.
 - [ ] Shipping size and build: Rust toolchain in the Windows and Mac builds; measure the added download size.
+      Windows so far: meson builds `buddy/` with cargo (build.py fetches Ruffle at a pinned commit and applies
+      `ruffle-host.patch`); powder.exe is 25.7 MB, the Windows zip about 10.5 MB (v0.9.0: 3.6 MB).
 
 ## 1. He's there (no interaction yet)
-- [ ] Fun tab row "Interactive Buddy" plus a "Choose SWF..." button; the path is saved in the prefs, and a missing or wrong file says so.
-- [ ] Patch the user's SWF on load inside TDPT (today `tools/prepare_native_swf.py` needs Java + JPEXS): ship only our
+- [x] Fun tab row "Interactive Buddy" plus a "Choose SWF..." button; the path is saved in the prefs, and a missing or wrong file says so.
+      (Windows; the Mac still needs its file picker.)
+- [x] Patch the user's SWF on load inside TDPT (today `tools/prepare_native_swf.py` needs Java + JPEXS): ship only our
       compiled bridge bytecode and splice it into their file in memory; refuse files that don't look like Interactive Buddy.
-- [ ] Run the game, and draw its frame in TDPT's overlay layer (same transparency rules as the sim).
-- [ ] Clicks: on the buddy or his toys they go to the game; elsewhere they go to TPT as now. Game menus are reachable.
+      Done: `buddy/bridge/*.patch` hold only our inserted tags; v1.01 is checked by its hash before and after.
+- [x] Run the game, and draw its frame in TDPT's overlay layer (same transparency rules as the sim). He runs on his
+      own thread (about 1 ms a frame left on TDPT's).
+- [x] Clicks: on the buddy or his toys they go to the game (the game's own hit shapes); elsewhere they go to TPT as now.
+      Game menus: right-click him (Windows). The game's Fist drags him (rest it on him, then press); its Open Hand
+      doesn't drag, he reaches for the cursor instead. Tested in `cargo test` (drag_him); the TDPT click path needs
+      a real mouse to try.
+- [x] Saves: the game's save (money, purchases) is a file in TPT's data folder, `buddy/`, written when he's turned
+      off or TDPT closes.
+- [ ] Sound (none yet).
 - [ ] One coordinate mapping: game stage <-> sim pixels (accounting for the game camera `camx/camy/camz` and the TDPT pixel size).
 
 ## 2. Sim -> Buddy (he feels the sim)
@@ -59,7 +70,7 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
 - [ ] Wallpaper and window marks from his fire and acid, like the rest of the sim.
 
 ## 5. Checks before merging into main
-- [ ] Off = TDPT exactly as before (the one-core bench and acid checksums unchanged).
+- [x] Off = TDPT exactly as before (the one-core bench and acid checksums unchanged; checked 2026-11-02).
 - [ ] Game replay checks still match with the bridge loaded (no interaction while the sim is empty).
 - [ ] No SWF in git, release zips or caches; the user's file is only read, never copied.
 - [ ] Windows first, then the Mac (native arm64 Ruffle).

@@ -1,0 +1,21 @@
+[package]
+name = "tdpt-buddy"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Interactive Buddy (the user's own copy of the game) run by Ruffle inside TDPT; see BUDDY.md
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+ruffle_core = { path = "vendor/ruffle/core", features = ["default_font"] }
+ruffle_render_wgpu = { path = "vendor/ruffle/render/wgpu" }
+flate2 = "1"
+sha2 = "0.10"
+rayon = "1"
+quick-xml = "0.37"
+
+
+[workspace]
+exclude = ["vendor"]

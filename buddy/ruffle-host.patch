@@ -1,0 +1,61 @@
+diff --git a/core/src/player.rs b/core/src/player.rs
+index c3756621..143da9b6 100644
+--- a/core/src/player.rs
++++ b/core/src/player.rs
+@@ -2520,6 +2520,56 @@ impl Player {
+         });
+     }
+ 
++    /// Reads one root AVM1 property for a native host without advancing gameplay.
++    pub fn get_root_variable(&mut self, name: &str) -> ExternalValue {
++        self.mutate_with_update_context(|context| {
++            let Some(root) = context.stage.root_clip() else {
++                return ExternalValue::Undefined;
++            };
++            let key = AvmString::new_utf8(context.gc_context, format!("_root.{name}"));
++            let mut activation = Activation::from_nothing(
++                context, ActivationIdentifier::root("Native host read"), root,
++            );
++            match activation.get_variable(key)
++                .and_then(|value| ExternalValue::from_avm1(&mut activation, value.into())) {
++                Ok(value) => value,
++                Err(error) => {
++                    tracing::warn!("Native host read of {name} failed: {error:?}");
++                    ExternalValue::Undefined
++                }
++            }
++        })
++    }
++
++    /// Assigns a native-host value using Flash's own variable-path resolver.
++    pub fn set_root_variable(&mut self, name: &str, value: ExternalValue) -> Result<(), String> {
++        self.update(|context| {
++            let root = context.stage.root_clip().ok_or("Missing root movie")?;
++            let key = AvmString::new_utf8(context.gc_context, format!("_root.{name}"));
++            let mut activation = Activation::from_nothing(
++                context, ActivationIdentifier::root("Native host write"), root,
++            );
++            let value = value.into_avm1(&mut activation);
++            activation.set_variable(key, value).map_err(|error| format!("{error:?}"))
++        })
++    }
++
++    /// Calls an existing root ActionScript method without advancing the timeline.
++    pub fn call_root_method(&mut self, name: &str, args: Vec<ExternalValue>) -> Result<ExternalValue, String> {
++        self.update(|context| {
++            let root = context.stage.root_clip().ok_or("Missing root movie")?;
++            let object = root.object1().ok_or("Root movie is not AVM1")?;
++            let key = AvmString::new_utf8(context.gc_context, name);
++            let mut activation = Activation::from_nothing(
++                context, ActivationIdentifier::root("Native host call"), root,
++            );
++            let args: Vec<_> = args.into_iter().map(|arg| arg.into_avm1(&mut activation)).collect();
++            object.call_method(key, &args, &mut activation, crate::avm1::ExecutionReason::Special)
++                .and_then(|value| ExternalValue::from_avm1(&mut activation, value))
++                .map_err(|error| format!("{error:?}"))
++        })
++    }
++
+     pub fn call_internal_interface(
+         &mut self,
+         name: &str,

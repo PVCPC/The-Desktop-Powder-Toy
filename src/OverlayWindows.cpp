@@ -197,6 +197,7 @@ namespace
 		bool taskThrow = false, taskPop = false; // Ctrl-drag a taskbar button off to throw a block; apps that open pop one out
 		bool tilt = false, weekday = false, typing = false; // gravity leans to the active window; weather by weekday; typing sparks
 		float meteors = 0;                       // big meteors an hour at night
+		bool buddy = false;                      // Interactive Buddy (OverlayBuddy; his file: Overlay.Fun.BuddySwf)
 		std::vector<HWND> flashed; // windows that flashed their taskbar button (a new message) since the last tick
 	} fun;
 	// The Fun tab's rows, by group, and the pref each is saved as. A row with no tip starts a group (name = heading);
@@ -293,7 +294,29 @@ namespace
 		Check(L"Meteor showers", L"On the real meteor shower nights (Quadrantids, Lyrids, Eta Aquariids, Perseids, Orionids, Leonids, Geminids) shooting stars come ten times as often, at least 60 an hour", &fun.showers, "Overlay.Fun.Showers"),
 		Slide(L"Big meteors", L"At night, about this many big glowing meteors an hour crash down: a crater in the sand, and with Destructible on a big chunk out of a window (3 times as many on meteor shower nights)", &fun.meteors, 0, 10, "Overlay.Fun.Meteors", 7),
 		Check(L"Holidays", L"Pumpkins roll about on Halloween, jelly hearts fall on Valentine's Day, fireworks go up after midnight on New Year's", &fun.holidays, "Overlay.Fun.Holidays"),
+
+		{ L"Interactive Buddy" },
+		Check(L"Interactive Buddy", L"The buddy from the Flash game Interactive Buddy lives on your desktop in front of the sim: drag him, throw him, give him toys. Bring your own copy of the game (Interactive Buddy v1.01, a .swf file; it isn't included) and pick it with Choose SWF", &fun.buddy, "Overlay.Fun.Buddy"),
 	};
+	// Interactive Buddy's file: the game's .swf, from the user (turns him on)
+	void ChooseBuddySwf()
+	{
+#ifdef _WIN32
+		wchar_t file[MAX_PATH] = L"";
+		OPENFILENAMEW of{};
+		of.lStructSize = sizeof(of);
+		of.lpstrFilter = L"Flash games (*.swf) *.swf ";
+		of.lpstrFile = file;
+		of.nMaxFile = MAX_PATH;
+		of.lpstrTitle = L"Your copy of Interactive Buddy";
+		of.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
+		if (!GetOpenFileNameW(&of)) return;
+		GlobalPrefs::Ref().Set("Overlay.Fun.BuddySwf", Platform::WinNarrow(file));
+		fun.buddy = true;
+		GlobalPrefs::Ref().Set("Overlay.Fun.Buddy", true);
+#endif
+	}
+
 	// paper planes in flight or landed (sim pixels; landed: ticks since), and when the rainbow goes (GetTickCount64)
 	struct PaperPlane { float x, y, vx, vy; int landed; };
 	std::vector<PaperPlane> paperPlanes;
@@ -2928,6 +2951,11 @@ namespace
 							*f.b = !*f.b;
 							GlobalPrefs::Ref().Set(f.pref, *f.b);
 						}, f.tip);
+						if (f.b == &fun.buddy)
+						{
+							auto file = GlobalPrefs::Ref().Get("Overlay.Fun.BuddySwf", ByteString(""));
+							PushButton(x + w - S(132), ry - S(3), S(120), L"Choose SWF...", [] { ChooseBuddySwf(); }, file.empty() ? L"No file chosen yet" : Wide(file.FromUtf8()));
+						}
 						nx += S(19); // under the label, past the box
 					}
 					else if (f.v)

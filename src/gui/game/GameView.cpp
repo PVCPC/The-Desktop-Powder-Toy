@@ -1,6 +1,7 @@
 #include "GameView.h"
 #include "Overlay.h"
 #include "OverlayWindows.h"
+#include "OverlayBuddy.h"
 
 #include "Brush.h"
 #include "tool/DecorationTool.h"
@@ -1106,6 +1107,10 @@ void GameView::updateToolButtonScroll()
 
 void GameView::OnMouseMove(int x, int y, int dx, int dy)
 {
+	if (overlayMode && OverlayBuddy::Mouse(x, y, 0))
+	{
+		return; // dragging something of the buddy's
+	}
 	if (overlayMode && OverlayWindows::AreaMouse(x, y, 0))
 	{
 		return; // dragging a play-area edge
@@ -1158,6 +1163,14 @@ void GameView::OnMouseMove(int x, int y, int dx, int dy)
 
 void GameView::OnMouseDown(int x, int y, unsigned button)
 {
+	if (overlayMode && button == SDL_BUTTON_LEFT && OverlayBuddy::Mouse(x, y, 1))
+	{
+		return;
+	}
+	if (overlayMode && button == SDL_BUTTON_RIGHT && OverlayBuddy::Menu(x, y))
+	{
+		return;
+	}
 	if (overlayMode && button == SDL_BUTTON_LEFT && OverlayWindows::AreaMouse(x, y, 1))
 	{
 		return;
@@ -1229,6 +1242,10 @@ Vec2<int> GameView::PlaceSavePos() const
 
 void GameView::OnMouseUp(int x, int y, unsigned button)
 {
+	if (overlayMode && OverlayBuddy::Mouse(x, y, 2))
+	{
+		return;
+	}
 	if (overlayMode && OverlayWindows::AreaMouse(x, y, 2))
 	{
 		return;

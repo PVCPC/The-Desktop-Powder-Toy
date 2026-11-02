@@ -5,6 +5,7 @@
 #include <algorithm>
 #include "OverlayWindows.h"
 #include "OverlayWalls.h"
+#include "OverlayBuddy.h"
 #include "SimulationConfig.h"
 #include "prefs/GlobalPrefs.h"
 #include "gui/interface/Engine.h"
@@ -1027,6 +1028,7 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 	uint32_t empty = catchEmpty ? 0x01000000 : 0;
 	argb.resize(size_t(w) * h);
 	float fade = 1; // TPT's menus
+	bool buddyOn = false;
 	OverlayBands(h, [&](int y0, int y1) {
 		for (int i = y0 * w; i < y1 * w; i++)
 		{
@@ -1073,12 +1075,18 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 				}
 		}
 		OverlayWindows::DrawExtras(argb.data(), w, h);
+		POINT cur;
+		RECT wr;
+		GetCursorPos(&cur);
+		GetWindowRect(hwnd, &wr);
+		if (wr.right > wr.left && wr.bottom > wr.top)
+			buddyOn = OverlayBuddy::Draw(argb.data(), w, double(cur.x - wr.left) * w / (wr.right - wr.left), double(cur.y - wr.top) * h / (wr.bottom - wr.top));
 	}
 	OverlayWindows::ClearUnderWindows(argb.data(), w, h, ww, wh);
 	// Drawing at the screen's rate only pays while something moves: particles, a window, the menus fading, or TPT in
 	// use. Idle, a few frames a second keep up with slow changes and spot the next move, for a fraction of the CPU.
 	static double busyUntil = 0;
-	if (!moving.empty() || catchEmpty || !cursorMiss || (fade > 0 && fade < 1) || !OverlayWindows::WindowShifts().empty() || OverlayDebrisFlying())
+	if (!moving.empty() || buddyOn || catchEmpty || !cursorMiss || (fade > 0 && fade < 1) || !OverlayWindows::WindowShifts().empty() || OverlayDebrisFlying())
 		busyUntil = Now() + 1;
 	overlayIdle = Now() >= busyUntil;
 	ui::Engine::Ref().SetDrawingFrequencyLimit(overlayIdle ? DrawLimit(DrawLimitExplicit{ 15 }) : busyLimit);
@@ -1153,6 +1161,7 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 		}
 	});
 	float fade = 1; // TPT's menus
+	bool buddyOn = false;
 	if (w == WINDOWW && h == WINDOWH)
 	{
 		if (frameOccupied.size() < size_t(XRES) * YRES) frameOccupied.assign(size_t(XRES) * YRES, 0);
@@ -1188,6 +1197,10 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 				}
 		}
 		OverlayWindows::DrawExtras(argb.data(), w, h);
+		auto me = OverlayMac::Window();
+		double mx, my;
+		OverlayMac::MouseFrom(mx, my);
+		if (me.r > me.l && me.b > me.t) buddyOn = OverlayBuddy::Draw(argb.data(), w, (mx - me.l) * w / (me.r - me.l), (my - me.t) * h / (me.b - me.t));
 	}
 	auto me = OverlayMac::Window();
 	double scale = OverlayMac::BackingScale();
@@ -1198,7 +1211,7 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 	// use. Idle, a few frames a second keep up with slow changes and spot the next move, for a fraction of the CPU.
 	static double busyUntil = 0;
 	auto shifts = OverlayWindows::WindowShifts();
-	if (!moving.empty() || (catchEmpty && OverlayMac::Active()) || overDrawn || (fade > 0 && fade < 1) || !shifts.empty() || OverlayDebrisFlying())
+	if (!moving.empty() || buddyOn || (catchEmpty && OverlayMac::Active()) || overDrawn || (fade > 0 && fade < 1) || !shifts.empty() || OverlayDebrisFlying())
 		busyUntil = Now() + 1;
 	overlayIdle = Now() >= busyUntil;
 	ui::Engine::Ref().SetDrawingFrequencyLimit(overlayIdle ? DrawLimit(DrawLimitExplicit{ 15 }) : DrawLimit(DrawLimitDisplay{}));

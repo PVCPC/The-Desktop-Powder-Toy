@@ -529,6 +529,17 @@ foreach sta_info : [
 endforeach
 
 if get_option('build_powder')
+	# Interactive Buddy (src/OverlayBuddy.cpp): Ruffle as a Rust static library, built with cargo (buddy/build.py)
+	buddy_lib = custom_target(
+		'tdpt_buddy',
+		output: host_platform == 'windows' ? 'tdpt_buddy.lib' : 'libtdpt_buddy.a',
+		command: [ python3_prog, files('buddy/build.py'), '@OUTPUT@', meson.current_build_dir() / 'buddy-target' ],
+		build_always_stale: true,
+	)
+	powder_deps += declare_dependency(
+		link_with: buddy_lib,
+		link_args: host_platform == 'windows' ? [ 'opengl32.lib', 'ntdll.lib', 'userenv.lib', 'ws2_32.lib', 'dbghelp.lib' ] : [],
+	)
 	powder_deps += project_deps + [
 		threads_dep,
 		lua_dep,

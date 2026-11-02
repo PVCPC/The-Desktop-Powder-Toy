@@ -1,5 +1,6 @@
 #include "PowderToySDL.h"
 #include "Overlay.h"
+#include "OverlayBuddy.h"
 #include "OverlayWindows.h"
 #ifdef __APPLE__
 # include "OverlayMac.h"
@@ -623,7 +624,11 @@ int Main(int argc, char *argv[])
 
 	MainLoop();
 #if defined(_WIN32) || defined(__APPLE__)
-	if (overlayMode) OverlayWindows::SaveScene(); // the sand is still there next time
+	if (overlayMode)
+	{
+		OverlayBuddy::Close(); // his saves too
+		OverlayWindows::SaveScene(); // the sand is still there next time
+	}
 #endif
 
 	Platform::Exit(0);

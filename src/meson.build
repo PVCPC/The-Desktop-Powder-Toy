@@ -133,6 +133,7 @@ powder_files = files(
 	'lua/CommandInterface.cpp',
 	'lua/TPTSTypes.cpp',
 	'OverlayWalls.cpp',
+	'OverlayBuddy.cpp',
 )
 if host_platform == 'darwin'
 	add_languages('objcpp', native: false)
