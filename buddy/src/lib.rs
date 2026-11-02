@@ -1,6 +1,7 @@
 //! Interactive Buddy inside TDPT: the user's own copy of the game, patched in memory with our bridge code
 //! (bridge/*.patch: only the tags we add, none of the game) and run by Ruffle, drawn offscreen into TDPT's overlay
 //! frame. C interface in tdpt_buddy.h.
+use std::collections::HashMap;
 use ruffle_core::events::{MouseButton, PlayerEvent};
 use ruffle_core::external::Value;
 use ruffle_core::{FloatDuration, Player, PlayerBuilder, RootVars, StageAlign, StageScaleMode, ViewportDimensions};
@@ -87,7 +88,7 @@ struct Game {
     ready: bool,
     readback: [Option<wgpu::Buffer>; 2], // the GPU copies the frame into one while we read last frame's from the other
     pending: Option<Copy>,                // last frame's copy, not read yet
-    drawn: [Vec<[usize; 4]>; 3], // what the last 3 frames read back (x0, y0, x1, y1 boxes): the frame buffers TDPT and we take turns with
+    drawn: HashMap<usize, Vec<[usize; 4]>>, // what each frame buffer (by address: TDPT and we take turns with them) has in it, x0 y0 x1 y1 boxes
     settings: [f64; 5], // from the Buddy tab: size %, speech on, speech size %, toys at once (0: no limit), smooth on
     applied: [f64; 5],  // what the game has
 }
@@ -109,7 +110,7 @@ fn open(path: &str, w: u32, h: u32) -> Result<Game, String> {
         .with_storage(Box::new(Saves("buddy".into())))
         .build();
     load_fonts(&mut player.lock().unwrap());
-    Ok(Game { player, ground: Default::default(), size: (w, h), mouse: (-1.0, -1.0), ready: false, readback: [None, None], pending: None, drawn: std::array::from_fn(|_| vec![[0, 0, usize::MAX, usize::MAX]]), settings: SETTINGS, applied: [f64::NAN; 5] })
+    Ok(Game { player, ground: Default::default(), size: (w, h), mouse: (-1.0, -1.0), ready: false, readback: [None, None], pending: None, drawn: HashMap::new(), settings: SETTINGS, applied: [f64::NAN; 5] })
 }
 
 // The sim around him, so he stands on it, floats in it and burns in it: one byte per sim pixel over rect (x, y, w, h sim
@@ -613,7 +614,7 @@ fn frame(b: &mut Game, dt_ms: f64, mx: f64, my: f64, out: &mut [u32]) -> bool {
     let view = p.viewport_dimensions();
     if (view.width, view.height) != b.size {
         p.set_viewport_dimensions(ViewportDimensions { width: b.size.0, height: b.size.1, scale_factor: 1.0 });
-        b.drawn = std::array::from_fn(|_| vec![[0, 0, usize::MAX, usize::MAX]]); // the buffers are a new size: clear them whole
+        b.drawn.clear(); // the buffers are a new size: cleared whole
         (b.pending, b.readback) = (None, [None, None]); // and the copy on its way is the old size (its buffer still mapped)
     }
     if (mx, my) != b.mouse {
@@ -693,7 +694,7 @@ struct Copy {
 // new image every call: three times slower at 5120x1440). Only where things are drawn, and one frame late: this
 // frame's copy is sent off and last frame's (done by now) is read, so we never wait for the GPU to draw (4-5 ms at
 // 5120x1440, too slow for 120 Hz)
-fn read_back(readback: &mut [Option<wgpu::Buffer>; 2], pending: &mut Option<Copy>, renderer: &WgpuRenderBackend<TextureTarget>, out: &mut [u32], areas: &[[f64; 4]], drawn: &mut [Vec<[usize; 4]>; 3]) {
+fn read_back(readback: &mut [Option<wgpu::Buffer>; 2], pending: &mut Option<Copy>, renderer: &WgpuRenderBackend<TextureTarget>, out: &mut [u32], areas: &[[f64; 4]], drawn: &mut HashMap<usize, Vec<[usize; 4]>>) {
     use rayon::prelude::*;
     let (target, d) = (renderer.target(), renderer.descriptors());
     let (fw, fh) = (target.size.width as usize, target.size.height as usize);
@@ -736,15 +737,18 @@ fn read_back(readback: &mut [Option<wgpu::Buffer>; 2], pending: &mut Option<Copy
         buffer.slice(..total as u64).map_async(wgpu::MapMode::Read, |_| {});
     }
     let Some(last) = pending.replace(Copy { slot, boxes, rows, total, index }) else { return };
-    // last frame's: what an older frame in this buffer drew is cleared, then its boxes go in
-    for r in drawn.iter().flatten() {
-        let (x0, x1) = (r[0].min(fw), r[2].min(fw));
-        for y in r[1].min(fh)..r[3].min(fh) {
-            out[y * fw + x0..y * fw + x1].fill(0);
+    // last frame's: what this buffer had (however many frames ago; all of it if we don't know) is cleared, then its
+    // boxes go in
+    match drawn.insert(out.as_ptr() as usize, last.boxes.clone()) {
+        Some(old) => {
+            for r in old {
+                for y in r[1].min(fh)..r[3].min(fh) {
+                    out[y * fw + r[0].min(fw)..y * fw + r[2].min(fw)].fill(0);
+                }
+            }
         }
+        None => out.fill(0),
     }
-    drawn.rotate_right(1);
-    drawn[0] = last.boxes.clone();
     if last.total == 0 {
         return;
     }
@@ -1632,9 +1636,26 @@ mod tests {
             let (x, y) = (n(&game, "body.x"), n(&game, "body.y"));
             assert!(seen(&out, x, y), "nothing drawn on his body at {x},{y}");
         }
-        let left: usize = (500..720).map(|y| out[y * 1280 + 600..y * 1280 + 800].iter().filter(|p| **p >> 24 != 0).count()).sum();
-        println!("frame: pixels left where he was {left}");
-        assert_eq!(left, 0, "pixels left behind where he was");
+        let left = |out: &[u32]| (500..720).map(|y| out[y * 1280 + 600..y * 1280 + 800].iter().filter(|p| **p >> 24 != 0).count()).sum::<usize>();
+        println!("frame: pixels left where he was {}", left(&out));
+        assert_eq!(left(&out), 0, "pixels left behind where he was");
+        // three buffers taking turns as with TDPT (which takes a frame only now and then): a frame just drawn never
+        // has old pixels of him in it
+        let mut bufs = [vec![0u32; 1280 * 720], vec![0u32; 1280 * 720], vec![0u32; 1280 * 720]];
+        game.player.lock().unwrap().call_root_method("setBuddyXY", vec![700.into(), 400.into()]).unwrap();
+        for i in 0..120 {
+            if i == 60 {
+                game.player.lock().unwrap().call_root_method("setBuddyXY", vec![1100.into(), 400.into()]).unwrap();
+            }
+            super::frame(&mut game, 25.0, 0.0, 0.0, &mut bufs[0]);
+            if i > 64 {
+                assert_eq!(left(&bufs[0]), 0, "old pixels in a new frame at {i}");
+            }
+            bufs.swap(0, 1);
+            if i % 5 == 0 {
+                bufs.swap(1, 2);
+            }
+        }
     }
 
     // the Buddy tab's size: 200% doubles his parts, back to 100% restores them
