@@ -18,12 +18,15 @@ extern "C"
 	void tdpt_buddy_command(Buddy *b, const char *command); // a command from those lines, for the game
 	// the part of the sim he needs next: rect = x, y, w, h sim pixels (maybe partly off the sim)
 	void tdpt_buddy_area(Buddy *b, int32_t rect[4]);
-	// the sim over rect: w * h bytes, rows top down; low 5 bits 0 nothing, 1 solid for him, 2 + weight/4 liquid, 31 acid;
+	// the sim over rect: w * h bytes, rows top down; low 5 bits 0 nothing, 1 solid for him, 2 + weight/4 liquid, 31 acid, 30 VOID or
+	// black hole, 29 portal in;
 	// 0x20 60 C or hotter, 0x40 400 C or hotter, 0x60 -50 C or colder; 0x80 a spark
 	void tdpt_buddy_ground(Buddy *b, const int32_t rect[4], const uint8_t *cells);
 	// the sim's air over rect (x, y, w, h in cells of `cell` sim pixels): w * h of vx, vy, pressure
 	void tdpt_buddy_air(Buddy *b, int32_t cell, const int32_t rect[4], const float *v);
 	// TPT's gravity where he is, 1 = normal (straight down is 0, 1)
 	void tdpt_buddy_gravity(Buddy *b, double gx, double gy);
+	// where the portal in his reach comes out (sim pixels); has = 0: none
+	void tdpt_buddy_portal(Buddy *b, int32_t has, double x, double y);
 	void tdpt_buddy_close(Buddy *b);
 }

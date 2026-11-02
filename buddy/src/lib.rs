@@ -108,7 +108,8 @@ fn open(path: &str, w: u32, h: u32) -> Result<Game, String> {
 }
 
 // The sim around him, so he stands on it, floats in it and burns in it: one byte per sim pixel over rect (x, y, w, h sim
-// pixels, which are his stage pixels). Low 5 bits: 0 nothing, 1 solid for him, 2 + w/4 liquid of TPT weight w, ACID; then
+// pixels, which are his stage pixels). Low 5 bits: 0 nothing, 1 solid for him, 2 + w/4 liquid of TPT weight w, ACID,
+// PORTAL, EATER; then
 // WARM, HOT or COLD (2 bits), and SPARK. Rect (x, y, w, h sim pixels, which are his stage pixels). TDPT fills it each frame with the part he asks for (want).
 struct Ground {
     rect: [i32; 4],
@@ -122,6 +123,9 @@ struct Ground {
     calm: u32,                    // frames until the next blast may go off
     zap: Option<(f64, f64)>,      // a part touching a spark this frame: the game's shock() goes off there
     gravity: (f64, f64),          // TPT's gravity where he is, 1 = the game's own (down: 0, 1)
+    exit: Option<(f64, f64)>,     // where the portal in his reach comes out
+    jumped: u32,                  // frames since he went through one (not straight back in)
+    eaten: bool,                  // swallowed this frame: he comes back at the top
     game_grav: f64,               // the game's grav this frame, before that
 }
 
@@ -130,13 +134,15 @@ const HOT: u8 = 0x40; // 400 C and up: sets him on fire
 const COLD: u8 = 0x60; // -50 C and down: slows him, hurts
 const SPARK: u8 = 0x80; // electricity: shocks him
 const ACID: u8 = 31; // a kind: acid, a liquid (TPT weight 10) that eats him
+const EATER: u8 = 30; // a kind: VOID or a black hole, which swallows him (he comes back at the top)
+const PORTAL: u8 = 29; // a kind: a portal in, which moves him to its way out (Ground::exit)
 const PARTS: [&str; 6] = ["body", "head", "lArm", "rArm", "lLeg", "rLeg"];
 // where his parts sit around the body when he stands (from the game), to put him back together
 const POSE: [(f64, f64); 6] = [(0.0, 0.0), (0.0, -39.4), (-22.1, -10.2), (22.1, -10.2), (-15.1, 32.0), (15.0, 32.0)];
 
 impl Default for Ground {
     fn default() -> Self {
-        Self { rect: [0; 4], cells: Vec::new(), want: [0; 4], last: (400.0, 300.0), air_rect: [0; 4], air: Vec::new(), cell: 4, before: ([0; 4], Vec::new()), calm: 0, zap: None, gravity: (0.0, 1.0), game_grav: 1.0 }
+        Self { rect: [0; 4], cells: Vec::new(), want: [0; 4], last: (400.0, 300.0), air_rect: [0; 4], air: Vec::new(), cell: 4, before: ([0; 4], Vec::new()), calm: 0, zap: None, gravity: (0.0, 1.0), game_grav: 1.0, exit: None, jumped: 99, eaten: false }
     }
 }
 
@@ -145,7 +151,8 @@ impl Ground {
         self.cell(x, y) & 0x1F
     }
 
-    // what a circle touches (within a pixel): 1 << WARM, HOT, COLD (as 1, 2, 3) for each one there, SPARK, and 1 for acid
+    // what a circle touches (within a pixel): 1 << WARM, HOT, COLD (as 1, 2, 3) for each one there, SPARK, 1 for
+    // acid, 0x10 a portal, 0x20 an eater
     fn touch(&self, x: f64, y: f64, r: f64) -> u8 {
         let r = r + 1.0;
         let mut seen = 0;
@@ -155,6 +162,7 @@ impl Ground {
                 if dx * dx + dy * dy <= r * r {
                     let c = self.cell(px, py);
                     seen |= (1 << (c >> 5 & 3)) & 0x0E | c & SPARK | (c & 0x1F == ACID) as u8;
+                    seen |= (c & 0x1F == PORTAL) as u8 * 0x10 | (c & 0x1F == EATER) as u8 * 0x20;
                 }
             }
         }
@@ -320,6 +328,7 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
         let mut bbox = [f64::MAX, f64::MAX, f64::MIN, f64::MIN];
         let mut standing = false;
         let (mut hot, mut warm, mut doused, mut cold, mut zap) = (false, 0, false, 0, None);
+        let mut portal = false;
         for part in PARTS {
             let (mut x, mut y) = (num(v, &format!("{part}.x")), num(v, &format!("{part}.y")));
             let (mut xv, mut yv, r) = (num(v, &format!("{part}.xv")), num(v, &format!("{part}.yv")), num(v, &format!("{part}.rad")));
@@ -328,6 +337,8 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
             }
             let wet = !held && grav.is_finite() && g.float(x, y, &mut xv, &mut yv, r, grav);
             let touch = g.touch(x, y, r);
+            portal |= touch & 0x10 != 0;
+            g.eaten |= touch & 0x20 != 0;
             warm += (touch & 1) as u32 * 2; // acid hurts twice as much as heat
             hot |= touch & 1 << (HOT >> 5) != 0;
             warm += (touch & (1 << (WARM >> 5) | 1 << (HOT >> 5)) != 0) as u32;
@@ -384,6 +395,20 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
             }
         }
         g.zap = zap;
+        // through a portal: every part moves by the same amount, speed kept
+        g.jumped = g.jumped.saturating_add(1);
+        if portal && !held && g.jumped > 20 && let Some((ex, ey)) = g.exit {
+            let (dx, dy) = (ex - num(v, "body.x"), ey - num(v, "body.y"));
+            if dx.is_finite() && dy.is_finite() {
+                for part in PARTS {
+                    for (f, d) in [("x", dx), ("y", dy), ("ox", dx), ("oy", dy)] {
+                        let n = num(v, &format!("{part}.{f}"));
+                        v.set(&format!("{part}.{f}"), Value::Number(n + d));
+                    }
+                }
+                g.jumped = 0;
+            }
+        }
         if bbox[0] <= bbox[2] {
             g.want = [bbox[0] as i32, bbox[1] as i32, (bbox[2] - bbox[0]) as i32 + 1, (bbox[3] - bbox[1]) as i32 + 1];
         }
@@ -485,6 +510,9 @@ fn frame(b: &mut Game, dt_ms: f64, mx: f64, my: f64, out: &mut [u32]) -> bool {
         // ponytail: the game's shock() also lights its toys near the mouse (it was the mouse's zapper); fine for now
         if let Some((x, y)) = g.zap.take() {
             p.call_root_method("shock", vec![x.into(), y.into()]).ok();
+        }
+        if std::mem::take(&mut g.eaten) {
+            p.call_root_method("setBuddyXY", vec![(b.size.0 as f64 / 2.0).into(), 100.into()]).ok();
         }
     }
     p.tick(FloatDuration::from_millis(dt_ms));
@@ -859,6 +887,17 @@ pub unsafe extern "C" fn tdpt_buddy_gravity(b: *mut Buddy, gx: f64, gy: f64) {
     }
 }
 
+/// Where the portal in his reach (a PORTAL in his ground map) comes out, sim pixels; has = 0: none
+/// # Safety
+/// b is from tdpt_buddy_open.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tdpt_buddy_portal(b: *mut Buddy, has: i32, x: f64, y: f64) {
+    let b = unsafe { &mut *b };
+    if let Ok(mut g) = b.ground.lock() {
+        g.exit = (has != 0 && x.is_finite() && y.is_finite()).then_some((x, y));
+    }
+}
+
 /// what: 1 left button down, 2 up, at (x, y) stage pixels
 /// # Safety
 /// b is from tdpt_buddy_open.
@@ -1167,6 +1206,39 @@ mod tests {
         println!("gravity: off {x0:.0},{y0:.0}; sideways {x1:.0},{y1:.0}");
         assert!(y0 < 300.0, "fell with gravity off: {y0}");
         assert!(x1 > x0 + 50.0 && (y1 - y0).abs() < 30.0, "didn't fall sideways: {x0},{y0} -> {x1},{y1}");
+    }
+
+    // a portal floor drops him out of its exit; a VOID floor swallows him and he comes back at the top
+    #[test]
+    fn portal_and_void() {
+        let Some(path) = std::env::var_os("TDPT_BUDDY_SWF") else { return };
+        let mut game = super::open(path.to_str().unwrap(), 1280, 720).unwrap();
+        let mut out = vec![0u32; 1280 * 720];
+        while !super::frame(&mut game, 25.0, 0.0, 0.0, &mut out) {}
+        let n = |g: &super::Game, k: &str| match g.player.lock().unwrap().get_root_variable(k) { Value::Number(v) => v, o => panic!("{k} {o:?}") };
+        let floor = |game: &super::Game, c: u8| {
+            let mut g = game.ground.lock().unwrap();
+            let r = g.want;
+            g.cells = (0..r[2] * r[3]).map(|i| { let (x, y) = (r[0] + i % r[2], r[1] + i / r[2]); if y >= 600 && x > 700 { c } else { 0 } }).collect();
+            g.rect = r;
+        };
+        game.ground.lock().unwrap().exit = Some((200.0, 150.0));
+        let mut went = false;
+        for _ in 0..80 {
+            floor(&game, super::PORTAL);
+            super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+            went |= n(&game, "body.x") < 400.0;
+        }
+        assert!(went, "never came out of the portal");
+        game.ground.lock().unwrap().exit = None;
+        game.player.lock().unwrap().call_root_method("setBuddyXY", vec![900.into(), 500.into()]).unwrap();
+        let mut back = false;
+        for _ in 0..80 {
+            floor(&game, super::EATER);
+            super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+            back |= n(&game, "body.y") < 200.0 && (n(&game, "body.x") - 640.0).abs() < 60.0;
+        }
+        assert!(back, "never came back after the void");
     }
 
     #[test]

@@ -50,7 +50,8 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
 	}
 	if (!buddy) return false;
 	// what he stands on: windows and icons (not their holes), powders and solids, and walls a powder can't pass (1);
-	// liquids as 2 + a quarter of their weight (water 30), which he floats in, acid as 31; then how hot it is (0x20 60 C+, 0x40
+	// liquids as 2 + a quarter of their weight (water 30), which he floats in, acid as 31, VOID and black holes as 30,
+	// portals in as 29; then how hot it is (0x20 60 C+, 0x40
 	// 400 C+: sets him on fire, 0x60 -50 C or colder) and 0x80 a spark (shocks him)
 	int32_t r[4];
 	tdpt_buddy_area(buddy, r);
@@ -58,6 +59,7 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
 	ground.assign(size_t(r[2]) * r[3], 0);
 	auto *sim = GameController::Ref().GetModel()->GetSimulation();
 	auto &elements = SimulationData::CRef().elements;
+	int channel = -1; // of a portal in his reach
 	for (int y = std::max(r[1], 0); y < std::min(r[1] + r[3], YRES); y++)
 		for (int x = std::max(r[0], 0); x < std::min(r[0] + r[2], XRES); x++)
 		{
@@ -68,11 +70,27 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
 			else if (p && (elements[TYP(p)].Properties & TYPE_LIQUID)) c = uint8_t(2 + (std::clamp(elements[TYP(p)].Weight, 0, 100) + 2) / 4);
 			if (!p) continue;
 			if (TYP(p) == PT_ACID) c = 31;
+			if (TYP(p) == PT_VOID || TYP(p) == PT_BHOL) c = 30;
+			if (TYP(p) == PT_PRTI)
+			{
+				c = 29;
+				channel = sim->parts[ID(p)].tmp;
+			}
 			auto t = sim->parts[ID(p)].temp - 273.15f;
 			c |= t >= 400 ? 0x40 : t >= 60 ? 0x20 : t <= -50 ? 0x60 : 0;
 			if (TYP(p) == PT_SPRK) c |= 0x80;
 		}
 	tdpt_buddy_ground(buddy, r, ground.data());
+	// where that portal comes out
+	int has = 0;
+	float ex = 0, ey = 0;
+	for (int i = 0; channel >= 0 && i <= sim->parts.active; i++)
+		if (sim->parts[i].type == PT_PRTO && sim->parts[i].tmp == channel)
+		{
+			has = 1, ex = sim->parts[i].x, ey = sim->parts[i].y;
+			break;
+		}
+	tdpt_buddy_portal(buddy, has, ex, ey);
 	// the air over the same area, in sim cells
 	int32_t c[4] = { std::max(r[0], 0) / CELL, std::max(r[1], 0) / CELL, 0, 0 };
 	c[2] = std::max(0, std::min((r[0] + r[2]) / CELL + 1, XCELLS) - c[0]);

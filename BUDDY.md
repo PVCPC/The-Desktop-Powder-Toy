@@ -74,7 +74,9 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
 - [x] **Gravity:** follows TPT's gravity mode (vertical, off, radial, custom) and Newtonian gravity.
       Done: TDPT sends `GetGravityField` at the middle of his area (Newtonian x10); after setBasicVars the game's `grav`
       is scaled by its downward part and the sideways part is added to each part's speed.
-- [ ] **Portals / void / black holes:** PRTI/PRTO carry him, VOID and black holes pull him in (and respawn).
+- [x] **Portals / void / black holes:** PRTI/PRTO carry him, VOID and black holes pull him in (and respawn).
+      Done: PRTI is kind 29 (TDPT finds the PRTO on its channel and sends it), VOID/BHOL kind 30 (he comes back at
+      the top middle via the game's setBuddyXY). NBHL's pull comes through the Newtonian gravity.
 
 ## 3. Buddy -> Sim (the sim feels him)
 - [ ] His body parts are moving solid shapes in the sim (like windows are): sand piles on his head, falls off his shoulders.
