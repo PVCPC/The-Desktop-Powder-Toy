@@ -24,7 +24,7 @@ namespace
 	ByteString failed;            // the file that last failed to open: not retried until another is chosen
 	const uint32_t *frame = nullptr; // his newest frame, XRES x YRES premultiplied (null: nothing shown)
 	std::vector<uint8_t> ground;  // the sim around him, for tdpt_buddy_ground
-	std::vector<float> air;       // and its air velocity, for tdpt_buddy_air
+	std::vector<float> air;       // and its air (velocity, pressure), for tdpt_buddy_air
 	bool held = false;            // a press that went to him, until its release
 	double heldX, heldY;          // where TPT's window last saw the mouse while held (it has the mouse captured)
 }
@@ -71,12 +71,14 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
 	int32_t c[4] = { std::max(r[0], 0) / CELL, std::max(r[1], 0) / CELL, 0, 0 };
 	c[2] = std::max(0, std::min((r[0] + r[2]) / CELL + 1, XCELLS) - c[0]);
 	c[3] = std::max(0, std::min((r[1] + r[3]) / CELL + 1, YCELLS) - c[1]);
-	air.resize(size_t(c[2]) * c[3] * 2);
+	air.resize(size_t(c[2]) * c[3] * 3);
 	for (int y = 0; y < c[3]; y++)
 		for (int x = 0; x < c[2]; x++)
 		{
-			air[(size_t(y) * c[2] + x) * 2] = sim->vx[c[1] + y][c[0] + x];
-			air[(size_t(y) * c[2] + x) * 2 + 1] = sim->vy[c[1] + y][c[0] + x];
+			auto *a = &air[(size_t(y) * c[2] + x) * 3];
+			a[0] = sim->vx[c[1] + y][c[0] + x];
+			a[1] = sim->vy[c[1] + y][c[0] + x];
+			a[2] = sim->pv[c[1] + y][c[0] + x];
 		}
 	tdpt_buddy_air(buddy, CELL, c, air.data());
 	frame = held ? tdpt_buddy_frame(buddy, heldX, heldY, XRES, YRES) : tdpt_buddy_frame(buddy, mx, my, XRES, YRES);

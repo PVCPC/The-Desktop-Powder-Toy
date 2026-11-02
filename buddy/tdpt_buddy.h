@@ -20,7 +20,7 @@ extern "C"
 	void tdpt_buddy_area(Buddy *b, int32_t rect[4]);
 	// the sim over rect: w * h bytes, rows top down, nonzero where it's solid for him
 	void tdpt_buddy_ground(Buddy *b, const int32_t rect[4], const uint8_t *cells);
-	// the sim's air velocity over rect (x, y, w, h in cells of `cell` sim pixels): w * h pairs of vx, vy
+	// the sim's air over rect (x, y, w, h in cells of `cell` sim pixels): w * h of vx, vy, pressure
 	void tdpt_buddy_air(Buddy *b, int32_t cell, const int32_t rect[4], const float *v);
 	void tdpt_buddy_close(Buddy *b);
 }

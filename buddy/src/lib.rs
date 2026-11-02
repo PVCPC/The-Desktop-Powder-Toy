@@ -115,8 +115,10 @@ struct Ground {
     want: [i32; 4],
     last: (f64, f64), // his body, last frame
     air_rect: [i32; 4], // in sim cells (CELL pixels)
-    air: Vec<[f32; 2]>, // the sim's air velocity there
+    air: Vec<[f32; 3]>, // the sim's air velocity and pressure there
     cell: i32,
+    before: ([i32; 4], Vec<f32>), // the pressure last frame (air_rect, values)
+    calm: u32,                    // frames until the next blast may go off
 }
 
 const PARTS: [&str; 6] = ["body", "head", "lArm", "rArm", "lLeg", "rLeg"];
@@ -125,7 +127,7 @@ const POSE: [(f64, f64); 6] = [(0.0, 0.0), (0.0, -39.4), (-22.1, -10.2), (22.1, 
 
 impl Default for Ground {
     fn default() -> Self {
-        Self { rect: [0; 4], cells: Vec::new(), want: [0; 4], last: (400.0, 300.0), air_rect: [0; 4], air: Vec::new(), cell: 4 }
+        Self { rect: [0; 4], cells: Vec::new(), want: [0; 4], last: (400.0, 300.0), air_rect: [0; 4], air: Vec::new(), cell: 4, before: ([0; 4], Vec::new()), calm: 0 }
     }
 }
 
@@ -144,6 +146,34 @@ impl Ground {
             return (0.0, 0.0);
         }
         self.air.get((v * w + u) as usize).map_or((0.0, 0.0), |a| (a[0] as f64, a[1] as f64))
+    }
+
+    // A TPT explosion near him: the sim's pressure jumping by more than 6 in a frame. Where it jumped most (sim pixels)
+    // and how hard, as the game's explode() power (1 = one of its own bombs, at a jump of about 60). One per 10 frames.
+    fn blast(&mut self) -> Option<(f64, f64, f64)> {
+        let [rx, ry, w, h] = self.air_rect;
+        let (old_rect, old) = &self.before;
+        let mut best = (6.0f32, 0, 0);
+        for v in 0..h {
+            for u in 0..w {
+                let (ou, ov) = (u + rx - old_rect[0], v + ry - old_rect[1]);
+                if ou < 0 || ov < 0 || ou >= old_rect[2] || ov >= old_rect[3] {
+                    continue;
+                }
+                let jump = self.air[(v * w + u) as usize][2] - old[(ov * old_rect[2] + ou) as usize];
+                if jump > best.0 {
+                    best = (jump, u, v);
+                }
+            }
+        }
+        self.before = (self.air_rect, self.air.iter().map(|a| a[2]).collect());
+        self.calm = self.calm.saturating_sub(1);
+        if best.0 <= 6.0 || self.calm > 0 {
+            return None;
+        }
+        self.calm = 10;
+        let c = self.cell as f64;
+        Some(((best.1 + rx) as f64 * c + c / 2.0, (best.2 + ry) as f64 * c + c / 2.0, (best.0 as f64 / 60.0).min(2.0)))
     }
 
     fn solid(&self, x: i32, y: i32) -> bool {
@@ -372,6 +402,9 @@ fn frame(b: &mut Game, dt_ms: f64, mx: f64, my: f64, out: &mut [u32]) -> bool {
     if (mx, my) != b.mouse {
         b.mouse = (mx, my);
         p.handle_event(PlayerEvent::MouseMove { x: mx, y: my });
+    }
+    if b.ready && let Some((x, y, power)) = b.ground.lock().ok().and_then(|mut g| g.blast()) {
+        p.call_root_method("explode", vec![x.into(), y.into(), power.into()]).ok();
     }
     p.tick(FloatDuration::from_millis(dt_ms));
     if !b.ready {
@@ -715,9 +748,9 @@ pub unsafe extern "C" fn tdpt_buddy_ground(b: *mut Buddy, rect: *const i32, cell
     }
 }
 
-/// The sim's air velocity over rect (x, y, w, h in cells of `cell` sim pixels): w * h pairs of vx, vy
+/// The sim's air over rect (x, y, w, h in cells of `cell` sim pixels): w * h of vx, vy, pressure
 /// # Safety
-/// b is from tdpt_buddy_open; rect has 4; v has 2 * w * h.
+/// b is from tdpt_buddy_open; rect has 4; v has 3 * w * h.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tdpt_buddy_air(b: *mut Buddy, cell: i32, rect: *const i32, v: *const f32) {
     let b = unsafe { &mut *b };
@@ -727,7 +760,7 @@ pub unsafe extern "C" fn tdpt_buddy_air(b: *mut Buddy, cell: i32, rect: *const i
         g.cell = cell;
         g.air_rect = rect;
         g.air.clear();
-        g.air.extend(unsafe { std::slice::from_raw_parts(v as *const [f32; 2], n) });
+        g.air.extend(unsafe { std::slice::from_raw_parts(v as *const [f32; 3], n) });
     }
 }
 
@@ -891,7 +924,7 @@ mod tests {
         {
             let mut g = game.ground.lock().unwrap();
             g.air_rect = [0, 0, 320, 180];
-            g.air = vec![[3.0, 0.0]; 320 * 180];
+            g.air = vec![[3.0, 0.0, 0.0]; 320 * 180];
         }
         for _ in 0..60 {
             super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
@@ -899,6 +932,38 @@ mod tests {
         let x1 = x(&game);
         println!("wind: body {x0:.1} -> {x1:.1}");
         assert!(x1 > x0 + 50.0, "not blown: {x0} -> {x1}");
+    }
+
+    // a pressure jump just left of him (a TPT bomb) sets off the game's own explosion there, which throws him right
+    #[test]
+    fn thrown_by_blast() {
+        let Some(path) = std::env::var_os("TDPT_BUDDY_SWF") else { return };
+        let mut game = super::open(path.to_str().unwrap(), 1280, 720).unwrap();
+        let mut out = vec![0u32; 1280 * 720];
+        while !super::frame(&mut game, 25.0, 0.0, 0.0, &mut out) {}
+        for _ in 0..40 {
+            super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+        }
+        let n = |g: &super::Game, k: &str| match g.player.lock().unwrap().get_root_variable(k) { Value::Number(v) => v, o => panic!("{k} {o:?}") };
+        let (x0, y0) = (n(&game, "body.x"), n(&game, "body.y"));
+        let set = |game: &super::Game, p: f32| {
+            let mut g = game.ground.lock().unwrap();
+            g.air_rect = [0, 0, 320, 180];
+            g.air = vec![[0.0; 3]; 320 * 180];
+            let (u, v) = ((x0 as usize - 40) / 4, y0 as usize / 4);
+            g.air[v * 320 + u][2] = p;
+        };
+        set(&game, 0.0);
+        super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+        set(&game, 60.0);
+        super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+        set(&game, 60.0); // steady pressure: no second blast
+        for _ in 0..3 {
+            super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+        }
+        let x1 = n(&game, "body.x");
+        println!("blast: body {x0:.0} -> {x1:.0}");
+        assert!(x1 > x0 + 100.0, "not thrown: {x0} -> {x1}");
     }
 
     #[test]

@@ -54,7 +54,9 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
 - [x] **Air:** the sim's air velocity (vx/vy) and pressure gradient push each part; pressure blasts throw him.
       Done: each part gets 0.1 x the air velocity of its cell per frame (sand gets 0.7). Pressure itself is left out:
       a blast's push already shows up in the air velocity.
-- [ ] **Explosions:** TPT explosions near him call the game's own `explode()` at that spot, scaled.
+- [x] **Explosions:** TPT explosions near him call the game's own `explode()` at that spot, scaled.
+      Done: a pressure jump of more than 6 in a frame within his reach calls `explode(x, y, jump / 60)` (max 2; 1 = the
+      game's own bomb) where it jumped most, at most one per 10 frames.
 - [ ] **Heat:** parts touching hot particles take damage and play the game's hurt/emotion reactions; above ~1000 C he
       catches fire (game effect if there is one, or our own flames on the body parts).
 - [ ] **Cold:** cryo/LN2 slow him, frost tint.
