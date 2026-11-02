@@ -138,6 +138,8 @@ struct Ground {
     game_grav: f64,               // the game's grav this frame, before that
     ledge: Option<Ledge>,         // the active window's edges he can stand on (as in the desktop app)
     carry: (f64, f64),            // how far that window moved while he stood on it, not yet applied
+    buried: u32,                  // frames his head has been deep in powder
+    dig: bool,                    // digging out: powder doesn't stop him (the sim shoves it out of his way as he rises)
     support: u8,                  // what he stands on: 0 nothing, 1 its top edge, 2 its bottom edge
 }
 
@@ -166,6 +168,8 @@ const SPARK: u16 = 0x80; // electricity (a spark or an electron): shocks him
 const HURT: u16 = 0x100; // caustic gas, radiation, virus: hurts like acid
 const BANG: u16 = 0x200; // DEST, BOMB, a singularity: blows up on him
 const WINDOW: u16 = 0x400; // a window or icon: its sides stop him like they stop powder; he's in front of it otherwise
+const POWDER: u16 = 0x800; // a powder (sand, snow): buried in it, he digs up through it (DIG)
+const DIG: u32 = 40; // frames his head is deep in powder before he digs out
 const ACID: u16 = 31; // a kind: acid, a liquid (TPT weight 10) that eats him
 const EATER: u16 = 30; // a kind: VOID or a black hole, which swallows him (he comes back at the top)
 const PORTAL: u16 = 29; // a kind: a portal in, which moves him to its way out (Ground::exit)
@@ -175,7 +179,7 @@ const POSE: [(f64, f64); 6] = [(0.0, 0.0), (0.0, -39.4), (-22.1, -10.2), (22.1, 
 
 impl Default for Ground {
     fn default() -> Self {
-        Self { rect: [0; 4], cells: Vec::new(), want: [0; 4], last: (400.0, 300.0), air_rect: [0; 4], air: Vec::new(), cell: 4, before: ([0; 4], Vec::new()), calm: 0, zap: None, gravity: (0.0, 1.0), game_grav: 1.0, exit: None, jumped: 99, eaten: false, parts: Vec::new(), bang: None, booms: Vec::new(), ledge: None, carry: (0.0, 0.0), support: 0 }
+        Self { rect: [0; 4], cells: Vec::new(), want: [0; 4], last: (400.0, 300.0), air_rect: [0; 4], air: Vec::new(), cell: 4, before: ([0; 4], Vec::new()), calm: 0, zap: None, gravity: (0.0, 1.0), game_grav: 1.0, exit: None, jumped: 99, eaten: false, parts: Vec::new(), bang: None, booms: Vec::new(), ledge: None, carry: (0.0, 0.0), buried: 0, dig: false, support: 0 }
     }
 }
 
@@ -247,7 +251,26 @@ impl Ground {
     }
 
     fn solid(&self, x: i32, y: i32) -> bool {
-        self.kind(x, y) == 1
+        self.kind(x, y) == 1 && !(self.dig && self.cell(x, y) & POWDER != 0)
+    }
+
+    // powder over a part's top at least as deep as the part is wide (a few grains falling on him don't count)
+    fn covered(&self, x: f64, y: f64, r: f64) -> bool {
+        let (mut n, mut all) = (0, 0);
+        for py in (y - 3.0 * r) as i32..(y - r) as i32 {
+            for px in (x - r / 2.0) as i32..=(x + r / 2.0) as i32 {
+                all += 1;
+                n += (self.cell(px, py) & POWDER != 0) as u32;
+            }
+        }
+        all > 0 && n * 10 >= all * 7
+    }
+
+    // powder touching a part's upper half (still in the sand it's digging out of; what it stands on doesn't count)
+    fn sunk(&self, x: f64, y: f64, r: f64) -> bool {
+        let e = r + 2.0;
+        (y - e) as i32 <= y as i32
+            && ((y - e) as i32..y as i32).any(|py| ((x - e) as i32..=(x + e) as i32).any(|px| (px as f64 + 0.5 - x).hypot(py as f64 + 0.5 - y) <= e && self.cell(px, py) & POWDER != 0))
     }
 
     // a part's circle touches a window
@@ -321,7 +344,7 @@ impl Ground {
 
     // A body part (circle) inside solid: out the way away from the solid, a pixel at a time, and its speed into the
     // surface bounced like the game's own floor (half back, small speeds stop). The way out, if it was in.
-    // ponytail: a part buried deeper than its size stays put (sand dumped on him); dig out if that looks wrong
+    // A part buried deeper than its size stays put; buried in powder he digs out (Ground::dig).
     fn push_out(&self, x: &mut f64, y: &mut f64, xv: &mut f64, yv: &mut f64, r: f64) -> Option<(f64, f64)> {
         let (n, sx, sy) = self.overlap(*x, *y, r);
         if n == 0 {
@@ -397,6 +420,8 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
         let (mut hot, mut warm, mut doused, mut cold, mut zap) = (false, 0, false, 0, None);
         let mut portal = false;
         g.parts.clear();
+        g.dig = !held && g.buried > DIG;
+        let (mut covered, mut sunk) = (false, false);
         for part in PARTS {
             let (mut x, mut y) = (num(v, &format!("{part}.x")), num(v, &format!("{part}.y")));
             let (mut xv, mut yv, r) = (num(v, &format!("{part}.xv")), num(v, &format!("{part}.yv")), num(v, &format!("{part}.rad")));
@@ -439,6 +464,14 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
                 xv *= -0.3;
             }
             let out = if held { None } else { g.push_out(&mut x, &mut y, &mut xv, &mut yv, r) };
+            if part == "head" {
+                covered = g.covered(x, y, r);
+            }
+            sunk |= g.dig && g.sunk(x, y, r);
+            if g.dig {
+                yv = yv.min(-1.5 - grav.max(0.0)); // wriggling up, about 60 px a second
+                xv *= 0.8;
+            }
             // landing on the active window's top or bottom edge from above, as in the desktop app (not when put
             // somewhere: setBuddyXY, a portal)
             let mut landed = side;
@@ -451,7 +484,7 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
                 }
             }
             standing |= part.ends_with("Leg") && landed;
-            if wet || blown || cold > 0 || out.is_some() || landed {
+            if wet || blown || cold > 0 || out.is_some() || landed || g.dig {
                 for (f, n) in [("x", x), ("y", y), ("xv", xv), ("yv", yv)] {
                     v.set(&format!("{part}.{f}"), Value::Number(n));
                 }
@@ -462,6 +495,7 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
             let reach = r + 64.0 + xv.abs().max(yv.abs()) * 2.0; // what he can touch by the next frame
             bbox = [bbox[0].min(x - reach), bbox[1].min(y - reach), bbox[2].max(x + reach), bbox[3].max(y + reach)];
         }
+        g.buried = if (covered || sunk) && !held { g.buried + 1 } else { 0 }; // digging goes on until he's out
         if let Some(l) = g.ledge.filter(|_| !held) {
             for leg in ["lLeg", "rLeg"] {
                 let f = l.foot(num(v, &format!("{leg}.x")), num(v, &format!("{leg}.y")), num(v, &format!("{leg}.rad")), num(v, &format!("{leg}.yv")));
@@ -1251,6 +1285,62 @@ mod tests {
         println!("lLeg bottom {:.1}, body {by:.1}, onGround {:?}, cam {:?} {:?} {:?}", ly + lr, p.get_root_variable("onGround"), p.get_root_variable("camx"), p.get_root_variable("camy"), p.get_root_variable("camz"));
         assert!((ly + lr - 400.0).abs() < 4.0, "feet not on the block: {}", ly + lr);
         assert!(by < 400.0, "body sank: {by}");
+    }
+
+    // slopes: he slides down a 45 degree one; buried under 200 px of sand he digs up through it (not through metal)
+    #[test]
+    fn slides_and_digs_out() {
+        let Some(path) = std::env::var_os("TDPT_BUDDY_SWF") else { return };
+        let n = |g: &super::Game, k: &str| match g.player.lock().unwrap().get_root_variable(k) { Value::Number(v) => v, o => panic!("{k} {o:?}") };
+        let start = || {
+            let mut game = super::open(path.to_str().unwrap(), 1280, 720).unwrap();
+            let mut out = vec![0u32; 1280 * 720];
+            while !super::frame(&mut game, 25.0, 0.0, 0.0, &mut out) {}
+            (game, out)
+        };
+        let (mut game, mut out) = start();
+        game.player.lock().unwrap().call_root_method("setBuddyXY", vec![500.into(), 500.into()]).unwrap();
+        for _ in 0..80 {
+            let mut g = game.ground.lock().unwrap();
+            let r = g.want;
+            g.cells = (0..r[2] * r[3]).map(|i| (r[1] + i / r[2] >= 400 + (r[0] + i % r[2] - 300)) as u16).collect();
+            g.rect = r;
+            drop(g);
+            super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+        }
+        let x = n(&game, "body.x");
+        println!("slope: body.x 500 -> {x:.0}");
+        assert!(x > 540.0, "didn't slide down: {x}");
+        for (cell, out_too) in [(super::POWDER | 1, true), (1, false)] {
+            drop(game);
+            (game, out) = start();
+            game.player.lock().unwrap().call_root_method("setBuddyXY", vec![600.into(), 300.into()]).unwrap();
+            let mut hole = vec![];
+            for i in 0..400 {
+                if i == 80 {
+                    hole = game.ground.lock().unwrap().parts.clone(); // the sand settles around him: his shape stays empty
+                }
+                let mut g = game.ground.lock().unwrap();
+                let r = g.want;
+                g.cells = (0..r[2] * r[3])
+                    .map(|i| {
+                        let (x, y) = ((r[0] + i % r[2]) as f64 + 0.5, (r[1] + i / r[2]) as f64 + 0.5);
+                        let mine = hole.iter().any(|p| (x - p[0]).hypot(y - p[1]) <= p[2] + 1.0);
+                        if y >= 400.0 { 1 } else if !hole.is_empty() && y >= 200.0 && (300.0..900.0).contains(&x) && !mine { cell } else { 0 }
+                    })
+                    .collect();
+                g.rect = r;
+                drop(g);
+                super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+            }
+            let feet = n(&game, "lLeg.y") + n(&game, "lLeg.rad");
+            println!("buried (powder {out_too}): feet at {feet:.0}");
+            if out_too {
+                assert!((feet - 200.0).abs() < 6.0, "didn't dig out onto the pile: {feet}");
+            } else {
+                assert!(feet > 390.0, "went up through metal: {feet}");
+            }
+        }
     }
 
     // a pool of water (TPT weight 30: 2 + 8) under him: he floats with part of him above the surface

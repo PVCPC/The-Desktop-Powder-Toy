@@ -113,7 +113,11 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
 - [x] Pets react to him (wave, run away when he explodes).
       Done (Fun "Pets meet Buddy"): they walk over and hop hello when he is calm (then leave him 15 s), and run
       when he flies past (speed > 8) or a game explosion goes off (2 s). Pets already run from his fire.
-- [ ] He sits in TDPT puddles, slides down sand slopes, gets buried and digs out.
+- [x] He sits in TDPT puddles, slides down sand slopes, gets buried and digs out.
+      Done: he floats in puddles (section 2) and slides down slopes (27-56 degrees tested). Powders are 0x800 in the
+      ground map: with his head under powder at least 3 head-radii deep for 40 frames he digs up through it (about
+      60 px a second) until no powder touches his upper half; the sim shoves the sand out of his way. Not through
+      solids. Checked in TDPT: buried under a 320x340 px block of sand, out on top of the pile in about 10 s.
 - [x] Weather hits him: snow piles on his head, rain makes him wet (darker tint).
       Done (Fun "Buddy gets wet and frosty"): cool liquid darkens a part for 10 s, -50 C or colder frosts it pale blue; fire dries him.
 - [ ] Wallpaper and window marks from his fire and acid, like the rest of the sim.

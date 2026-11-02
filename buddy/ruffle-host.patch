@@ -25,7 +25,7 @@ index d76c1cba..5f568843 100644
  pub use ruffle_render::backend::ViewportDimensions;
  pub use swf;
 diff --git a/core/src/player.rs b/core/src/player.rs
-index c3756621..b58531a9 100644
+index c3756621..ba2c5d04 100644
 --- a/core/src/player.rs
 +++ b/core/src/player.rs
 @@ -2520,6 +2520,122 @@ impl Player {
@@ -151,7 +151,7 @@ index c3756621..b58531a9 100644
      pub fn call_internal_interface(
          &mut self,
          name: &str,
-@@ -2624,6 +2740,55 @@ impl Player {
+@@ -2624,8 +2740,59 @@ impl Player {
      }
  }
  
@@ -206,4 +206,8 @@ index c3756621..b58531a9 100644
 +
  impl Drop for Player {
      fn drop(&mut self) {
++        // its hooks go with it (a later player on this thread starts at slot 0 again)
++        HOST_HOOKS.with(|h| h.borrow_mut().clear());
          self.flush_shared_objects();
+     }
+ }

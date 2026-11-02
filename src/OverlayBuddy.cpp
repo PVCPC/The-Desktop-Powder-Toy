@@ -83,7 +83,8 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
 	// liquids as 2 + a quarter of their weight (water 30), which he floats in, acid as 31, VOID and black holes as 30,
 	// portals in as 29; then how hot it is (0x20 60 C+, 0x40
 	// 400 C+: sets him on fire, 0x60 -50 C or colder), 0x80 a spark or electron (shocks him), 0x100 caustic gas, radiation
-	// or virus (hurts), 0x200 DEST, BOMB or a singularity (blows up on him); light (PHOT) warms him
+	// or virus (hurts), 0x200 DEST, BOMB or a singularity (blows up on him), 0x800 a powder (buried, he digs up through
+	// it); light (PHOT) warms him
 	int32_t r[4];
 	tdpt_buddy_area(buddy, r);
 	r[2] = std::clamp(r[2], 0, XRES * 2), r[3] = std::clamp(r[3], 0, YRES * 2);
@@ -101,7 +102,7 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
 			else if (e == PT_PHOT && !(c & 0x60)) c |= 0x20;
 			if (y < wb && sim->PixelWall(x, y) && !sim->HoleAt(x, y) && !Mine(x, y, 4)) c |= 0x400;
 			if (sim->IsWallBlocking(x, y, PT_DUST)) c |= 1;
-			else if (p && (elements[TYP(p)].Properties & (TYPE_PART | TYPE_SOLID))) c |= 1;
+			else if (p && (elements[TYP(p)].Properties & (TYPE_PART | TYPE_SOLID))) c |= (elements[TYP(p)].Properties & TYPE_PART) ? 0x801 : 1;
 			else if (p && (elements[TYP(p)].Properties & TYPE_LIQUID)) c |= uint16_t(2 + (std::clamp(elements[TYP(p)].Weight, 0, 100) + 2) / 4);
 			if (!p) continue;
 			if (TYP(p) == PT_ACID) c = (c & ~0x1F) | 31;
