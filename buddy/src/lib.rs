@@ -85,7 +85,9 @@ struct Game {
     size: (u32, u32),
     mouse: (f64, f64),
     ready: bool,
-    readback: Option<wgpu::Buffer>,
+    readback: [Option<wgpu::Buffer>; 2], // the GPU copies the frame into one while we read last frame's from the other
+    pending: Option<Copy>,                // last frame's copy, not read yet
+    drawn: [Vec<[usize; 4]>; 3], // what the last 3 frames read back (x0, y0, x1, y1 boxes): the frame buffers TDPT and we take turns with
     settings: [f64; 5], // from the Buddy tab: size %, speech on, speech size %, toys at once (0: no limit), smooth on
     applied: [f64; 5],  // what the game has
 }
@@ -107,7 +109,7 @@ fn open(path: &str, w: u32, h: u32) -> Result<Game, String> {
         .with_storage(Box::new(Saves("buddy".into())))
         .build();
     load_fonts(&mut player.lock().unwrap());
-    Ok(Game { player, ground: Default::default(), size: (w, h), mouse: (-1.0, -1.0), ready: false, readback: None, settings: SETTINGS, applied: [f64::NAN; 5] })
+    Ok(Game { player, ground: Default::default(), size: (w, h), mouse: (-1.0, -1.0), ready: false, readback: [None, None], pending: None, drawn: std::array::from_fn(|_| vec![[0, 0, usize::MAX, usize::MAX]]), settings: SETTINGS, applied: [f64::NAN; 5] })
 }
 
 // The sim around him, so he stands on it, floats in it and burns in it: one byte per sim pixel over rect (x, y, w, h sim
@@ -611,6 +613,8 @@ fn frame(b: &mut Game, dt_ms: f64, mx: f64, my: f64, out: &mut [u32]) -> bool {
     let view = p.viewport_dimensions();
     if (view.width, view.height) != b.size {
         p.set_viewport_dimensions(ViewportDimensions { width: b.size.0, height: b.size.1, scale_factor: 1.0 });
+        b.drawn = std::array::from_fn(|_| vec![[0, 0, usize::MAX, usize::MAX]]); // the buffers are a new size: clear them whole
+        (b.pending, b.readback) = (None, [None, None]); // and the copy on its way is the old size (its buffer still mapped)
     }
     if (mx, my) != b.mouse {
         b.mouse = (mx, my);
@@ -667,45 +671,95 @@ fn frame(b: &mut Game, dt_ms: f64, mx: f64, my: f64, out: &mut [u32]) -> bool {
     p.call_root_method("__hostRender", vec![]).ok();
     p.render();
     p.call_root_method("__hostRestore", vec![]).ok();
+    // only the part anything is drawn in comes back from the GPU (the whole 5120x1440 frame took 8-10 ms, so he
+    // couldn't keep up at 120 Hz); 32 px more for glows and shadows
+    let areas = p.drawn_areas(32.0);
     let renderer = (p.renderer() as &dyn std::any::Any).downcast_ref::<WgpuRenderBackend<TextureTarget>>().unwrap();
-    read_back(&mut b.readback, renderer, out);
+    read_back(&mut b.readback, &mut b.pending, renderer, out, &areas, &mut b.drawn);
     true
 }
 
+// A copy of the frame's drawn boxes on its way back from the GPU: which readback buffer, each box (x0, y0, x1, y1) and
+// where its rows are in the buffer (padded row length, offset), the bytes used, and the submission to wait for
+struct Copy {
+    slot: usize,
+    boxes: Vec<[usize; 4]>,
+    rows: Vec<(usize, usize)>,
+    total: usize,
+    index: wgpu::SubmissionIndex,
+}
+
 // The frame from the GPU, already premultiplied, as 0xAARRGGBB (Ruffle's own capture_frame un-premultiplies into a
-// new image every call: three times slower at 5120x1440)
-fn read_back(readback: &mut Option<wgpu::Buffer>, renderer: &WgpuRenderBackend<TextureTarget>, out: &mut [u32]) {
+// new image every call: three times slower at 5120x1440). Only where things are drawn, and one frame late: this
+// frame's copy is sent off and last frame's (done by now) is read, so we never wait for the GPU to draw (4-5 ms at
+// 5120x1440, too slow for 120 Hz)
+fn read_back(readback: &mut [Option<wgpu::Buffer>; 2], pending: &mut Option<Copy>, renderer: &WgpuRenderBackend<TextureTarget>, out: &mut [u32], areas: &[[f64; 4]], drawn: &mut [Vec<[usize; 4]>; 3]) {
     use rayon::prelude::*;
     let (target, d) = (renderer.target(), renderer.descriptors());
-    let w = target.size.width as usize;
-    let row = (w * 4).div_ceil(256) * 256;
-    let size = (row * target.size.height as usize) as u64;
-    if readback.as_ref().is_none_or(|r| r.size() != size) {
-        *readback = Some(d.device.create_buffer(&wgpu::BufferDescriptor {
+    let (fw, fh) = (target.size.width as usize, target.size.height as usize);
+    if out.len() != fw * fh {
+        return;
+    }
+    // this frame's boxes, copied into the buffer last frame's copy isn't in
+    let boxes: Vec<[usize; 4]> = areas
+        .iter()
+        .map(|a| [a[0].clamp(0.0, fw as f64) as usize, a[1].clamp(0.0, fh as f64) as usize, a[2].clamp(0.0, fw as f64).ceil() as usize, a[3].clamp(0.0, fh as f64).ceil() as usize])
+        .filter(|b| b[2] > b[0] && b[3] > b[1])
+        .collect();
+    let mut rows = Vec::new();
+    let mut total = 0;
+    for b in &boxes {
+        let row = ((b[2] - b[0]) * 4).div_ceil(256) * 256;
+        rows.push((row, total));
+        total += row * (b[3] - b[1]);
+    }
+    let slot = pending.as_ref().map_or(0, |c| 1 - c.slot);
+    if readback[slot].as_ref().is_none_or(|r| (r.size() as usize) < total) {
+        readback[slot] = Some(d.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("buddy readback"),
-            size,
+            size: ((fw * 4).div_ceil(256) * 256 * fh).max(total) as u64, // room for the whole frame, made once
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         }));
     }
-    let buffer = readback.as_ref().unwrap();
+    let buffer = readback[slot].as_ref().unwrap();
     let mut encoder = d.device.create_command_encoder(&Default::default());
-    encoder.copy_texture_to_buffer(
-        target.texture.as_image_copy(),
-        wgpu::TexelCopyBufferInfo { buffer, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row as u32), rows_per_image: None } },
-        target.size,
-    );
+    for (b, &(row, offset)) in boxes.iter().zip(&rows) {
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo { origin: wgpu::Origin3d { x: b[0] as u32, y: b[1] as u32, z: 0 }, ..target.texture.as_image_copy() },
+            wgpu::TexelCopyBufferInfo { buffer, layout: wgpu::TexelCopyBufferLayout { offset: offset as u64, bytes_per_row: Some(row as u32), rows_per_image: None } },
+            wgpu::Extent3d { width: (b[2] - b[0]) as u32, height: (b[3] - b[1]) as u32, depth_or_array_layers: 1 },
+        );
+    }
     let index = d.queue.submit([encoder.finish()]);
-    let slice = buffer.slice(..);
-    slice.map_async(wgpu::MapMode::Read, |_| {});
-    d.device.poll(wgpu::PollType::Wait { submission_index: Some(index), timeout: None }).ok();
+    if total > 0 {
+        buffer.slice(..total as u64).map_async(wgpu::MapMode::Read, |_| {});
+    }
+    let Some(last) = pending.replace(Copy { slot, boxes, rows, total, index }) else { return };
+    // last frame's: what an older frame in this buffer drew is cleared, then its boxes go in
+    for r in drawn.iter().flatten() {
+        let (x0, x1) = (r[0].min(fw), r[2].min(fw));
+        for y in r[1].min(fh)..r[3].min(fh) {
+            out[y * fw + x0..y * fw + x1].fill(0);
+        }
+    }
+    drawn.rotate_right(1);
+    drawn[0] = last.boxes.clone();
+    if last.total == 0 {
+        return;
+    }
+    d.device.poll(wgpu::PollType::Wait { submission_index: Some(last.index), timeout: None }).ok();
+    let buffer = readback[last.slot].as_ref().unwrap();
     {
-        let map = slice.get_mapped_range().unwrap();
-        out.par_chunks_mut(w).zip(map.par_chunks(row)).for_each(|(o, src)| {
-            for (o, c) in o.iter_mut().zip(src.chunks_exact(4)) {
-                *o = u32::from(c[3]) << 24 | u32::from(c[0]) << 16 | u32::from(c[1]) << 8 | u32::from(c[2]);
-            }
-        });
+        let map = buffer.slice(..last.total as u64).get_mapped_range().unwrap();
+        for (b, &(row, offset)) in last.boxes.iter().zip(&last.rows) {
+            let src = &map[offset..offset + row * (b[3] - b[1])];
+            out[b[1] * fw..b[3] * fw].par_chunks_mut(fw).zip(src.par_chunks(row)).for_each(|(o, src)| {
+                for (o, c) in o[b[0]..b[2]].iter_mut().zip(src.chunks_exact(4)) {
+                    *o = u32::from(c[3]) << 24 | u32::from(c[0]) << 16 | u32::from(c[1]) << 8 | u32::from(c[2]);
+                }
+            });
+        }
     }
     buffer.unmap();
 }
@@ -818,7 +872,7 @@ pub struct Buddy {
     front: Vec<u32>, // the frame TDPT is drawing
 }
 
-// The game's thread: ticks and draws him about 60 times a second, off TDPT's frame (a game frame alone is ~7 ms)
+// The game's thread: ticks and draws him 120 times a second (60 without smoothing), off TDPT's frame (a game frame alone is ~7 ms)
 fn run(mut game: Game, shared: Arc<Mutex<Shared>>) {
     let mut work = Vec::new();
     let mut last = Instant::now();
@@ -875,7 +929,9 @@ fn run(mut game: Game, shared: Arc<Mutex<Shared>>) {
             }
         }
         drop(s);
-        std::thread::sleep(Duration::from_secs_f64(1.0 / 60.0).saturating_sub(start.elapsed()));
+        // the game's smoothing draws him between its 40 Hz steps: 120 frames a second, as in the desktop app
+        let rate = if game.settings[4] != 0.0 { 120.0 } else { 60.0 };
+        std::thread::sleep(Duration::from_secs_f64(1.0 / rate).saturating_sub(start.elapsed()));
     }
 }
 
@@ -1557,6 +1613,28 @@ mod tests {
         }
         println!("sides: rightmost {right:.1}");
         assert!(right < 702.0, "went into the window: {right}");
+    }
+
+    // only where things are drawn comes back, a frame late: his pixels are where he is, and none are left where he was
+    #[test]
+    fn frame_follows_him() {
+        let Some(path) = std::env::var_os("TDPT_BUDDY_SWF") else { return };
+        let mut game = super::open(path.to_str().unwrap(), 1280, 720).unwrap();
+        let mut out = vec![0u32; 1280 * 720];
+        while !super::frame(&mut game, 25.0, 0.0, 0.0, &mut out) {}
+        let n = |g: &super::Game, k: &str| match g.player.lock().unwrap().get_root_variable(k) { Value::Number(v) => v, o => panic!("{k} {o:?}") };
+        let seen = |out: &[u32], x: f64, y: f64| (-5..=5).any(|d| out[(y as usize).saturating_add_signed(d) * 1280 + x as usize] >> 24 != 0);
+        for at in [700.0, 1100.0] {
+            game.player.lock().unwrap().call_root_method("setBuddyXY", vec![at.into(), 400.into()]).unwrap();
+            for _ in 0..90 {
+                super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+            }
+            let (x, y) = (n(&game, "body.x"), n(&game, "body.y"));
+            assert!(seen(&out, x, y), "nothing drawn on his body at {x},{y}");
+        }
+        let left: usize = (500..720).map(|y| out[y * 1280 + 600..y * 1280 + 800].iter().filter(|p| **p >> 24 != 0).count()).sum();
+        println!("frame: pixels left where he was {left}");
+        assert_eq!(left, 0, "pixels left behind where he was");
     }
 
     // the Buddy tab's size: 200% doubles his parts, back to 100% restores them

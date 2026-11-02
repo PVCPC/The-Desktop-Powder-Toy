@@ -25,13 +25,50 @@ index d76c1cba..5f568843 100644
  pub use ruffle_render::backend::ViewportDimensions;
  pub use swf;
 diff --git a/core/src/player.rs b/core/src/player.rs
-index c3756621..06c9ca4f 100644
+index c3756621..b58531a9 100644
 --- a/core/src/player.rs
 +++ b/core/src/player.rs
-@@ -2520,6 +2520,85 @@ impl Player {
+@@ -2520,6 +2520,122 @@ impl Player {
          });
      }
  
++    /// Where anything visible is drawn on the stage, as separate boxes (pixels: x0, y0, x1, y1), each grown by
++    /// `margin` (filters such as glows spill past what they're on) and merged where they touch, for a native host that
++    /// only reads those parts of the frame back.
++    pub fn drawn_areas(&mut self, margin: f64) -> Vec<[f64; 4]> {
++        fn walk<'gc>(o: DisplayObject<'gc>, m: Matrix, margin: f64, out: &mut Vec<[f64; 4]>) {
++            if !o.visible() {
++                return;
++            }
++            let m = m * o.base().matrix();
++            let r = m * o.self_bounds(crate::display_object::BoundsMode::Engine);
++            if r.is_valid() && r.x_max > r.x_min && r.y_max > r.y_min {
++                out.push([r.x_min.to_pixels() - margin, r.y_min.to_pixels() - margin, r.x_max.to_pixels() + margin, r.y_max.to_pixels() + margin]);
++            }
++            if let Some(c) = o.as_container() {
++                for child in c.iter_render_list() {
++                    walk(child, m, margin, out);
++                }
++            }
++        }
++        let mut boxes = Vec::new();
++        self.mutate_with_update_context(|context| {
++            if let Some(root) = context.stage.root_clip() {
++                walk(root, Matrix::IDENTITY, margin, &mut boxes);
++            }
++        });
++        // merge touching boxes until none touch
++        let mut merged: Vec<[f64; 4]> = Vec::new();
++        for mut b in boxes {
++            while let Some(k) = merged.iter().position(|m| m[0] <= b[2] && b[0] <= m[2] && m[1] <= b[3] && b[1] <= m[3]) {
++                let m = merged.swap_remove(k);
++                b = [b[0].min(m[0]), b[1].min(m[1]), b[2].max(m[2]), b[3].max(m[3])];
++            }
++            merged.push(b);
++        }
++        merged
++    }
++
 +    /// Reads one root AVM1 property for a native host without advancing gameplay.
 +    pub fn get_root_variable(&mut self, name: &str) -> ExternalValue {
 +        self.mutate_with_update_context(|context| {
@@ -114,7 +151,7 @@ index c3756621..06c9ca4f 100644
      pub fn call_internal_interface(
          &mut self,
          name: &str,
-@@ -2624,6 +2703,55 @@ impl Player {
+@@ -2624,6 +2740,55 @@ impl Player {
      }
  }
  
