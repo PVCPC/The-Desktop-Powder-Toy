@@ -25,7 +25,7 @@ index d76c1cba..5f568843 100644
  pub use ruffle_render::backend::ViewportDimensions;
  pub use swf;
 diff --git a/core/src/player.rs b/core/src/player.rs
-index c3756621..c6d9c3dd 100644
+index c3756621..06c9ca4f 100644
 --- a/core/src/player.rs
 +++ b/core/src/player.rs
 @@ -2520,6 +2520,85 @@ impl Player {
@@ -114,7 +114,7 @@ index c3756621..c6d9c3dd 100644
      pub fn call_internal_interface(
          &mut self,
          name: &str,
-@@ -2624,6 +2703,53 @@ impl Player {
+@@ -2624,6 +2703,55 @@ impl Player {
      }
  }
  
@@ -147,14 +147,16 @@ index c3756621..c6d9c3dd 100644
 +
 +fn host_hooked<'gc, const N: usize>(
 +    activation: &mut Activation<'_, 'gc>,
-+    _this: Object<'gc>,
++    this: Object<'gc>,
 +    args: &[Value<'gc>],
 +) -> Result<Value<'gc>, crate::avm1::Error<'gc>> {
 +    let Some(root) = activation.context.stage.root_clip().and_then(|root| root.object1()) else {
 +        return Ok(Value::Undefined);
 +    };
++    // the original, with the caller's own this
 +    let saved = AvmString::new_utf8(activation.gc(), format!("__hostOriginal{N}"));
-+    let result = root.call_method(saved, args, activation, crate::avm1::ExecutionReason::Special)?;
++    let Value::Object(original) = root.get(saved, activation)? else { return Ok(Value::Undefined) };
++    let result = original.call(saved, activation, this.into(), args)?;
 +    HOST_HOOKS.with(|hooks| {
 +        if let Ok(mut hooks) = hooks.try_borrow_mut() {
 +            if let Some(hook) = hooks.get_mut(N) {

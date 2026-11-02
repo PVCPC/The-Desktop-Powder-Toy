@@ -107,22 +107,66 @@ fn open(path: &str, w: u32, h: u32) -> Result<Game, String> {
     Ok(Game { player, ground: Default::default(), size: (w, h), mouse: (-1.0, -1.0), ready: false, readback: None })
 }
 
-// The sim around him, so he stands on it: one byte per sim pixel (nonzero: solid for him) over rect (x, y, w, h sim
-// pixels, which are his stage pixels). TDPT fills it each frame with the part he asks for (want).
-#[derive(Default)]
+// The sim around him, so he stands on it and floats in it: one byte per sim pixel (0 nothing, 1 solid for him, 2 + w
+// liquid of TPT weight w) over rect (x, y, w, h sim pixels, which are his stage pixels). TDPT fills it each frame with the part he asks for (want).
 struct Ground {
     rect: [i32; 4],
     cells: Vec<u8>,
     want: [i32; 4],
+    last: (f64, f64), // his body, last frame
 }
 
 const PARTS: [&str; 6] = ["body", "head", "lArm", "rArm", "lLeg", "rLeg"];
+// where his parts sit around the body when he stands (from the game), to put him back together
+const POSE: [(f64, f64); 6] = [(0.0, 0.0), (0.0, -39.4), (-22.1, -10.2), (22.1, -10.2), (-15.1, 32.0), (15.0, 32.0)];
+
+impl Default for Ground {
+    fn default() -> Self {
+        Self { rect: [0; 4], cells: Vec::new(), want: [0; 4], last: (400.0, 300.0) }
+    }
+}
 
 impl Ground {
-    fn solid(&self, x: i32, y: i32) -> bool {
+    fn cell(&self, x: i32, y: i32) -> u8 {
         let [rx, ry, w, h] = self.rect;
         let (u, v) = (x - rx, y - ry);
-        u >= 0 && v >= 0 && u < w && v < h && self.cells.get((v * w + u) as usize).is_some_and(|&c| c != 0)
+        if u >= 0 && v >= 0 && u < w && v < h { self.cells.get((v * w + u) as usize).copied().unwrap_or(0) } else { 0 }
+    }
+
+    fn solid(&self, x: i32, y: i32) -> bool {
+        self.cell(x, y) == 1
+    }
+
+    // how much of a circle is in liquid (0-1), and that liquid's mean TPT weight
+    fn wet(&self, x: f64, y: f64, r: f64) -> (f64, f64) {
+        let (mut all, mut n, mut w) = (0, 0, 0.0);
+        for py in (y - r).floor() as i32..=(y + r).ceil() as i32 {
+            for px in (x - r).floor() as i32..=(x + r).ceil() as i32 {
+                let (dx, dy) = (px as f64 + 0.5 - x, py as f64 + 0.5 - y);
+                if dx * dx + dy * dy <= r * r {
+                    all += 1;
+                    if let c @ 2.. = self.cell(px, py) {
+                        n += 1;
+                        w += (c - 2) as f64;
+                    }
+                }
+            }
+        }
+        if n == 0 { (0.0, 0.0) } else { (n as f64 / all as f64, w / n as f64) }
+    }
+
+    // A part in liquid: lifted by what it pushes aside (as heavy as 1.2 x water: he floats in water with his top out,
+    // high in mercury, sinks slowly in oil) and slowed by it. grav = the game's own gravity per frame.
+    fn float(&self, x: f64, y: f64, xv: &mut f64, yv: &mut f64, r: f64, grav: f64) -> bool {
+        let (frac, weight) = self.wet(x, y, r);
+        if frac == 0.0 {
+            return false;
+        }
+        *yv -= grav * frac * weight / 30.0 * 1.2;
+        let drag = 1.0 - 0.12 * frac * (weight / 30.0).min(2.0);
+        *xv *= drag;
+        *yv *= drag;
+        true
     }
 
     // the solid pixels inside a circle: how many, and the sum of their offsets from its centre
@@ -189,6 +233,18 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
     p.hook_after_root_function("doBodyPhysics", Box::new(move |v| {
         let Ok(mut g) = g.lock() else { return };
         let held = v.get("fistDrag") == Value::Number(1.0); // held: he goes where the hand goes
+        let grav = num(v, "grav");
+        // a part the game lost (NaN: its own divide by 0, or a save that kept one) stays lost and is saved that way:
+        // stand him up again where he last was
+        if PARTS.iter().any(|part| ["x", "y", "xv", "yv"].iter().any(|f| !num(v, &format!("{part}.{f}")).is_finite())) {
+            let (bx, by) = g.last;
+            for (part, (dx, dy)) in PARTS.iter().zip(POSE) {
+                for (f, n) in [("x", bx + dx), ("y", by + dy), ("xv", 0.0), ("yv", 0.0)] {
+                    v.set(&format!("{part}.{f}"), Value::Number(n));
+                }
+            }
+        }
+        g.last = (num(v, "body.x"), num(v, "body.y"));
         let mut bbox = [f64::MAX, f64::MAX, f64::MIN, f64::MIN];
         let mut standing = false;
         for part in PARTS {
@@ -197,12 +253,14 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
             if [x, y, xv, yv, r].iter().any(|n| !n.is_finite()) || r <= 0.0 {
                 continue;
             }
-            if !held && let Some((_, ny)) = g.push_out(&mut x, &mut y, &mut xv, &mut yv, r) {
+            let wet = !held && grav.is_finite() && g.float(x, y, &mut xv, &mut yv, r, grav);
+            let out = if held { None } else { g.push_out(&mut x, &mut y, &mut xv, &mut yv, r) };
+            if wet || out.is_some() {
                 for (f, n) in [("x", x), ("y", y), ("xv", xv), ("yv", yv)] {
                     v.set(&format!("{part}.{f}"), Value::Number(n));
                 }
-                standing |= part.ends_with("Leg") && ny < -0.5;
             }
+            standing |= part.ends_with("Leg") && out.is_some_and(|(_, ny)| ny < -0.5);
             let reach = r + 64.0 + xv.abs().max(yv.abs()) * 2.0; // what he can touch by the next frame
             bbox = [bbox[0].min(x - reach), bbox[1].min(y - reach), bbox[2].max(x + reach), bbox[3].max(y + reach)];
         }
@@ -701,7 +759,7 @@ mod tests {
     #[test]
     fn ground_push_out() {
         // a floor from y = 100 down
-        let g = super::Ground { rect: [0, 0, 200, 200], cells: (0..200 * 200).map(|i| (i / 200 >= 100) as u8).collect(), want: [0; 4] };
+        let g = super::Ground { rect: [0, 0, 200, 200], cells: (0..200 * 200).map(|i| (i / 200 >= 100) as u8).collect(), ..Default::default() };
         let (mut x, mut y, mut xv, mut yv) = (50.0, 95.0, 1.0, 6.0);
         let n = g.push_out(&mut x, &mut y, &mut xv, &mut yv, 10.0).expect("in the floor");
         assert!(n.1 < -0.9 && y <= 90.5 && y > 88.0, "{n:?} {y}");
@@ -739,6 +797,51 @@ mod tests {
         println!("lLeg bottom {:.1}, body {by:.1}, onGround {:?}, cam {:?} {:?} {:?}", ly + lr, p.get_root_variable("onGround"), p.get_root_variable("camx"), p.get_root_variable("camy"), p.get_root_variable("camz"));
         assert!((ly + lr - 400.0).abs() < 4.0, "feet not on the block: {}", ly + lr);
         assert!(by < 400.0, "body sank: {by}");
+    }
+
+    // a pool of water (TPT weight 30) under him: he floats with part of him above the surface
+    #[test]
+    fn floats_in_water() {
+        let Some(path) = std::env::var_os("TDPT_BUDDY_SWF") else { return };
+        let mut game = super::open(path.to_str().unwrap(), 1280, 720).unwrap();
+        let mut out = vec![0u32; 1280 * 720];
+        while !super::frame(&mut game, 25.0, 0.0, 0.0, &mut out) {}
+        let fill = |game: &super::Game| {
+            let mut g = game.ground.lock().unwrap();
+            let r = g.want;
+            g.cells = (0..r[2] * r[3]).map(|i| if r[1] + i / r[2] >= 450 { 32 } else { 0 }).collect();
+            g.rect = r;
+        };
+        game.player.lock().unwrap().call_root_method("setBuddyXY", vec![600.into(), 200.into()]).unwrap();
+        for _ in 0..400 {
+            fill(&game);
+            super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+        }
+        let mut p = game.player.lock().unwrap();
+        let y = |p: &mut ruffle_core::Player, n: &str| match p.get_root_variable(n) { Value::Number(v) => v, o => panic!("{n} {o:?}") };
+        let (hy, by, byv) = (y(&mut p, "head.y"), y(&mut p, "body.y"), y(&mut p, "body.yv"));
+        println!("head {hy:.1} body {by:.1} yv {byv:.2}");
+        assert!(by > 430.0 && by < 520.0, "body not at the surface: {by}");
+        assert!(hy < 450.0, "head under water: {hy}");
+        assert!(byv.abs() < 1.5, "still bobbing hard: {byv}");
+    }
+
+    // a lost part (NaN, as a bad save brings back) is put back together instead of staying lost
+    #[test]
+    fn heals_nan() {
+        let Some(path) = std::env::var_os("TDPT_BUDDY_SWF") else { return };
+        let mut game = super::open(path.to_str().unwrap(), 1280, 720).unwrap();
+        let mut out = vec![0u32; 1280 * 720];
+        while !super::frame(&mut game, 25.0, 0.0, 0.0, &mut out) {}
+        game.player.lock().unwrap().set_root_variable("lArm.y", Value::Number(f64::NAN)).unwrap();
+        for _ in 0..40 {
+            super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+        }
+        let mut p = game.player.lock().unwrap();
+        for part in super::PARTS {
+            let v = p.get_root_variable(&format!("{part}.y"));
+            assert!(matches!(v, Value::Number(n) if n.is_finite()), "{part}.y = {v:?}");
+        }
     }
 
     #[test]

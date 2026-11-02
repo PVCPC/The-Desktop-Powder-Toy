@@ -48,7 +48,8 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
 		}
 	}
 	if (!buddy) return false;
-	// what he stands on: windows and icons (not their holes), powders and solids, and walls a powder can't pass
+	// what he stands on: windows and icons (not their holes), powders and solids, and walls a powder can't pass (1);
+	// liquids as 2 + their weight (water 30), which he floats in
 	int32_t r[4];
 	tdpt_buddy_area(buddy, r);
 	r[2] = std::clamp(r[2], 0, XRES * 2), r[3] = std::clamp(r[3], 0, YRES * 2);
@@ -59,8 +60,10 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
 		for (int x = std::max(r[0], 0); x < std::min(r[0] + r[2], XRES); x++)
 		{
 			int p = sim->pmap[y][x];
-			ground[size_t(y - r[1]) * r[2] + x - r[0]] = (sim->PixelWall(x, y) && !sim->HoleAt(x, y)) ||
-				(p && (elements[TYP(p)].Properties & (TYPE_PART | TYPE_SOLID))) || sim->IsWallBlocking(x, y, PT_DUST);
+			auto &c = ground[size_t(y - r[1]) * r[2] + x - r[0]];
+			if ((sim->PixelWall(x, y) && !sim->HoleAt(x, y)) || sim->IsWallBlocking(x, y, PT_DUST)) c = 1;
+			else if (p && (elements[TYP(p)].Properties & (TYPE_PART | TYPE_SOLID))) c = 1;
+			else if (p && (elements[TYP(p)].Properties & TYPE_LIQUID)) c = uint8_t(2 + std::clamp(elements[TYP(p)].Weight, 0, 100));
 		}
 	tdpt_buddy_ground(buddy, r, ground.data());
 	frame = held ? tdpt_buddy_frame(buddy, heldX, heldY, XRES, YRES) : tdpt_buddy_frame(buddy, mx, my, XRES, YRES);

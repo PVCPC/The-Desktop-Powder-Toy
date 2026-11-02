@@ -48,7 +48,9 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
       Done: Ruffle wraps the game's `doBodyPhysics`/`setBasicVars` with a native hook (`hook_after_root_function`);
       each part is pushed out of solid pixels and bounces like the game's floor, legs on solid set `onGround`. TDPT
       fills the ground map around him each frame (`tdpt_buddy_area`/`tdpt_buddy_ground`). Not while the fist drags him.
-- [ ] **Buoyancy and drag:** parts in liquid float and slow down by density; heavy liquids (mercury) float him higher.
+- [x] **Buoyancy and drag:** parts in liquid float and slow down by density; heavy liquids (mercury) float him higher.
+      Done: liquids go in the ground map as 2 + TPT weight; a part is lifted by its wet share x weight/30 x 1.2 x the
+      game's `grav` and slowed by it. Also: NaN parts (game divide by 0, or a save that kept one) are reset.
 - [ ] **Air:** the sim's air velocity (vx/vy) and pressure gradient push each part; pressure blasts throw him.
 - [ ] **Explosions:** TPT explosions near him call the game's own `explode()` at that spot, scaled.
 - [ ] **Heat:** parts touching hot particles take damage and play the game's hurt/emotion reactions; above ~1000 C he
