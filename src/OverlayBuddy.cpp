@@ -50,7 +50,7 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
 	}
 	if (!buddy) return false;
 	// what he stands on: windows and icons (not their holes), powders and solids, and walls a powder can't pass (1);
-	// liquids as 2 + a quarter of their weight (water 30), which he floats in; then how hot it is (0x20 60 C+, 0x40
+	// liquids as 2 + a quarter of their weight (water 30), which he floats in, acid as 31; then how hot it is (0x20 60 C+, 0x40
 	// 400 C+: sets him on fire, 0x60 -50 C or colder) and 0x80 a spark (shocks him)
 	int32_t r[4];
 	tdpt_buddy_area(buddy, r);
@@ -67,6 +67,7 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
 			else if (p && (elements[TYP(p)].Properties & (TYPE_PART | TYPE_SOLID))) c = 1;
 			else if (p && (elements[TYP(p)].Properties & TYPE_LIQUID)) c = uint8_t(2 + (std::clamp(elements[TYP(p)].Weight, 0, 100) + 2) / 4);
 			if (!p) continue;
+			if (TYP(p) == PT_ACID) c = 31;
 			auto t = sim->parts[ID(p)].temp - 273.15f;
 			c |= t >= 400 ? 0x40 : t >= 60 ? 0x20 : t <= -50 ? 0x60 : 0;
 			if (TYP(p) == PT_SPRK) c |= 0x80;
@@ -86,6 +87,12 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
 			a[2] = sim->pv[c[1] + y][c[0] + x];
 		}
 	tdpt_buddy_air(buddy, CELL, c, air.data());
+	// gravity where he is (the middle of that area), as a particle that falls like his game would (Newtonian
+	// gravity x10: his normal fall is about ten times a powder's)
+	float gx = 0, gy = 1;
+	int cx = std::clamp(r[0] + r[2] / 2, 0, XRES - 1), cy = std::clamp(r[1] + r[3] / 2, 0, YRES - 1);
+	if (r[2] > 0) sim->GetGravityField(cx, cy, 1.0f, 10.0f, gx, gy);
+	tdpt_buddy_gravity(buddy, gx, gy);
 	frame = held ? tdpt_buddy_frame(buddy, heldX, heldY, XRES, YRES) : tdpt_buddy_frame(buddy, mx, my, XRES, YRES);
 	if (!frame) return true;
 	// his premultiplied pixels over the frame's

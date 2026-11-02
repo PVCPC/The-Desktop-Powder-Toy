@@ -65,11 +65,15 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
 - [x] **Cold:** cryo/LN2 slow him, frost tint.
       Done: 0x60 (-50 C or colder) slows a touching part (speed x 0.85 per frame) and saddens him like heat.
       Frost tint not done (the frame has no per-part colour; would need the body clips' colour transforms).
-- [ ] **Acid and caustics:** acid on a part hurts him over time, and eats the acid like it eats other things.
+- [x] **Acid and caustics:** acid on a part hurts him over time, and eats the acid like it eats other things.
+      Done (hurting): ACID is kind 31 in the ground map, a liquid of weight 10 that saddens him twice as fast as heat.
+      Eating the acid up belongs to section 3.
 - [x] **Electricity:** SPRK touching him shocks him (twitch impulse plus a hurt reaction).
       Done: 0x80 (a SPRK pixel) calls the game's own `shock(x, y)` at the touching part (twitch, cash, sad). It also
       lights game toys near the mouse, as the game's zapper does.
-- [ ] **Gravity:** follows TPT's gravity mode (vertical, off, radial, custom) and Newtonian gravity.
+- [x] **Gravity:** follows TPT's gravity mode (vertical, off, radial, custom) and Newtonian gravity.
+      Done: TDPT sends `GetGravityField` at the middle of his area (Newtonian x10); after setBasicVars the game's `grav`
+      is scaled by its downward part and the sideways part is added to each part's speed.
 - [ ] **Portals / void / black holes:** PRTI/PRTO carry him, VOID and black holes pull him in (and respawn).
 
 ## 3. Buddy -> Sim (the sim feels him)

@@ -108,7 +108,7 @@ fn open(path: &str, w: u32, h: u32) -> Result<Game, String> {
 }
 
 // The sim around him, so he stands on it, floats in it and burns in it: one byte per sim pixel over rect (x, y, w, h sim
-// pixels, which are his stage pixels). Low 5 bits: 0 nothing, 1 solid for him, 2 + w/4 liquid of TPT weight w; then
+// pixels, which are his stage pixels). Low 5 bits: 0 nothing, 1 solid for him, 2 + w/4 liquid of TPT weight w, ACID; then
 // WARM, HOT or COLD (2 bits), and SPARK. Rect (x, y, w, h sim pixels, which are his stage pixels). TDPT fills it each frame with the part he asks for (want).
 struct Ground {
     rect: [i32; 4],
@@ -121,19 +121,22 @@ struct Ground {
     before: ([i32; 4], Vec<f32>), // the pressure last frame (air_rect, values)
     calm: u32,                    // frames until the next blast may go off
     zap: Option<(f64, f64)>,      // a part touching a spark this frame: the game's shock() goes off there
+    gravity: (f64, f64),          // TPT's gravity where he is, 1 = the game's own (down: 0, 1)
+    game_grav: f64,               // the game's grav this frame, before that
 }
 
 const WARM: u8 = 0x20; // 60 C and up: hurts
 const HOT: u8 = 0x40; // 400 C and up: sets him on fire
 const COLD: u8 = 0x60; // -50 C and down: slows him, hurts
 const SPARK: u8 = 0x80; // electricity: shocks him
+const ACID: u8 = 31; // a kind: acid, a liquid (TPT weight 10) that eats him
 const PARTS: [&str; 6] = ["body", "head", "lArm", "rArm", "lLeg", "rLeg"];
 // where his parts sit around the body when he stands (from the game), to put him back together
 const POSE: [(f64, f64); 6] = [(0.0, 0.0), (0.0, -39.4), (-22.1, -10.2), (22.1, -10.2), (-15.1, 32.0), (15.0, 32.0)];
 
 impl Default for Ground {
     fn default() -> Self {
-        Self { rect: [0; 4], cells: Vec::new(), want: [0; 4], last: (400.0, 300.0), air_rect: [0; 4], air: Vec::new(), cell: 4, before: ([0; 4], Vec::new()), calm: 0, zap: None }
+        Self { rect: [0; 4], cells: Vec::new(), want: [0; 4], last: (400.0, 300.0), air_rect: [0; 4], air: Vec::new(), cell: 4, before: ([0; 4], Vec::new()), calm: 0, zap: None, gravity: (0.0, 1.0), game_grav: 1.0 }
     }
 }
 
@@ -142,7 +145,7 @@ impl Ground {
         self.cell(x, y) & 0x1F
     }
 
-    // what a circle touches (within a pixel): 1 << WARM, HOT, COLD (as 1, 2, 3) for each one there, and SPARK
+    // what a circle touches (within a pixel): 1 << WARM, HOT, COLD (as 1, 2, 3) for each one there, SPARK, and 1 for acid
     fn touch(&self, x: f64, y: f64, r: f64) -> u8 {
         let r = r + 1.0;
         let mut seen = 0;
@@ -151,7 +154,7 @@ impl Ground {
                 let (dx, dy) = (px as f64 + 0.5 - x, py as f64 + 0.5 - y);
                 if dx * dx + dy * dy <= r * r {
                     let c = self.cell(px, py);
-                    seen |= (1 << (c >> 5 & 3)) & 0x0E | c & SPARK;
+                    seen |= (1 << (c >> 5 & 3)) & 0x0E | c & SPARK | (c & 0x1F == ACID) as u8;
                 }
             }
         }
@@ -216,7 +219,7 @@ impl Ground {
                     all += 1;
                     if let c @ 2.. = self.kind(px, py) {
                         n += 1;
-                        w += (c - 2) as f64 * 4.0;
+                        w += if c == ACID { 10.0 } else { (c - 2) as f64 * 4.0 };
                     }
                 }
             }
@@ -325,6 +328,7 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
             }
             let wet = !held && grav.is_finite() && g.float(x, y, &mut xv, &mut yv, r, grav);
             let touch = g.touch(x, y, r);
+            warm += (touch & 1) as u32 * 2; // acid hurts twice as much as heat
             hot |= touch & 1 << (HOT >> 5) != 0;
             warm += (touch & (1 << (WARM >> 5) | 1 << (HOT >> 5)) != 0) as u32;
             doused |= touch & 1 << (HOT >> 5) == 0 && g.wet(x, y, r).0 > 0.3;
@@ -341,6 +345,10 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
             let blown = ax != 0.0 || ay != 0.0;
             xv += 0.1 * ax;
             yv += 0.1 * ay;
+            if !held && g.gravity.0 != 0.0 && g.game_grav.is_finite() {
+                xv += g.game_grav * g.gravity.0;
+            }
+            let blown = blown || g.gravity.0 != 0.0;
             let out = if held { None } else { g.push_out(&mut x, &mut y, &mut xv, &mut yv, r) };
             if wet || blown || cold > 0 || out.is_some() {
                 for (f, n) in [("x", x), ("y", y), ("xv", xv), ("yv", yv)] {
@@ -368,7 +376,7 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
                 v.set(&format!("{part}.fireStrength"), Value::Number(0.0));
             }
         }
-        // heat and cold hurt a little each frame per part touching them (the game's addEmotion(-10) is about -6.5)
+        // heat, cold and acid hurt a little each frame per part touching them (the game's addEmotion(-10) is about -6.5)
         if warm + cold > 0 {
             let e = num(v, "emotion");
             if e.is_finite() {
@@ -383,7 +391,13 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
     .ok();
     let g = ground.clone();
     p.hook_after_root_function("setBasicVars", Box::new(move |v| {
-        let Ok(g) = g.lock() else { return };
+        let Ok(mut g) = g.lock() else { return };
+        // TPT's gravity where he is: the game's own (down, grav per frame) scaled by its downward part; the sideways
+        // part is added in doBodyPhysics
+        g.game_grav = num(v, "grav");
+        if g.gravity != (0.0, 1.0) && g.game_grav.is_finite() {
+            v.set("grav", Value::Number(g.game_grav * g.gravity.1));
+        }
         let on = ["lLeg", "rLeg"].iter().any(|leg| {
             let (x, y, r) = (num(v, &format!("{leg}.x")), num(v, &format!("{leg}.y")), num(v, &format!("{leg}.rad")));
             x.is_finite() && y.is_finite() && r > 0.0 && g.under(x, y, r)
@@ -831,6 +845,20 @@ pub unsafe extern "C" fn tdpt_buddy_air(b: *mut Buddy, cell: i32, rect: *const i
     }
 }
 
+/// TPT's gravity where he is, 1 = normal (straight down is 0, 1)
+/// # Safety
+/// b is from tdpt_buddy_open.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tdpt_buddy_gravity(b: *mut Buddy, gx: f64, gy: f64) {
+    let b = unsafe { &mut *b };
+    if let Ok(mut g) = b.ground.lock()
+        && gx.is_finite()
+        && gy.is_finite()
+    {
+        g.gravity = (gx, gy);
+    }
+}
+
 /// what: 1 left button down, 2 up, at (x, y) stage pixels
 /// # Safety
 /// b is from tdpt_buddy_open.
@@ -1094,6 +1122,51 @@ mod tests {
         let e1 = match get(&game, "emotion") { Value::Number(e) => e, o => panic!("{o:?}") };
         println!("cold: emotion {e0:.2} -> {e1:.2}");
         assert!(e1 < e0 - 0.5, "cold didn't bother him");
+    }
+
+    // a pool of acid upsets him (and he floats in it)
+    #[test]
+    fn hurt_by_acid() {
+        let Some(path) = std::env::var_os("TDPT_BUDDY_SWF") else { return };
+        let mut game = super::open(path.to_str().unwrap(), 1280, 720).unwrap();
+        let mut out = vec![0u32; 1280 * 720];
+        while !super::frame(&mut game, 25.0, 0.0, 0.0, &mut out) {}
+        for _ in 0..60 {
+            {
+                let mut g = game.ground.lock().unwrap();
+                let r = g.want;
+                g.cells = (0..r[2] * r[3]).map(|i| if r[1] + i / r[2] >= 600 { super::ACID } else { 0 }).collect();
+                g.rect = r;
+            }
+            super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+        }
+        let e = game.player.lock().unwrap().get_root_variable("emotion");
+        println!("acid: emotion {e:?}");
+        assert!(matches!(e, Value::Number(e) if e < -2.0), "acid didn't hurt: {e:?}");
+    }
+
+    // TPT gravity off: he hangs in the air; sideways: he falls sideways
+    #[test]
+    fn follows_tpt_gravity() {
+        let Some(path) = std::env::var_os("TDPT_BUDDY_SWF") else { return };
+        let mut game = super::open(path.to_str().unwrap(), 1280, 720).unwrap();
+        let mut out = vec![0u32; 1280 * 720];
+        while !super::frame(&mut game, 25.0, 0.0, 0.0, &mut out) {}
+        let n = |g: &super::Game, k: &str| match g.player.lock().unwrap().get_root_variable(k) { Value::Number(v) => v, o => panic!("{k} {o:?}") };
+        game.ground.lock().unwrap().gravity = (0.0, 0.0);
+        game.player.lock().unwrap().call_root_method("setBuddyXY", vec![600.into(), 200.into()]).unwrap();
+        for _ in 0..40 {
+            super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+        }
+        let (x0, y0) = (n(&game, "body.x"), n(&game, "body.y"));
+        game.ground.lock().unwrap().gravity = (1.0, 0.0);
+        for _ in 0..20 {
+            super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+        }
+        let (x1, y1) = (n(&game, "body.x"), n(&game, "body.y"));
+        println!("gravity: off {x0:.0},{y0:.0}; sideways {x1:.0},{y1:.0}");
+        assert!(y0 < 300.0, "fell with gravity off: {y0}");
+        assert!(x1 > x0 + 50.0 && (y1 - y0).abs() < 30.0, "didn't fall sideways: {x0},{y0} -> {x1},{y1}");
     }
 
     #[test]
