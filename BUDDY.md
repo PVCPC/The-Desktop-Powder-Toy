@@ -59,12 +59,16 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
       game's own bomb) where it jumped most, at most one per 10 frames.
 - [x] **Heat:** parts touching hot particles take damage and play the game's hurt/emotion reactions; above ~1000 C he
       catches fire (game effect if there is one, or our own flames on the body parts).
-      Done: ground map flags 0x80 (400 C+) and 0x40 (60 C+). 400 C+ sets `body.onFire`; the game's doBodyPhysics
+      Done: ground map temperature bits 0x20 (60 C+), 0x40 (400 C+). 400 C+ sets `body.onFire`; the game's doBodyPhysics
       spreads it to head and legs with its own addEmotion/addCash. Heat lowers `emotion` 0.03 per touching part per
       frame. Cool liquid on him puts the fire out (onFire and oldOnFire false, so the game doesn't react to it).
-- [ ] **Cold:** cryo/LN2 slow him, frost tint.
+- [x] **Cold:** cryo/LN2 slow him, frost tint.
+      Done: 0x60 (-50 C or colder) slows a touching part (speed x 0.85 per frame) and saddens him like heat.
+      Frost tint not done (the frame has no per-part colour; would need the body clips' colour transforms).
 - [ ] **Acid and caustics:** acid on a part hurts him over time, and eats the acid like it eats other things.
-- [ ] **Electricity:** SPRK touching him shocks him (twitch impulse plus a hurt reaction).
+- [x] **Electricity:** SPRK touching him shocks him (twitch impulse plus a hurt reaction).
+      Done: 0x80 (a SPRK pixel) calls the game's own `shock(x, y)` at the touching part (twitch, cash, sad). It also
+      lights game toys near the mouse, as the game's zapper does.
 - [ ] **Gravity:** follows TPT's gravity mode (vertical, off, radial, custom) and Newtonian gravity.
 - [ ] **Portals / void / black holes:** PRTI/PRTO carry him, VOID and black holes pull him in (and respawn).
 

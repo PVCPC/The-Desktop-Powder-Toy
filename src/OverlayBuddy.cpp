@@ -50,8 +50,8 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
 	}
 	if (!buddy) return false;
 	// what he stands on: windows and icons (not their holes), powders and solids, and walls a powder can't pass (1);
-	// liquids as 2 + half their weight (water 30), which he floats in; 0x80 where something is 400 C or hotter (sets
-	// him on fire), 0x40 at 60 C or hotter (hurts)
+	// liquids as 2 + a quarter of their weight (water 30), which he floats in; then how hot it is (0x20 60 C+, 0x40
+	// 400 C+: sets him on fire, 0x60 -50 C or colder) and 0x80 a spark (shocks him)
 	int32_t r[4];
 	tdpt_buddy_area(buddy, r);
 	r[2] = std::clamp(r[2], 0, XRES * 2), r[3] = std::clamp(r[3], 0, YRES * 2);
@@ -65,9 +65,11 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
 			auto &c = ground[size_t(y - r[1]) * r[2] + x - r[0]];
 			if ((sim->PixelWall(x, y) && !sim->HoleAt(x, y)) || sim->IsWallBlocking(x, y, PT_DUST)) c = 1;
 			else if (p && (elements[TYP(p)].Properties & (TYPE_PART | TYPE_SOLID))) c = 1;
-			else if (p && (elements[TYP(p)].Properties & TYPE_LIQUID)) c = uint8_t(2 + std::clamp(elements[TYP(p)].Weight, 0, 100) / 2);
-			if (p && sim->parts[ID(p)].temp >= 273.15f + 400) c |= 0x80;
-			else if (p && sim->parts[ID(p)].temp >= 273.15f + 60) c |= 0x40;
+			else if (p && (elements[TYP(p)].Properties & TYPE_LIQUID)) c = uint8_t(2 + (std::clamp(elements[TYP(p)].Weight, 0, 100) + 2) / 4);
+			if (!p) continue;
+			auto t = sim->parts[ID(p)].temp - 273.15f;
+			c |= t >= 400 ? 0x40 : t >= 60 ? 0x20 : t <= -50 ? 0x60 : 0;
+			if (TYP(p) == PT_SPRK) c |= 0x80;
 		}
 	tdpt_buddy_ground(buddy, r, ground.data());
 	// the air over the same area, in sim cells
