@@ -33,6 +33,8 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
       Done: `buddy/bridge/*.patch` hold only our inserted tags; v1.01 is checked by its hash before and after.
 - [x] Run the game, and draw its frame in TDPT's overlay layer (same transparency rules as the sim). He runs on his
       own thread (about 1 ms a frame left on TDPT's).
+      120 frames a second with smoothing on (60 off): only the drawn areas are read back from the GPU, a frame
+      late so it never waits (about 6 ms a frame at 5120x1440, was 13.5).
 - [x] Clicks: on the buddy or his toys they go to the game (the game's own hit shapes); elsewhere they go to TPT as now.
       Game menus: right-click him (Windows). The game's Fist drags him (rest it on him, then press); its Open Hand
       doesn't drag, he reaches for the cursor instead. Tested in `cargo test` (drag_him); the TDPT click path needs
