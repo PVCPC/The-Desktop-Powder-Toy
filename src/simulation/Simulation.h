@@ -144,6 +144,8 @@ public:
 	bool petWander = false; // fighters with no stickman to chase stroll about (the overlay's desktop pets)
 	struct { int x = -1, y = -1; float speed = 0; } petPointer; // the mouse pointer the pets notice (sim pixels, per tick)
 	int petGreet = 0; // pets hop until this tick: the user is back
+	struct { int x = -1, y = -1; float speed = 0; int scare = 0; } petBuddy; // Interactive Buddy, if the pets notice him
+	                                                                         // (x -1: no); scare: they run until this tick
 	bool petNap = false;    // pets stand still asleep (the overlay draws their z's)
 	bool petGather = false; // the user is away: pets make for the middle of the screen
 	bool petHoles = false;  // pets drop through holes in windows and stop to look out of them

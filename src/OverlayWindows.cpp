@@ -199,6 +199,7 @@ namespace
 		bool tilt = false, weekday = false, typing = false; // gravity leans to the active window; weather by weekday; typing sparks
 		float meteors = 0;                       // big meteors an hour at night
 		bool buddy = false;                      // Interactive Buddy (OverlayBuddy; his file: Overlay.Fun.BuddySwf)
+		bool buddyPets = false;                  // the pets notice him (OverlayBuddy reads Overlay.Fun.BuddyPets)
 		std::vector<HWND> flashed; // windows that flashed their taskbar button (a new message) since the last tick
 	} fun;
 	// The Fun tab's rows, by group, and the pref each is saved as. A row with no tip starts a group (name = heading);
@@ -298,6 +299,7 @@ namespace
 
 		{ L"Interactive Buddy" },
 		Check(L"Interactive Buddy", L"The buddy from the Flash game Interactive Buddy lives on your desktop in front of the sim: drag him, throw him, give him toys. Bring your own copy of the game (Interactive Buddy v1.01, a .swf file; it isn't included) and pick it with Choose SWF", &fun.buddy, "Overlay.Fun.Buddy"),
+		Check(L"Pets meet Buddy", L"The pets walk over to Buddy and hop hello, and run when he is thrown past them or something blows up by him", &fun.buddyPets, "Overlay.Fun.BuddyPets"),
 	};
 	// Interactive Buddy's file: the game's .swf, from the user (turns him on)
 	void ChooseBuddySwf()

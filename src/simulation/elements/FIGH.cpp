@@ -130,6 +130,24 @@ static int PetComm(Simulation *sim, playerst *figh, int f)
 			}
 		}
 	}
+	// Interactive Buddy: they run from him when he flies past or something blew up by him; when he is calm they walk
+	// over and hop hello (then leave him be a while)
+	static int metBuddy[MAX_FIGHTERS];
+	if (auto &b = sim->petBuddy; b.x >= 0 && flee[f] <= 0 && std::abs(b.x - cx) < 120 && b.y > cy - 90 && b.y < cy + 30)
+	{
+		if (b.scare > sim->currentTick || b.speed > 8)
+			dir[f] = b.x < cx ? 2 : 1, left[f] = flee[f] = 60;
+		else if (--metBuddy[f] <= 0)
+		{
+			left[f] = 20;
+			dir[f] = std::abs(b.x - cx) < 24 ? 0 : (b.x < cx ? 1 : 2);
+			if (!dir[f] && sim->rng.chance(1, 20))
+			{
+				metBuddy[f] = 900;
+				return 0x04;
+			}
+		}
+	}
 	if (sim->petNap && flee[f] <= 0)
 	{
 		return 0;

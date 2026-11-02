@@ -126,6 +126,7 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
 	for (size_t i = 0, n = tdpt_buddy_booms(buddy, booms, 16); i < n; i++)
 	{
 		double bx = booms[i * 3], by = booms[i * 3 + 1], power = booms[i * 3 + 2];
+		sim->petBuddy.scare = sim->currentTick + 120;
 		int R = std::max(2, int(4 * power)); // cells
 		for (int y = int(by) / CELL - R; y <= int(by) / CELL + R; y++)
 			for (int x = int(bx) / CELL - R; x <= int(bx) / CELL + R; x++)
@@ -156,6 +157,8 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
 
 void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 {
+	auto *sim = GameController::Ref().GetModel()->GetSimulation();
+	sim->petBuddy.x = -1;
 	if (!buddy || !frame)
 	{
 		parts.clear();
@@ -163,8 +166,9 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 	}
 	parts.resize(8);
 	parts.resize(tdpt_buddy_parts(buddy, parts[0].data(), parts.size()));
+	if (parts.size() && GlobalPrefs::Ref().Get("Overlay.Fun.BuddyPets", false) && std::isfinite(parts[0][0] + parts[0][1]))
+		sim->petBuddy.x = int(parts[0][0]), sim->petBuddy.y = int(parts[0][1]), sim->petBuddy.speed = float(std::hypot(parts[0][3], parts[0][4]));
 	// he pushes the air he moves through (0.1 of his speed) and warms what touches him, slowly, toward 37 C
-	auto *sim = GameController::Ref().GetModel()->GetSimulation();
 	for (auto &p : parts)
 	{
 		if (!std::isfinite(p[0] + p[1] + p[2] + p[3] + p[4])) continue;
