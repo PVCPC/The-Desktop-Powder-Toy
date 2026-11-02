@@ -107,8 +107,9 @@ fn open(path: &str, w: u32, h: u32) -> Result<Game, String> {
     Ok(Game { player, ground: Default::default(), size: (w, h), mouse: (-1.0, -1.0), ready: false, readback: None })
 }
 
-// The sim around him, so he stands on it and floats in it: one byte per sim pixel (0 nothing, 1 solid for him, 2 + w
-// liquid of TPT weight w) over rect (x, y, w, h sim pixels, which are his stage pixels). TDPT fills it each frame with the part he asks for (want).
+// The sim around him, so he stands on it, floats in it and burns in it: one byte per sim pixel over rect (x, y, w, h sim
+// pixels, which are his stage pixels). Low 6 bits: 0 nothing, 1 solid for him, 2 + w/2 liquid of TPT weight w; HOT and
+// WARM: something that hot is there. Rect (x, y, w, h sim pixels, which are his stage pixels). TDPT fills it each frame with the part he asks for (want).
 struct Ground {
     rect: [i32; 4],
     cells: Vec<u8>,
@@ -121,6 +122,8 @@ struct Ground {
     calm: u32,                    // frames until the next blast may go off
 }
 
+const HOT: u8 = 0x80; // 400 C and up: sets him on fire
+const WARM: u8 = 0x40; // 60 C and up: hurts
 const PARTS: [&str; 6] = ["body", "head", "lArm", "rArm", "lLeg", "rLeg"];
 // where his parts sit around the body when he stands (from the game), to put him back together
 const POSE: [(f64, f64); 6] = [(0.0, 0.0), (0.0, -39.4), (-22.1, -10.2), (22.1, -10.2), (-15.1, 32.0), (15.0, 32.0)];
@@ -132,6 +135,25 @@ impl Default for Ground {
 }
 
 impl Ground {
+    fn kind(&self, x: i32, y: i32) -> u8 {
+        self.cell(x, y) & 0x3F
+    }
+
+    // HOT / WARM within a pixel of a circle
+    fn heat(&self, x: f64, y: f64, r: f64) -> u8 {
+        let r = r + 1.0;
+        let mut flags = 0;
+        for py in (y - r).floor() as i32..=(y + r).ceil() as i32 {
+            for px in (x - r).floor() as i32..=(x + r).ceil() as i32 {
+                let (dx, dy) = (px as f64 + 0.5 - x, py as f64 + 0.5 - y);
+                if dx * dx + dy * dy <= r * r {
+                    flags |= self.cell(px, py) & (HOT | WARM);
+                }
+            }
+        }
+        flags
+    }
+
     fn cell(&self, x: i32, y: i32) -> u8 {
         let [rx, ry, w, h] = self.rect;
         let (u, v) = (x - rx, y - ry);
@@ -177,7 +199,7 @@ impl Ground {
     }
 
     fn solid(&self, x: i32, y: i32) -> bool {
-        self.cell(x, y) == 1
+        self.kind(x, y) == 1
     }
 
     // how much of a circle is in liquid (0-1), and that liquid's mean TPT weight
@@ -188,9 +210,9 @@ impl Ground {
                 let (dx, dy) = (px as f64 + 0.5 - x, py as f64 + 0.5 - y);
                 if dx * dx + dy * dy <= r * r {
                     all += 1;
-                    if let c @ 2.. = self.cell(px, py) {
+                    if let c @ 2.. = self.kind(px, py) {
                         n += 1;
-                        w += (c - 2) as f64;
+                        w += (c - 2) as f64 * 2.0;
                     }
                 }
             }
@@ -290,6 +312,7 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
         g.last = (num(v, "body.x"), num(v, "body.y"));
         let mut bbox = [f64::MAX, f64::MAX, f64::MIN, f64::MIN];
         let mut standing = false;
+        let (mut hot, mut warm, mut doused) = (false, 0, false);
         for part in PARTS {
             let (mut x, mut y) = (num(v, &format!("{part}.x")), num(v, &format!("{part}.y")));
             let (mut xv, mut yv, r) = (num(v, &format!("{part}.xv")), num(v, &format!("{part}.yv")), num(v, &format!("{part}.rad")));
@@ -297,6 +320,10 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
                 continue;
             }
             let wet = !held && grav.is_finite() && g.float(x, y, &mut xv, &mut yv, r, grav);
+            let heat = g.heat(x, y, r);
+            hot |= heat & HOT != 0;
+            warm += (heat & (HOT | WARM) != 0) as u32;
+            doused |= heat & HOT == 0 && g.wet(x, y, r).0 > 0.3;
             // the sim's air pushes him like a heavy powder (sand follows it at 0.7, he at 0.1); blasts throw him
             let (ax, ay) = if held { (0.0, 0.0) } else { g.wind(x, y) };
             let blown = ax != 0.0 || ay != 0.0;
@@ -314,6 +341,27 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
         }
         if standing {
             v.set("onGround", Value::Bool(true));
+        }
+        // fire: the game spreads it from his body to his head and legs (sad, and cash, like its own fire); it never goes
+        // out by itself, but a cool liquid puts it out (old = new, so the game doesn't count it as catching fire)
+        let burning = v.get("body.onFire") == Value::Bool(true);
+        if hot && !burning && v.get("body.flammable") != Value::Bool(false) {
+            v.set("body.onFire", Value::Bool(true));
+            v.set("body.fireStrength", Value::Number(100.0));
+        } else if doused && !hot && burning {
+            for part in PARTS {
+                for f in ["onFire", "oldOnFire"] {
+                    v.set(&format!("{part}.{f}"), Value::Bool(false));
+                }
+                v.set(&format!("{part}.fireStrength"), Value::Number(0.0));
+            }
+        }
+        // heat hurts a little each frame per part touching it (the game's addEmotion(-10) is about -6.5)
+        if warm > 0 {
+            let e = num(v, "emotion");
+            if e.is_finite() {
+                v.set("emotion", Value::Number((e - 0.03 * warm as f64).max(-100.0)));
+            }
         }
         if bbox[0] <= bbox[2] {
             g.want = [bbox[0] as i32, bbox[1] as i32, (bbox[2] - bbox[0]) as i32 + 1, (bbox[3] - bbox[1]) as i32 + 1];
@@ -733,7 +781,7 @@ pub unsafe extern "C" fn tdpt_buddy_area(b: *mut Buddy, rect: *mut i32) {
     unsafe { std::ptr::copy_nonoverlapping(want.as_ptr(), rect, 4) };
 }
 
-/// The sim over rect (x, y, w, h): w * h bytes, rows top down, nonzero where it's solid for him
+/// The sim over rect (x, y, w, h): w * h bytes, rows top down, as in Ground
 /// # Safety
 /// b is from tdpt_buddy_open; rect has 4; cells has w * h.
 #[unsafe(no_mangle)]
@@ -867,7 +915,7 @@ mod tests {
         assert!(by < 400.0, "body sank: {by}");
     }
 
-    // a pool of water (TPT weight 30) under him: he floats with part of him above the surface
+    // a pool of water (TPT weight 30: 2 + 15) under him: he floats with part of him above the surface
     #[test]
     fn floats_in_water() {
         let Some(path) = std::env::var_os("TDPT_BUDDY_SWF") else { return };
@@ -877,7 +925,7 @@ mod tests {
         let fill = |game: &super::Game| {
             let mut g = game.ground.lock().unwrap();
             let r = g.want;
-            g.cells = (0..r[2] * r[3]).map(|i| if r[1] + i / r[2] >= 450 { 32 } else { 0 }).collect();
+            g.cells = (0..r[2] * r[3]).map(|i| if r[1] + i / r[2] >= 450 { 2 + 15 } else { 0 }).collect();
             g.rect = r;
         };
         game.player.lock().unwrap().call_root_method("setBuddyXY", vec![600.into(), 200.into()]).unwrap();
@@ -964,6 +1012,36 @@ mod tests {
         let x1 = n(&game, "body.x");
         println!("blast: body {x0:.0} -> {x1:.0}");
         assert!(x1 > x0 + 100.0, "not thrown: {x0} -> {x1}");
+    }
+
+    // standing in fire sets him alight (the game spreads it: sadder, and cash); stepping into water puts it out
+    #[test]
+    fn burns_and_douses() {
+        let Some(path) = std::env::var_os("TDPT_BUDDY_SWF") else { return };
+        let mut game = super::open(path.to_str().unwrap(), 1280, 720).unwrap();
+        let mut out = vec![0u32; 1280 * 720];
+        while !super::frame(&mut game, 25.0, 0.0, 0.0, &mut out) {}
+        let floor = |game: &super::Game, c: u8| {
+            let mut g = game.ground.lock().unwrap();
+            let r = g.want;
+            g.cells = (0..r[2] * r[3]).map(|i| if r[1] + i / r[2] >= 600 { c } else { 0 }).collect();
+            g.rect = r;
+        };
+        let get = |game: &super::Game, k: &str| game.player.lock().unwrap().get_root_variable(k);
+        for _ in 0..60 {
+            floor(&game, 1 | super::HOT);
+            super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+        }
+        println!("fire: body {:?} head {:?} emotion {:?} cash {:?}", get(&game, "body.onFire"), get(&game, "head.onFire"), get(&game, "emotion"), get(&game, "cash"));
+        assert_eq!(get(&game, "head.onFire"), Value::Bool(true), "fire didn't spread");
+        assert!(matches!(get(&game, "emotion"), Value::Number(e) if e < -1.0), "not upset");
+        for _ in 0..200 {
+            floor(&game, 2 + 15);
+            super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+        }
+        println!("water: body {:?} head {:?}", get(&game, "body.onFire"), get(&game, "head.onFire"));
+        assert_eq!(get(&game, "body.onFire"), Value::Bool(false), "still burning in water");
+        assert_eq!(get(&game, "head.onFire"), Value::Bool(false), "head still burning");
     }
 
     #[test]

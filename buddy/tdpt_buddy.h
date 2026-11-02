@@ -18,7 +18,8 @@ extern "C"
 	void tdpt_buddy_command(Buddy *b, const char *command); // a command from those lines, for the game
 	// the part of the sim he needs next: rect = x, y, w, h sim pixels (maybe partly off the sim)
 	void tdpt_buddy_area(Buddy *b, int32_t rect[4]);
-	// the sim over rect: w * h bytes, rows top down, nonzero where it's solid for him
+	// the sim over rect: w * h bytes, rows top down; low 6 bits 0 nothing, 1 solid for him, 2 + weight/2 liquid;
+	// 0x80 400 C or hotter there, 0x40 60 C or hotter
 	void tdpt_buddy_ground(Buddy *b, const int32_t rect[4], const uint8_t *cells);
 	// the sim's air over rect (x, y, w, h in cells of `cell` sim pixels): w * h of vx, vy, pressure
 	void tdpt_buddy_air(Buddy *b, int32_t cell, const int32_t rect[4], const float *v);

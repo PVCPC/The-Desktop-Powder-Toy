@@ -57,8 +57,11 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
 - [x] **Explosions:** TPT explosions near him call the game's own `explode()` at that spot, scaled.
       Done: a pressure jump of more than 6 in a frame within his reach calls `explode(x, y, jump / 60)` (max 2; 1 = the
       game's own bomb) where it jumped most, at most one per 10 frames.
-- [ ] **Heat:** parts touching hot particles take damage and play the game's hurt/emotion reactions; above ~1000 C he
+- [x] **Heat:** parts touching hot particles take damage and play the game's hurt/emotion reactions; above ~1000 C he
       catches fire (game effect if there is one, or our own flames on the body parts).
+      Done: ground map flags 0x80 (400 C+) and 0x40 (60 C+). 400 C+ sets `body.onFire`; the game's doBodyPhysics
+      spreads it to head and legs with its own addEmotion/addCash. Heat lowers `emotion` 0.03 per touching part per
+      frame. Cool liquid on him puts the fire out (onFire and oldOnFire false, so the game doesn't react to it).
 - [ ] **Cold:** cryo/LN2 slow him, frost tint.
 - [ ] **Acid and caustics:** acid on a part hurts him over time, and eats the acid like it eats other things.
 - [ ] **Electricity:** SPRK touching him shocks him (twitch impulse plus a hurt reaction).
