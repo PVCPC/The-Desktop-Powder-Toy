@@ -35,6 +35,7 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
       own thread (about 1 ms a frame left on TDPT's).
       120 frames a second with smoothing on (60 off): only the drawn areas are read back from the GPU, a frame
       late so it never waits (about 6 ms a frame at 5120x1440, was 13.5).
+      overlay:window draws him in the window too (its bottom is his floor; no taskbar floor or window ledges there).
 - [x] Clicks: on the buddy or his toys they go to the game (the game's own hit shapes); elsewhere they go to TPT as now.
       Game menus: right-click him (Windows). The game's Fist drags him (rest it on him, then press); its Open Hand
       doesn't drag, he reaches for the cursor instead. Tested in `cargo test` (drag_him); the TDPT click path needs
@@ -45,7 +46,8 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
 - [x] Buddy tab (shown once his SWF is chosen in Fun): on/off + Choose SWF, size 25-300 % (the game's own
       __nativeSetBuddySize, so independent of TDPT's pixel size), active-window ledges, smoothing, speech bubbles and
       their size, toys at once (0 no limit), pets, wet/frosty. Prefs Overlay.Buddy.*, sent with tdpt_buddy_settings.
-- [ ] One coordinate mapping: game stage <-> sim pixels (accounting for the game camera `camx/camy/camz` and the TDPT pixel size).
+- [x] One coordinate mapping: game stage <-> sim pixels (TDPT pixel size). The game camera never zooms (camz stays 1);
+      it only shakes up to ~9 px for a moment on explosions, left as the game has it.
 
 ## 2. Sim -> Buddy (he feels the sim)
 - [x] **Solid ground:** solids and powders under/around each body part stop it (like PlatformBridge, but against the

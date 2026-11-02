@@ -155,14 +155,15 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
 	auto play = sim->PlayRect();
 	// his stage: the play area, ending 10 px into the taskbar as the desktop app's did (the game's floor is 7 px up: feet just on it)
 	fw = std::clamp(play.pos.X + play.size.X, 1, XRES), fh = std::clamp(play.pos.Y + play.size.Y, 1, YRES);
-	wb = OverlayWindows::WorkBottom(parts.size() ? int(parts[0][0]) : XRES / 2);
+	// (overlay:window: the window's own bottom, no taskbar or other windows: they aren't where his stage is)
+	wb = overlayWindowed ? YRES : OverlayWindows::WorkBottom(parts.size() ? int(parts[0][0]) : XRES / 2);
 	fh = std::min(fh, wb + 10);
 	auto &prefs = GlobalPrefs::Ref();
 	tdpt_buddy_settings(buddy, prefs.Get("Overlay.Buddy.Size", 100.f), prefs.Get("Overlay.Buddy.Speech", true), prefs.Get("Overlay.Buddy.SpeechSize", 100.f),
 	                    int(prefs.Get("Overlay.Buddy.Toys", 6.f)), prefs.Get("Overlay.Buddy.Smooth", true));
 	uintptr_t id = 0;
 	int el, er, et, eb;
-	if (prefs.Get("Overlay.Buddy.Ledges", true) && OverlayWindows::ActiveEdges(id, el, er, et, eb))
+	if (!overlayWindowed && prefs.Get("Overlay.Buddy.Ledges", true) && OverlayWindows::ActiveEdges(id, el, er, et, eb))
 		tdpt_buddy_ledge(buddy, id, el, er, et < 0 ? NAN : et, eb < 0 ? NAN : eb);
 	else
 		tdpt_buddy_ledge(buddy, 0, 0, 0, NAN, NAN);

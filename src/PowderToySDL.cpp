@@ -9,6 +9,7 @@
 #include "common/clipboard/Clipboard.h"
 #include "FrameSchedule.h"
 #include "OverlayWindows.h"
+#include "OverlayBuddy.h"
 #include "prefs/GlobalPrefs.h"
 #include <iostream>
 #include <algorithm>
@@ -131,6 +132,10 @@ void blit(pixel *vid)
 			OverlayWindows::SetWindowedView(view.X, view.Y);
 			SDL_RenderSetLogicalSize(sdl_renderer, view.X, view.Y);
 		}
+		// Buddy over the sim (TPT redraws the whole frame each time, so he can be drawn into it)
+		int mx, my;
+		CalculateMousePosition(&mx, &my);
+		OverlayBuddy::Draw(vid, WINDOWW, mx, my);
 		SDL_UpdateTexture(sdl_texture, nullptr, vid, WINDOWW * sizeof (Uint32));
 		SDL_RenderClear(sdl_renderer);
 		SDL_Rect src{ 0, 0, view.X, view.Y };
