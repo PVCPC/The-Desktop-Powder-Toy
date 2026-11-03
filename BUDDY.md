@@ -177,6 +177,14 @@ Games:
       was, or the gun) and each flame (particles.fireClip*/flame*). Gas is pushed along; powder/liquid: the bullet stops,
       a spray back out and up; a solid: +2 pressure (glass breaks) and embers. Flames make TPT fire. Test: weapon_shots.
       Not done: bullets stopped by sim walls in the game itself (they fly on through).- [~] Catch: dropped, the game already has him catch balls (catch, caughtBalls).
+- [ ] His items as real TPT stuff (user, 2026-11-03): a setting per kind, Game / TPT / Both (Game = as now). Probed by
+      using each item in the game (particles clips, objectList, root vars):
+      water: Wide Nozzle Hose, Narrow Nozzle Hose, Fire Hose (a strong water hose, not fire): particles.splash* drops -> WATR;
+      fire: Flamethrower (done as Both), Fireballs, Molotov Cocktails -> FIRE;
+      gravity: Weak/Strong Gravity Vortex (gravitating, gravitatingx/y) -> a TPT gravity point; Gravity Shifter (grav) -> TPT gravity;
+      Stun Gun -> sparks into what it touches; Shotgun pellets: check they are bullets too;
+      objects (objectList): Baseballs, Rubber Balls, Bowling Balls, Infants, Magical Orb, Radio, Flail push sand and water
+      and float or sink in it, like Buddy's own parts. Explosions (Grenades, Mines, Missiles, Explode At Mouse): already TPT blasts.
 - [x] Fireman: when fire starts he grabs water and puts it out, happy if he saves a window. (Overlay.Fun.BuddyFireman:
       sprays water from his hand 3 s at fire 40-250 px away, rests 10 s; no "happy" yet, needs the game's emotes)
 
