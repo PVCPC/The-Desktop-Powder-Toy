@@ -155,6 +155,7 @@ Libraries and other assets used
 * [mbedtls](https://www.trustedfirmware.org/projects/mbed-tls/)
 * [SDL](https://libsdl.org/)
 * Windows XP Luna theme images (Blue, Olive Green, Silver) from [listumps/wine_themes](https://github.com/listumps/wine_themes)
+* Windows Vista and 7 control images from the [B00merang Project](https://github.com/B00merang-Project) (Windows-Vista, Windows-7; GPL-3)
 
 Instructions
 ===========================================================================

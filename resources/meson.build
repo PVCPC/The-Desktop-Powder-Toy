@@ -146,4 +146,6 @@ embedded_files += [
 	[ 'font_bz2', files('font.bz2') ],
 	[ 'credits_json', files('credits.json') ],
 	[ 'luna_png', files('luna.png') ], # Windows XP Luna's own images (luna.py)
+	[ 'skin_vista_png', files('skin_vista.png') ], # looks' controls from faithful recreations (skins.py)
+	[ 'skin_seven_png', files('skin_seven.png') ],
 ]

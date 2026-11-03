@@ -37,6 +37,9 @@
 #include "lua/CommandInterface.h"
 #include "Format.h"
 #include "luna_png.h"
+#include "skin_vista_png.h"
+#include "skin_seven_png.h"
+#include "OverlaySkins.h"
 #include "gui/dialogues/ErrorMessage.h"
 #include "client/Client.h"
 #include "simulation/SaveRenderer.h"
@@ -1288,11 +1291,10 @@ namespace
 
 	// State f (of n) of part p in column col over x, y, w, h: its l, r, t, b source pixels at the edges kept (scaled
 	// as the UI is), the middle stretched, as the msstyles' SizingMargins.
-	void Luna(Canvas &cv, int col, LunaPart p, int f, int n, int x, int y, int w, int h, int l = 0, int r = 0, int t = 0, int b = 0)
+	void Slice(Canvas &cv, const PlaneAdapter<std::vector<pixel_rgba>> *atlas, int sx, int sy, int sw, int sh, int x, int y, int w, int h, int l, int r, int t, int b)
 	{
-		static auto atlas = format::PixelsFromPNG(luna_png.AsCharSpan());
 		if (!atlas || w <= 0 || h <= 0) return;
-		int aw = atlas->Size().X, sw = lunaParts[p][2], sh = lunaParts[p][3] / n, sx = col * lunaBlock + lunaParts[p][0], sy = lunaParts[p][1] + f * sh;
+		int aw = atlas->Size().X;
 		// a destination pixel's source along one side: margins lo and hi (source px) are S()-sized, shrunk to fit
 		auto along = [&](int len, int src, int lo, int hi) {
 			int dlo = S(float(lo)), dhi = S(float(hi));
@@ -1313,6 +1315,59 @@ namespace
 				cv.Blend(x + i, y + j, c & 0xFFFFFF, c >> 24);
 			}
 	}
+
+	void Luna(Canvas &cv, int col, LunaPart p, int f, int n, int x, int y, int w, int h, int l = 0, int r = 0, int t = 0, int b = 0)
+	{
+		static auto atlas = format::PixelsFromPNG(luna_png.AsCharSpan());
+		int sh = lunaParts[p][3] / n;
+		Slice(cv, atlas.get(), col * lunaBlock + lunaParts[p][0], lunaParts[p][1] + f * sh, lunaParts[p][2], sh, x, y, w, h, l, r, t, b);
+	}
+
+	// A look's controls in images of a faithful recreation (resources/skins.py, OverlaySkins.h): a part's state f, or
+	// false when the look draws that part itself.
+	enum SkinPart { SkinButton, SkinCheck, SkinRadio, SkinTab, SkinClose, SkinMin, SkinMax };
+	struct Skin
+	{
+		std::span<const char> png;
+		const int (*parts)[4][5];
+		bool Draw(Canvas &cv, SkinPart p, int f, int x, int y, int w, int h) const
+		{
+			static std::map<const char *, std::unique_ptr<PlaneAdapter<std::vector<pixel_rgba>>>> atlases;
+			auto &atlas = atlases[png.data()];
+			if (!atlas) atlas = format::PixelsFromPNG(png);
+			auto &c = parts[p][f];
+			if (!c[2]) return false;
+			Slice(cv, atlas.get(), c[0], c[1], c[2], c[3], x, y, w, h, c[4], c[4], c[4], c[4]);
+			return true;
+		}
+	};
+
+	template<class Base> struct Skinned : Base
+	{
+		static constexpr SkinPart captionParts[] = { SkinMin, SkinMax, SkinClose }; // by CaptionKind
+		Skin skin;
+		Skinned(Skin skin) : skin(skin)
+		{
+			for (int k = 0; k < 3; k++) // caption buttons at their images' size
+				if (int w = skin.parts[captionParts[k]][0][2]) this->capW[k] = w, this->capH = skin.parts[captionParts[k]][0][3];
+		}
+		void Button(Canvas &cv, int x, int y, int w, int h, int state) override
+		{
+			if (!skin.Draw(cv, SkinButton, state, x, y, w, h)) Base::Button(cv, x, y, w, h, state);
+		}
+		void Tab(Canvas &cv, RECT rc, bool on, bool hot) override
+		{
+			if (!skin.Draw(cv, SkinTab, on ? 2 : hot, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top)) Base::Tab(cv, rc, on, hot);
+		}
+		bool CheckBox(Canvas &cv, int x, int y, int b, bool on, bool round, bool hot) override
+		{
+			return skin.Draw(cv, round ? SkinRadio : SkinCheck, (on ? 2 : 0) + hot, x, y, b, b) || Base::CheckBox(cv, x, y, b, on, round, hot);
+		}
+		void CaptionButton(Canvas &cv, RECT rc, bool hover, CaptionKind kind) override
+		{
+			if (!skin.Draw(cv, captionParts[kind], hover, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top)) Base::CaptionButton(cv, rc, hover, kind);
+		}
+	};
 
 	// Windows XP Luna, in its own images: Blue (col 0), Olive Green (1) or Silver (2).
 	struct XP : Theme
@@ -2040,8 +2095,8 @@ namespace
 	NinetyFive ninetyFiveTheme;
 	NinetyEight ninetyEightTheme;
 	XP xpTheme, xpOliveTheme{ 1 }, xpSilverTheme{ 2 };
-	Vista vistaTheme;
-	Seven sevenTheme;
+	Skinned<Vista> vistaTheme{ { skin_vista_png.AsCharSpan(), skin_vista_parts } };
+	Skinned<Seven> sevenTheme{ { skin_seven_png.AsCharSpan(), skin_seven_parts } };
 	Eight eightTheme;
 	Ten tenTheme;
 	Eleven elevenTheme;
