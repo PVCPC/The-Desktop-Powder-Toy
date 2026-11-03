@@ -48,9 +48,12 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
 - [ ] Clicks in overlay:window: dragging him, the Fist and right-click menus are untested there (window-relative
       mouse while TPT has it captured).
 - [ ] Buddy tab next to Fun (it sits after Welcome now).
-- [ ] Shown at 120 Hz: he makes 120 frames a second, but TDPT's overlay shows ~30 a second at 5120x1440 (sim 7 ms +
-      TPT drawing 13 ms + layered-window present 10 ms; his share ~1 ms). Fix: his own small click-through layered
-      window, sized to his drawn boxes and presented from his thread; the overlay keeps the click catching.
+- [x] Shown at the screen's rate: TDPT's overlay shows ~30 frames a second at 5120x1440 (sim 7 ms + TPT drawing
+      13 ms + present 10 ms), so he has his own click-through layered window over it (Windows), updated from a
+      thread of its own each screen refresh, only where his frame changed (tdpt_buddy_boxes; ~2-3 ms a frame); the
+      overlay catches clicks on his pixels (alpha 1). The window he stands on is read there too, every refresh.
+      Not behind the icons or with the wet/frosty looks: those still draw him into the overlay's frame.
+      He makes ~80 frames a second on a 5120x1440 stage (TPT pixel size 1); 120 needs a cheaper game frame.
 - [ ] The game's zapper: shock() also lights its toys near the mouse, not only near the spark that touched him.
 - [x] Buddy tab (shown once his SWF is chosen in Fun): on/off + Choose SWF, size 25-300 % (the game's own
       __nativeSetBuddySize, so independent of TDPT's pixel size), active-window ledges, smoothing, speech bubbles and

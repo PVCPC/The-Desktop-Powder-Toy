@@ -1080,7 +1080,8 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 		GetCursorPos(&cur);
 		GetWindowRect(hwnd, &wr);
 		if (wr.right > wr.left && wr.bottom > wr.top)
-			buddyOn = OverlayBuddy::Draw(argb.data(), w, double(cur.x - wr.left) * w / (wr.right - wr.left), double(cur.y - wr.top) * h / (wr.bottom - wr.top));
+			buddyOn = OverlayBuddy::Draw(argb.data(), w, double(cur.x - wr.left) * w / (wr.right - wr.left), double(cur.y - wr.top) * h / (wr.bottom - wr.top),
+			                             GetParent(hwnd) ? nullptr : gpu && gpu->view ? gpu->view : hwnd, h); // his own window over what shows ours (not behind the icons)
 	}
 	OverlayWindows::ClearUnderWindows(argb.data(), w, h, ww, wh);
 	// Drawing at the screen's rate only pays while something moves: particles, a window, the menus fading, or TPT in

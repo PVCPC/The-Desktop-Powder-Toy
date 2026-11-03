@@ -913,6 +913,7 @@ struct Shared {
     mouse: (f64, f64),
     clicks: Vec<PlayerEvent>,
     ready: Vec<u32>, // the newest finished frame, waiting for TDPT (when fresh)
+    ready_boxes: Vec<[usize; 4]>, // where it has pixels (x0, y0, x1, y1): it's clear everywhere else
     hits: Vec<(char, [f64; 4])>, // what clicks can land on in it
     menus: String,         // read_menus, about once a second
     commands: Vec<String>, // picked from them, for the game
@@ -926,6 +927,7 @@ pub struct Buddy {
     ground: Arc<Mutex<Ground>>,
     thread: Option<std::thread::JoinHandle<()>>,
     front: Vec<u32>, // the frame TDPT is drawing
+    front_boxes: Vec<[usize; 4]>,
 }
 
 // The game's thread: ticks and draws him 120 times a second (60 without smoothing), off TDPT's frame (a game frame alone is ~7 ms)
@@ -964,6 +966,8 @@ fn run(mut game: Game, shared: Arc<Mutex<Shared>>) {
         let mut s = shared.lock().unwrap();
         match drawn {
             Ok(true) if game.size == s.size => {
+                let (w, h) = (game.size.0 as usize, game.size.1 as usize);
+                s.ready_boxes = game.drawn.get(&(work.as_ptr() as usize)).cloned().unwrap_or_else(|| vec![[0, 0, w, h]]);
                 std::mem::swap(&mut work, &mut s.ready);
                 s.fresh = true;
                 drop(s);
@@ -1025,7 +1029,7 @@ pub unsafe extern "C" fn tdpt_buddy_open(path: *const c_char, w: u32, h: u32, er
         })
     };
     match thread.map_err(|e| e.to_string()).and_then(|t| told.recv().map_err(|e| e.to_string())?.map(|g| (t, g))) {
-        Ok((t, ground)) => Box::into_raw(Box::new(Buddy { shared, ground, thread: Some(t), front: Vec::new() })),
+        Ok((t, ground)) => Box::into_raw(Box::new(Buddy { shared, ground, thread: Some(t), front: Vec::new(), front_boxes: Vec::new() })),
         Err(e) => {
             say(error, error_len, &e);
             std::ptr::null_mut()
@@ -1049,8 +1053,24 @@ pub unsafe extern "C" fn tdpt_buddy_frame(b: *mut Buddy, mx: f64, my: f64, w: u3
     if s.fresh {
         s.fresh = false;
         std::mem::swap(&mut s.ready, &mut b.front);
+        std::mem::swap(&mut s.ready_boxes, &mut b.front_boxes);
     }
     if b.front.len() == w as usize * h as usize { b.front.as_ptr() } else { std::ptr::null() }
+}
+
+/// Where the frame tdpt_buddy_frame last gave has pixels: up to n boxes (x0, y0, x1, y1 stage pixels) into out; it is
+/// clear everywhere else. Returns how many there are.
+/// # Safety
+/// b is from tdpt_buddy_open; out has room for n * 4.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tdpt_buddy_boxes(b: *mut Buddy, out: *mut i32, n: usize) -> usize {
+    let b = unsafe { &mut *b };
+    for (i, r) in b.front_boxes.iter().take(n).enumerate() {
+        for k in 0..4 {
+            unsafe { *out.add(i * 4 + k) = r[k] as i32 };
+        }
+    }
+    b.front_boxes.len()
 }
 
 /// Whether a click at (x, y) stage pixels lands on him, his toys or the game's windows (not on the hand the game

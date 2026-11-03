@@ -17,6 +17,11 @@
 #include <SDL.h>
 #include <SDL_syswm.h>
 #include <windows.h>
+#include <dwmapi.h>
+#include <thread>
+#include <mutex>
+#include <atomic>
+#include <memory>
 #endif
 #include <vector>
 #include <filesystem>
@@ -26,7 +31,8 @@ namespace
 {
 	Buddy *buddy = nullptr;
 	ByteString failed;            // the file that last failed to open: not retried until another is chosen
-	const uint32_t *frame = nullptr; // his newest frame, fw x fh premultiplied (null: nothing shown)
+	const uint32_t *frame = nullptr; // his newest frame, fw x fh premultiplied (null: nothing shown), drawn into the overlay's
+	bool drawn = false;              // he has a frame up (in the overlay's or in his own window)
 	int fw = XRES, fh = YRES;     // his stage: TDPT's play area (from the top left), so his floor is the sand's floor
 	int wb = YRES;                // the taskbar's top (sim pixels): he stands on it, as in the desktop app
 	std::vector<uint16_t> ground; // the sim around him, for tdpt_buddy_ground
@@ -41,6 +47,169 @@ namespace
 	int wet[8], frost[8];         // ticks each part still looks wet / frosted (Overlay.Fun.BuddyLooks)
 	bool held = false;            // a press that went to him, until its release
 	double heldX, heldY;          // where TPT's window last saw the mouse while held (it has the mouse captured)
+
+#ifdef _WIN32
+	// His own window (Windows, the overlay over everything as layered window): his frames go to the screen from a
+	// thread of their own at the screen's rate, as in the desktop app, not at TDPT's own frame rate (~30 a second at
+	// 5120x1440). Click-through; the overlay still catches clicks on his pixels (alpha 1 there, from mask).
+	// UpdateLayeredWindowIndirect: only the changed part goes to the screen (Vista and later; the build targets XP's headers)
+	struct UlwInfo { DWORD cbSize; HDC hdcDst; const POINT *pptDst; const SIZE *psize; HDC hdcSrc; const POINT *pptSrc; COLORREF crKey; const BLENDFUNCTION *pblend; DWORD dwFlags; const RECT *prcDirty; };
+	extern "C" __declspec(dllimport) BOOL WINAPI UpdateLayeredWindowIndirect(HWND, const UlwInfo *);
+
+	struct Shown
+	{
+		std::thread thread;
+		std::atomic<bool> quit{ false };
+		std::atomic<HWND> window{ nullptr };
+		std::mutex m; // guards the rest
+		HWND overlay = nullptr;
+		int w = 1, h = 1, fw = XRES, fh = YRES, windows = 1; // the overlay frame's size, his stage, Overlay.Buddy.Windows
+		bool held = false, has = false;
+		double heldX = 0, heldY = 0;
+		std::vector<uint32_t> copy; // his last frame shown (fw2 wide), and where it has pixels (tdpt_buddy_boxes)
+		int fw2 = 0;
+		std::vector<RECT> boxes;
+	};
+	std::unique_ptr<Shown> shown;
+
+	void Show(Shown &s)
+	{
+		HWND bw = CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST, L"STATIC", L"Buddy",
+		                          WS_POPUP, 0, 0, 1, 1, nullptr, nullptr, nullptr, nullptr);
+		HDC dc = CreateCompatibleDC(nullptr);
+		HBITMAP bmp = nullptr;
+		uint32_t *bits = nullptr;
+		RECT at{};               // the overlay's place on screen (his window's too)
+		const uint32_t *seen = nullptr;
+		std::vector<RECT> had;   // where the last frame shown had pixels (sim), for the size it was
+		int hadW = 0, hadH = 0;
+		s.window = bw;
+		while (!s.quit)
+		{
+			MSG msg;
+			while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&msg);
+			HWND overlay;
+			int w, h, fw, fh, windows;
+			bool held;
+			double mx, my;
+			{
+				std::lock_guard lock(s.m);
+				overlay = s.overlay, w = s.w, h = s.h, fw = s.fw, fh = s.fh, windows = s.windows, held = s.held, mx = s.heldX, my = s.heldY;
+			}
+			RECT wr;
+			if (!overlay || !GetWindowRect(overlay, &wr) || wr.right <= wr.left || wr.bottom <= wr.top)
+			{
+				Sleep(10);
+				continue;
+			}
+			if (!IsWindowVisible(overlay)) // TPT minimised or the overlay hidden: he goes with it
+			{
+				if (IsWindowVisible(bw)) ShowWindow(bw, SW_HIDE);
+				Sleep(10);
+				continue;
+			}
+			int ww = wr.right - wr.left, wh = wr.bottom - wr.top;
+			if (!EqualRect(&wr, &at))
+			{
+				at = wr, seen = nullptr, hadW = 0; // all drawn again
+				if (bmp) DeleteObject(bmp);
+				BITMAPINFO bi{ { sizeof(BITMAPINFOHEADER), ww, -wh, 1, 32, BI_RGB } };
+				bmp = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, (void **)&bits, nullptr, 0);
+				SelectObject(dc, bmp);
+				POINT src{}, dst{ wr.left, wr.top };
+				SIZE size{ ww, wh };
+				BLENDFUNCTION blend{ AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+				UpdateLayeredWindow(bw, nullptr, &dst, &size, dc, &src, 0, &blend, ULW_ALPHA);
+			}
+			if (!IsWindowVisible(bw)) ShowWindow(bw, SW_SHOWNOACTIVATE);
+			if (!held)
+			{
+				POINT cur;
+				GetCursorPos(&cur);
+				mx = double(cur.x - wr.left) * w / ww, my = double(cur.y - wr.top) * h / wh;
+			}
+			// the window he stands on, every frame here so he moves with it smoothly
+			uintptr_t id = 0;
+			int el, er, et, eb;
+			if (windows == 1 && OverlayWindows::ActiveEdges(id, el, er, et, eb))
+				tdpt_buddy_ledge(buddy, id, el, er, et < 0 ? NAN : et, eb < 0 ? NAN : eb);
+			else
+				tdpt_buddy_ledge(buddy, 0, 0, 0, NAN, NAN);
+			auto *f = tdpt_buddy_frame(buddy, mx, my, fw, fh);
+			if (f && f != seen && bits)
+			{
+				seen = f;
+				// where it has pixels (it's clear everywhere else): those and where the last one had them are all that
+				// changed (the game's labels sit in the far corners: one box around everything was most of the screen)
+				int32_t raw[64 * 4];
+				size_t n = tdpt_buddy_boxes(buddy, raw, 64);
+				std::vector<RECT> boxes;
+				if (n > 64) boxes = { RECT{ 0, 0, fw, fh } };
+				for (size_t i = 0; i < n && n <= 64; i++)
+				{
+					RECT r{ std::clamp(raw[i * 4], 0, fw), std::clamp(raw[i * 4 + 1], 0, fh), std::clamp(raw[i * 4 + 2], 0, fw), std::clamp(raw[i * 4 + 3], 0, fh) };
+					if (!IsRectEmpty(&r)) boxes.push_back(r);
+				}
+				if (fw != hadW || fh != hadH) had = { RECT{ 0, 0, fw, fh } }, hadW = fw, hadH = fh; // all of it again
+				auto dirty = boxes;
+				dirty.insert(dirty.end(), had.begin(), had.end());
+				had = boxes;
+				for (bool merged = true; merged;) // overlapping ones as one
+				{
+					merged = false;
+					for (size_t i = 0; i < dirty.size() && !merged; i++)
+						for (size_t j = i + 1; j < dirty.size() && !merged; j++)
+						{
+							RECT both;
+							if (IntersectRect(&both, &dirty[i], &dirty[j]))
+							{
+								UnionRect(&dirty[i], &dirty[i], &dirty[j]);
+								dirty.erase(dirty.begin() + j);
+								merged = true;
+							}
+						}
+				}
+				{
+					// a copy for the overlay's click catching
+					std::lock_guard lock(s.m);
+					if (s.copy.size() != size_t(fw) * fh || s.fw2 != fw) s.copy.assign(size_t(fw) * fh, 0), s.fw2 = fw;
+					for (auto &r : dirty)
+						for (int y = r.top; y < r.bottom; y++) std::copy(f + size_t(y) * fw + r.left, f + size_t(y) * fw + r.right, s.copy.data() + size_t(y) * fw + r.left);
+					s.boxes = boxes;
+					s.has = true;
+				}
+				// each to the screen (nearest pixel, as the overlay scales the sim)
+				for (auto &r : dirty)
+				{
+					RECT now{ LONG(r.left * ww / w), LONG(r.top * wh / h), LONG(std::min<int>(ww, (r.right * ww + w - 1) / w)), LONG(std::min<int>(wh, (r.bottom * wh + h - 1) / h)) };
+					for (int y = now.top; y < now.bottom; y++)
+					{
+						auto *src = f + size_t(std::min(y * h / wh, fh - 1)) * fw;
+						for (int x = now.left; x < now.right; x++) bits[size_t(y) * ww + x] = src[std::min(x * w / ww, fw - 1)];
+					}
+					POINT src{};
+					SIZE size{ ww, wh };
+					BLENDFUNCTION blend{ AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+					UlwInfo info{ sizeof(info), nullptr, nullptr, &size, dc, &src, 0, &blend, ULW_ALPHA, &now };
+					UpdateLayeredWindowIndirect(bw, &info);
+				}
+			}
+			DwmFlush(); // the next screen refresh
+		}
+		s.window = nullptr;
+		DestroyWindow(bw);
+		DeleteDC(dc);
+		if (bmp) DeleteObject(bmp);
+	}
+
+	void Hide()
+	{
+		if (!shown) return;
+		shown->quit = true;
+		shown->thread.join();
+		shown.reset();
+	}
+#endif
 
 	// a blast in the sim at (x, y) sim pixels, power 1 about one of his game's bombs: pressure and a ball of fire
 	void Blast(Simulation *sim, double bx, double by, double power)
@@ -59,7 +228,7 @@ namespace
 	}
 }
 
-bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
+bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my, void *layer, int h)
 {
 	auto path = GlobalPrefs::Ref().Get("Overlay.Fun.BuddySwf", ByteString(""));
 	if (!GlobalPrefs::Ref().Get("Overlay.Fun.Buddy", false) || path.empty())
@@ -166,6 +335,36 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
 	auto &prefs = GlobalPrefs::Ref();
 	tdpt_buddy_settings(buddy, prefs.Get("Overlay.Buddy.Size", 100.f), prefs.Get("Overlay.Buddy.Speech", true), prefs.Get("Overlay.Buddy.SpeechSize", 100.f),
 	                    int(prefs.Get("Overlay.Buddy.Toys", 6.f)), prefs.Get("Overlay.Buddy.Smooth", true));
+	bool looks = GlobalPrefs::Ref().Get("Overlay.Fun.BuddyLooks", false);
+#ifdef _WIN32
+	// in his own window (not with the wet/frosty looks: those are drawn into the overlay's frame)
+	if (layer && !looks)
+	{
+		if (!shown)
+		{
+			shown = std::make_unique<Shown>();
+			shown->thread = std::thread(Show, std::ref(*shown));
+		}
+		auto &s = *shown;
+		std::lock_guard lock(s.m);
+		s.overlay = HWND(layer), s.w = w, s.h = h, s.fw = fw, s.fh = fh, s.windows = windows;
+		s.held = held, s.heldX = heldX, s.heldY = heldY;
+		frame = nullptr;
+		drawn = s.has;
+		// clicks on him: the overlay takes them over his pixels (alpha 1, as good as invisible)
+		for (auto &r : s.boxes)
+			for (int y = r.top; y < r.bottom; y++)
+				for (int x = r.left; x < r.right; x++)
+					if (s.copy[size_t(y) * s.fw2 + x] >> 24 && !(argb[size_t(y) * w + x] >> 24)) argb[size_t(y) * w + x] = 0x01000000;
+		// just above the overlay
+		HWND bwin = s.window, above = GetWindow(HWND(layer), GW_HWNDPREV);
+		if (bwin && above != bwin)
+			SetWindowPos(bwin, above ? above : (GetWindowLongPtrW(HWND(layer), GWL_EXSTYLE) & WS_EX_TOPMOST ? HWND_TOPMOST : HWND_TOP), 0, 0, 0, 0,
+			             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+		return true;
+	}
+	Hide();
+#endif
 	uintptr_t id = 0;
 	int el, er, et, eb;
 	if (windows == 1 && OverlayWindows::ActiveEdges(id, el, er, et, eb))
@@ -173,8 +372,8 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
 	else
 		tdpt_buddy_ledge(buddy, 0, 0, 0, NAN, NAN);
 	frame = held ? tdpt_buddy_frame(buddy, heldX, heldY, fw, fh) : tdpt_buddy_frame(buddy, mx, my, fw, fh);
+	drawn = frame;
 	if (!frame) return true;
-	bool looks = GlobalPrefs::Ref().Get("Overlay.Fun.BuddyLooks", false);
 	// his premultiplied pixels over the frame's
 	OverlayBands(fh, [&](int y0, int y1) {
 		for (int y = y0; y < y1; y++)
@@ -217,7 +416,7 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 {
 	auto *sim = GameController::Ref().GetModel()->GetSimulation();
 	sim->petBuddy.x = -1;
-	if (!buddy || !frame)
+	if (!buddy || !drawn)
 	{
 		parts.clear();
 		return;
@@ -293,6 +492,10 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 
 void OverlayBuddy::Close()
 {
+#ifdef _WIN32
+	Hide(); // before he goes: it reads his frames
+#endif
+	drawn = false;
 	tdpt_buddy_close(buddy);
 	buddy = nullptr;
 	frame = nullptr;
@@ -307,7 +510,7 @@ bool OverlayBuddy::Mouse(int x, int y, int what)
 	if (what == 1)
 	{
 		// only a press on him, his toys or the game's windows; everywhere else stays TPT's
-		if (!frame || !tdpt_buddy_hit(buddy, x, y)) return false;
+		if (!drawn || !tdpt_buddy_hit(buddy, x, y)) return false;
 		held = true;
 		tdpt_buddy_mouse(buddy, x, y, 1);
 		return true;
