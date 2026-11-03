@@ -44,10 +44,10 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
       off or TDPT closes.
 - [ ] Sound (none yet): the game's own sounds through TDPT's audio (Ruffle's audio backend), with a volume / mute
       row in the Buddy tab, off when TDPT is muted.
-- [ ] Saves also every few minutes (now only when he's turned off or TDPT closes: a crash loses money and purchases).
+- [x] Saves also every 2 minutes (checked: TDPT killed after 2 min 17 s, his save was there).
 - [ ] Clicks in overlay:window: dragging him, the Fist and right-click menus are untested there (window-relative
       mouse while TPT has it captured).
-- [ ] Buddy tab next to Fun (it sits after Welcome now).
+- [x] Buddy tab next to Fun.
 - [x] Shown at the screen's rate: TDPT's overlay shows ~30 frames a second at 5120x1440 (sim 7 ms + TPT drawing
       13 ms + present 10 ms), so he has his own click-through layered window over it (Windows), updated from a
       thread of its own each screen refresh, only where his frame changed (tdpt_buddy_boxes; ~2-3 ms a frame); the

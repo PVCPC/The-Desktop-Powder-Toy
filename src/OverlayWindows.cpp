@@ -2457,6 +2457,7 @@ namespace
 		std::wstring *typed = &query; // which one: the elements' or the online saves'
 		static constexpr const wchar_t *tabNames[] = { L"Elements", L"Tools", L"Simulation", L"Display", L"Saves", L"Overlay", L"Fun", L"Welcome", L"Buddy" };
 		static constexpr int toolsTab = 1, welcomeTab = 7, buddyTab = 8; // Buddy: only once his file is chosen
+		static constexpr int tabOrder[] = { 0, 1, 2, 3, 4, 5, 6, buddyTab, welcomeTab }; // as shown (Buddy next to Fun)
 
 		SideWindow()
 		{
@@ -3984,7 +3985,7 @@ namespace
 					if (i != buddyTab || BuddyTabShown()) names += text->Measure(tabNames[i]).cx + S(1);
 				pad = std::clamp((cv.w - 2 * tx - names) / int(std::size(tabNames)), S(6), S(20));
 			}
-			for (int i = 0; i < int(std::size(tabNames)); i++)
+			for (int i : tabOrder)
 			{
 				if (fixedTab >= 0 && i != fixedTab) continue;
 				if (i == buddyTab && !BuddyTabShown())
@@ -4007,7 +4008,11 @@ namespace
 			for (int i = c.left; i < c.right; i++) cv.Blend(i, c.top, theme->edge, 255);
 			// The selected tab's bottom edge opens into the page.
 			int sx = border + S(4);
-			for (int i = 0; i < tab && fixedTab < 0; i++) sx += text->Measure(tabNames[i]).cx + pad + S(1);
+			for (int i : tabOrder)
+			{
+				if (i == tab || fixedTab >= 0) break;
+				if (i != buddyTab || BuddyTabShown()) sx += text->Measure(tabNames[i]).cx + pad + S(1);
+			}
 			if (!theme->segmentTabs)
 				for (int i = sx + 1; i < sx + text->Measure(tabNames[tab]).cx + pad - S(1); i++) cv.Blend(i, c.top, theme->page, 255);
 

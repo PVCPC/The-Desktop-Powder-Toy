@@ -935,6 +935,7 @@ fn run(mut game: Game, shared: Arc<Mutex<Shared>>) {
     let mut work = Vec::new();
     let mut last = Instant::now();
     let mut menus_at = Instant::now();
+    let mut saved_at = Instant::now();
     loop {
         let start = Instant::now();
         let (mouse, clicks, commands) = {
@@ -974,6 +975,13 @@ fn run(mut game: Game, shared: Arc<Mutex<Shared>>) {
                 let data = game.player.lock().unwrap().get_root_variable("__host.hitData");
                 s = shared.lock().unwrap();
                 s.hits = if let Value::String(d) = data { hits(&d) } else { Vec::new() };
+                // his save (money, purchases) every 2 minutes too, not only when he's closed: a crash keeps most of it
+                if saved_at.elapsed() > Duration::from_secs(120) {
+                    drop(s);
+                    game.player.lock().unwrap().flush_shared_objects();
+                    saved_at = Instant::now();
+                    s = shared.lock().unwrap();
+                }
                 if menus_at.elapsed() > Duration::from_secs(1) {
                     drop(s);
                     let menus = read_menus(&mut game.player.lock().unwrap());
