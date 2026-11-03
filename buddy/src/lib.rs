@@ -154,6 +154,8 @@ struct Ground {
     shots: Vec<[f64; 5]>,         // his weapons since TDPT last asked: a bullet's path this frame (x0, y0, x1, y1, 1) or a flame (x, y, x, y, 2)
     bullets: Vec<(f64, f64)>,     // the game's bullets last frame: where each was
     drops: Vec<String>,           // his hoses' drops last frame (their clips' names)
+    toys: bool,                   // his thrown things feel the sim (toys: command)
+    toys_at: Vec<(f64, f64, f64)>, // where they are (x, y, radius), so the ground TDPT sends covers them
     hide: u8,                     // the game's own effects TDPT shows as the sim's instead, not drawn: 1 his hoses' water, 2 fire
     game_grav: f64,               // the game's grav this frame, before that
     ledge: Option<Ledge>,         // the active window's edges he can stand on (as in the desktop app)
@@ -200,7 +202,7 @@ const POSE: [(f64, f64); 6] = [(0.0, 0.0), (0.0, -39.4), (-22.1, -10.2), (22.1, 
 
 impl Default for Ground {
     fn default() -> Self {
-        Self { rect: [0; 4], cells: Vec::new(), want: [0; 4], last: (400.0, 300.0), air_rect: [0; 4], air: Vec::new(), cell: 4, before: ([0; 4], Vec::new()), calm: 0, zap: None, gravity: (0.0, 1.0), game_grav: 1.0, exit: None, jumped: 99, eaten: false, parts: Vec::new(), bang: None, booms: Vec::new(), shots: Vec::new(), bullets: Vec::new(), drops: Vec::new(), hide: 0, ledge: None, carry: (0.0, 0.0), buried: 0, dig: false, support: 0 }
+        Self { rect: [0; 4], cells: Vec::new(), want: [0; 4], last: (400.0, 300.0), air_rect: [0; 4], air: Vec::new(), cell: 4, before: ([0; 4], Vec::new()), calm: 0, zap: None, gravity: (0.0, 1.0), game_grav: 1.0, exit: None, jumped: 99, eaten: false, parts: Vec::new(), bang: None, booms: Vec::new(), shots: Vec::new(), bullets: Vec::new(), drops: Vec::new(), toys: false, toys_at: Vec::new(), hide: 0, ledge: None, carry: (0.0, 0.0), buried: 0, dig: false, support: 0 }
     }
 }
 
@@ -579,6 +581,13 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
                 g.jumped = 0;
             }
         }
+        // and his toys near him (ponytail: within 800 px, so the ground stays small; one rect per toy if far ones matter)
+        let (bx, by) = g.last;
+        for &(x, y, r) in &g.toys_at {
+            if (x - bx).hypot(y - by) < 800.0 {
+                bbox = [bbox[0].min(x - r - 40.0), bbox[1].min(y - r - 40.0), bbox[2].max(x + r + 40.0), bbox[3].max(y + r + 40.0)];
+            }
+        }
         if bbox[0] <= bbox[2] {
             g.want = [bbox[0] as i32, bbox[1] as i32, (bbox[2] - bbox[0]) as i32 + 1, (bbox[3] - bbox[1]) as i32 + 1];
         }
@@ -604,6 +613,36 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
             now.push((x, y));
         }
         g.bullets = now;
+        // his toys (balls, infants, the orb, the radio: the game's circles) feel the sim as his parts do: they rest on it, float
+        // in liquid (but the heavy bowling ball), its air blows them; one stopped fast by it splashes (x, y, radius, speed, 7)
+        g.toys_at.clear();
+        let grav = num(v, "grav");
+        for i in 0..num(v, "objectList.length").min(64.0) as usize {
+            let s = |f: &str| format!("objectList.{i}.{f}");
+            if !g.toys || v.get(&s("type")) != Value::String("circle".into()) || v.get(&s("group")) == Value::String("buddy".into()) {
+                continue;
+            }
+            let t = |v: &mut dyn RootVars, f: &str| num(v, &s(&format!("targ.{f}")));
+            let (mut x, mut y, mut xv, mut yv, r, mass) = (t(v, "x"), t(v, "y"), t(v, "xv"), t(v, "yv"), t(v, "rad"), t(v, "mass"));
+            if [x, y, xv, yv, r].iter().any(|n| !n.is_finite()) || r <= 0.0 {
+                continue;
+            }
+            g.toys_at.push((x, y, r));
+            let speed = xv.hypot(yv);
+            let wet = !(mass >= 0.6) && grav.is_finite() && g.float(x, y, &mut xv, &mut yv, r, grav);
+            let (ax, ay) = g.wind(x, y);
+            xv += 0.1 * ax;
+            yv += 0.1 * ay;
+            let out = g.push_out(&mut x, &mut y, &mut xv, &mut yv, r);
+            if wet || out.is_some() || ax != 0.0 || ay != 0.0 {
+                for (f, n) in [("x", x), ("y", y), ("xv", xv), ("yv", yv)] {
+                    v.set(&s(&format!("targ.{f}")), Value::Number(n));
+                }
+            }
+            if speed > 8.0 && xv.hypot(yv) < speed * 0.5 && g.shots.len() < 256 {
+                g.shots.push([x, y, r, speed, 7.0]);
+            }
+        }
         // his stun gun shocking him
         if v.get("beingShocked") == Value::Bool(true) && g.shots.len() < 256 {
             g.shots.push([num(v, "body.x"), num(v, "body.y"), 0.0, 0.0, 6.0]);
@@ -1083,6 +1122,10 @@ fn run(mut game: Game, shared: Arc<Mutex<Shared>>) {
         let drawn = catch_unwind(AssertUnwindSafe(|| {
             let mut p = game.player.lock().unwrap();
             for c in commands {
+                if let Some(on) = c.strip_prefix("toys:") {
+                    game.ground.lock().unwrap().toys = on == "1";
+                    continue;
+                }
                 if let Some(hide) = c.strip_prefix("hide:") {
                     game.ground.lock().unwrap().hide = hide.parse().unwrap_or(0);
                     continue;
@@ -1404,7 +1447,8 @@ pub unsafe extern "C" fn tdpt_buddy_booms(b: *mut Buddy, out: *mut f64, max: usi
 
 /// His weapons since the last call (up to max): x0, y0, x1, y1, kind each (1 a bullet's path, 2 a flame at x0, y0, 3 he
 /// dances at x0, y0, 4 a new drop from his hose at x0, y0 with speed x1, y1 a frame, 5 his gravity pulls to x0, y0, x1
-/// hard: 1 weak vortex, 2 gravity shifter, 3 strong vortex, 6 his stun gun is shocking him); how many
+/// hard: 1 weak vortex, 2 gravity shifter, 3 strong vortex, 6 his stun gun is shocking him, 7 a toy of his
+/// stopped fast by the sim at x0, y0, radius x1, speed y1 before); how many
 /// # Safety
 /// b is from tdpt_buddy_open; out has room for 5 * max.
 #[unsafe(no_mangle)]
@@ -1993,6 +2037,34 @@ mod tests {
             game.player.lock().unwrap().handle_event(PlayerEvent::MouseUp { x: hx, y: hy, button: MouseButton::Left });
             let shots = std::mem::take(&mut game.ground.lock().unwrap().shots);
             assert!(shots.iter().any(|s| s[4] == 6.0), "not shocked: {shots:?}");
+        }
+        // his toys on the sim: a ball dropped from the mouse lands on a block 100 px below it
+        if let Some(line) = menus.lines().find(|l| l.split('\t').nth(3) == Some("Bowling Balls")) {
+            let pick = line.split('\t').nth(2).unwrap().to_owned();
+            game.player.lock().unwrap().call_root_method("__hostMenuCommand", vec![pick.into()]).unwrap();
+            game.ground.lock().unwrap().toys = true;
+            let fill = |game: &super::Game| {
+                let mut g = game.ground.lock().unwrap();
+                let r = g.want;
+                g.cells = (0..r[2] * r[3]).map(|i| (r[1] + i / r[2] >= my as i32 + 100 && (r[0] + i % r[2] - mx as i32).abs() < 200) as u16).collect();
+                g.rect = r;
+            };
+            for f in 0..120 {
+                fill(&game);
+                if f == 20 {
+                    game.player.lock().unwrap().handle_event(PlayerEvent::MouseMove { x: mx, y: my });
+                    game.player.lock().unwrap().handle_event(PlayerEvent::MouseDown { x: mx, y: my, button: MouseButton::Left, index: None });
+                }
+                if f == 22 {
+                    game.player.lock().unwrap().handle_event(PlayerEvent::MouseUp { x: mx, y: my, button: MouseButton::Left });
+                }
+                super::frame(&mut game, 25.0, mx, my, &mut out);
+            }
+            let mut p = game.player.lock().unwrap();
+            let Value::Number(n) = p.get_root_variable("objectList.length") else { panic!() };
+            let k = |p: &mut ruffle_core::Player, f: &str| match p.get_root_variable(&format!("objectList.{}.targ.{f}", n as usize - 1)) { Value::Number(v) => v, o => panic!("{f} {o:?}") };
+            let (y, r) = (k(&mut p, "y"), k(&mut p, "rad"));
+            assert!((y + r - (my + 100.0)).abs() < 4.0, "ball not on the block: bottom {} block {}", y + r, my + 100.0);
         }
     }
 

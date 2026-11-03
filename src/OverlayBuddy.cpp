@@ -49,6 +49,7 @@ namespace
 	int zapped = 0;               // ticks he still glows from a shock (Overlay.Fun.BuddyGlow)
 	int fleeRest = 0;             // ticks before he runs from fire again (Overlay.Fun.BuddyFlee)
 	int hidden = -1;              // the game's own effects last told to hide (hide: command)
+	int toys = -1;                // his toys last told to feel the sim or not (toys: command, Overlay.Fun.BuddyToys)
 	bool stunned = false;         // his stun gun was shocking him last tick (Overlay.Fun.BuddyWeapons)
 	double lastSpeed[8];          // each part's speed last tick (a splash: fast, then stopped by sand or water)
 	int hose = 0, hoseRest = 0;   // fireman: ticks left spraying, and before he looks for fire again
@@ -543,21 +544,23 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 		}
 	// Splash: a part that was flying (speed over 8) and is stopped by sand or water throws it up and out round it
 	bool splash = prefs.Get("Overlay.Fun.BuddySplash", false);
+	auto fling = [&](double px, double py, double r, double was) {
+		for (int y = std::max(0, int(py - r - 4)); y <= std::min(YRES - 1, int(py + r + 4)); y++)
+			for (int x = std::max(0, int(px - r - 4)); x <= std::min(XRES - 1, int(px + r + 4)); x++)
+				if (int q = sim->pmap[y][x]; q && (isPowder(ID(q)) || isLiquid(ID(q))))
+				{
+					double dx = x + 0.5 - px, dy = y + 0.5 - py, d = std::max(1.0, std::hypot(dx, dy));
+					auto &t = sim->parts[ID(q)];
+					float f = float(std::min(was, 10.0) * (0.2 + 0.2 * sim->rng.uniform01())); // (harder flung it left the play area)
+					t.vx += float(dx / d) * f, t.vy += float(std::min(dy / d, -0.3)) * f; // out, and up
+				}
+	};
 	for (size_t k = 0; k < parts.size() && k < 8; k++)
 	{
 		auto &p = parts[k];
 		double speed = std::hypot(p[3], p[4]), was = lastSpeed[k];
 		lastSpeed[k] = std::isfinite(speed) ? speed : 0;
-		if (!splash || was < 8 || speed > was * 0.5 || !std::isfinite(p[0] + p[1])) continue;
-		for (int y = std::max(0, int(p[1] - p[2] - 4)); y <= std::min(YRES - 1, int(p[1] + p[2] + 4)); y++)
-			for (int x = std::max(0, int(p[0] - p[2] - 4)); x <= std::min(XRES - 1, int(p[0] + p[2] + 4)); x++)
-				if (int q = sim->pmap[y][x]; q && (isPowder(ID(q)) || isLiquid(ID(q))))
-				{
-					double dx = x + 0.5 - p[0], dy = y + 0.5 - p[1], d = std::max(1.0, std::hypot(dx, dy));
-					auto &t = sim->parts[ID(q)];
-					float f = float(std::min(was, 10.0) * (0.2 + 0.2 * sim->rng.uniform01())); // (harder flung it left the play area)
-					t.vx += float(dx / d) * f, t.vy += float(std::min(dy / d, -0.3)) * f; // out, and up
-				}
+		if (splash && was >= 8 && speed <= was * 0.5 && std::isfinite(p[0] + p[1])) fling(p[0], p[1], p[2], was);
 	}
 	// Fireman: fire near him (and he isn't burning): he sprays water at it from his hand for 3 s, then rests 10 s
 	if (prefs.Get("Overlay.Fun.BuddyFireman", false) && parts.size() == 6)
@@ -620,6 +623,12 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 					if (int i = sim->create_part(-1, x, y, PT_WATR); i >= 0)
 						sim->parts[i].vx = float(std::clamp(b[2] * 0.6, -25.0, 25.0) + sim->rng.uniform01() - 0.5),
 						sim->parts[i].vy = float(std::clamp(b[3] * 0.6, -25.0, 25.0) + sim->rng.uniform01() - 0.5);
+	// his toys (Overlay.Fun.BuddyToys): the game moves them against the sim; one stopped fast splashes it (as he does)
+	if (int on = prefs.Get("Overlay.Fun.BuddyToys", false); on != toys)
+		tdpt_buddy_command(buddy, on ? "toys:1" : "toys:0"), toys = on;
+	for (size_t s = 0; s < shot && toys; s++)
+		if (double *b = shots + s * 5; b[4] == 7 && std::isfinite(b[0] + b[1]))
+			fling(b[0], b[1], b[2], b[3]);
 	stunned = false;
 	for (size_t s = 0; s < shot && weapons; s++)
 	{
