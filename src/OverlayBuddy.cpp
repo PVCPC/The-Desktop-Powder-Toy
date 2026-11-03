@@ -45,6 +45,7 @@ namespace
 	}
 	std::vector<float> air;       // and its air (velocity, pressure), for tdpt_buddy_air
 	int wet[8], frost[8];         // ticks each part still looks wet / frosted (Overlay.Fun.BuddyLooks)
+	int zapped = 0;               // ticks he still glows from a shock (Overlay.Fun.BuddyGlow)
 	double lastSpeed[8];          // each part's speed last tick (a splash: fast, then stopped by sand or water)
 	int hose = 0, hoseRest = 0;   // fireman: ticks left spraying, and before he looks for fire again
 	float hoseX, hoseY;           // the fire he is putting out
@@ -348,10 +349,10 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my, void *layer
 	tdpt_buddy_settings(buddy, prefs.Get("Overlay.Buddy.Size", 100.f), prefs.Get("Overlay.Buddy.Speech", true), prefs.Get("Overlay.Buddy.SpeechSize", 100.f),
 	                    int(prefs.Get("Overlay.Buddy.Toys", 6.f)), prefs.Get("Overlay.Buddy.Smooth", true));
 	tdpt_buddy_volume(buddy, prefs.Get("Overlay.Buddy.Volume", 50.f) / 100.f);
-	bool looks = GlobalPrefs::Ref().Get("Overlay.Fun.BuddyLooks", false);
+	bool looks = GlobalPrefs::Ref().Get("Overlay.Fun.BuddyLooks", false), glows = GlobalPrefs::Ref().Get("Overlay.Fun.BuddyGlow", false);
 #ifdef _WIN32
-	// in his own window (not with the wet/frosty looks: those are drawn into the overlay's frame)
-	if (layer && !looks)
+	// in his own window (not with the wet/frosty looks or the glow: those are drawn into the overlay's frame)
+	if (layer && !looks && !glows)
 	{
 		if (!shown)
 		{
@@ -400,12 +401,15 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my, void *layer
 				d = s + ((((d & 0xFF00FF) * k) >> 8) & 0xFF00FF) + ((((d & 0xFF00) * k) >> 8) & 0xFF00) + ((((d >> 24) * k) >> 8) << 24);
 			}
 	});
-	// wet parts look darker, frosted ones paler blue, fading over 10 s: his own pixels there, recoloured in place
-	for (size_t n = 0; looks && n < parts.size(); n++)
+	// wet parts look darker, frosted ones paler blue, fading over 10 s; shocked, all of him flickers bright blue-white for
+	// a moment: his own pixels there, recoloured in place
+	static int flicker = 0;
+	float zap = glows && zapped ? (++flicker & 2 ? 0.9f : 0.5f) * std::min(1.f, zapped / 10.f) : 0;
+	for (size_t n = 0; (looks || zap) && n < parts.size(); n++)
 	{
 		auto &p = parts[n];
-		float dark = 0.3f * wet[n] / 600, ice = 0.5f * frost[n] / 600;
-		if ((!dark && !ice) || !std::isfinite(p[0] + p[1] + p[2])) continue;
+		float dark = looks ? 0.3f * wet[n] / 600 : 0, ice = looks ? 0.5f * frost[n] / 600 : 0;
+		if ((!dark && !ice && !zap) || !std::isfinite(p[0] + p[1] + p[2])) continue;
 		for (int y = std::max(0, int(p[1] - p[2]) - 2); y <= std::min(fh - 1, int(p[1] + p[2]) + 2); y++)
 			for (int x = std::max(0, int(p[0] - p[2]) - 2); x <= std::min(fw - 1, int(p[0] + p[2]) + 2); x++)
 			{
@@ -417,6 +421,7 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my, void *layer
 				{
 					float sc = float(s >> (c * 8) & 0xFF), want = sc * (1 - dark);
 					want += (a * (c == 0 ? 0.95f : c == 1 ? 0.85f : 0.75f) - want) * ice; // toward pale blue (b, g, r)
+					want += (a * (c == 0 ? 1.f : c == 1 ? 0.97f : 0.8f) - want) * zap;  // toward blue-white
 					int v = int(d >> (c * 8) & 0xFF) - int(sc) + int(want);
 					out |= uint32_t(std::clamp(v, 0, 255)) << (c * 8);
 				}
@@ -472,10 +477,12 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 	}
 	auto &elements = SimulationData::CRef().elements;
 	bool spark = false;
+	zapped = std::max(0, zapped - 1);
 	for (int i : touching)
 	{
 		int t = sim->parts[i].type;
 		if (t == PT_SPRK) spark = true;
+		if (t == PT_SPRK || t == PT_ELEC || t == PT_LIGH) zapped = 30;
 		if (t == PT_ACID && sim->rng.chance(1, 8)) sim->kill_part(i);
 		if (t == PT_DEST || t == PT_BOMB || t == PT_SING)
 		{

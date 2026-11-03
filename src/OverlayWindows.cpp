@@ -223,7 +223,7 @@ namespace
 		bool buddy = false;                      // Interactive Buddy (OverlayBuddy; his file: Overlay.Fun.BuddySwf)
 		bool buddyPets = false;                  // the pets notice him (OverlayBuddy reads Overlay.Fun.BuddyPets)
 		bool buddyLooks = false;                 // he looks wet and frosted (Overlay.Fun.BuddyLooks)
-		bool buddyTracks = false, buddySplash = false, buddyFireman = false, buddyCarry = false; // footprints, splashes, he puts out fires, carries sand (Overlay.Fun.Buddy*)
+		bool buddyTracks = false, buddySplash = false, buddyFireman = false, buddyCarry = false, buddyGlow = false; // footprints, splashes, he puts out fires, carries sand (Overlay.Fun.Buddy*)
 		// the Buddy tab (OverlayBuddy reads them from the prefs): his size and speech bubbles' (%), toys at once (0: no
 		// limit), standing on the active window, smoothing, speech
 		float buddySize = 100, buddySpeechSize = 100, buddyToys = 6, buddyVolume = 50;
@@ -349,6 +349,7 @@ namespace
 		{ L"Buddy and the sim" },
 		Check(L"Pets meet Buddy", L"The pets walk over to Buddy and hop hello, and run when he is thrown past them or something blows up by him", &fun.buddyPets, "Overlay.Fun.BuddyPets"),
 		Check(L"Buddy gets wet and frosty", L"Water and rain leave Buddy darker for a while, and anything below -50 C (cryo, liquid nitrogen) frosts him pale blue", &fun.buddyLooks, "Overlay.Fun.BuddyLooks"),
+		Check(L"Buddy glows when shocked", L"A spark, lightning or electrons running through Buddy make him flicker bright blue-white for half a second. (Sparks already run on through him into metal he touches, and into metal powder he carries)", &fun.buddyGlow, "Overlay.Fun.BuddyGlow"),
 		Check(L"Footprints", L"Walking through sand and other powders, Buddy's feet push it aside and leave dents; with wet feet he leaves drops of water on dry ground", &fun.buddyTracks, "Overlay.Fun.BuddyTracks"),
 		Check(L"Splash", L"Thrown into sand or water, Buddy sends it flying up and out around where he lands", &fun.buddySplash, "Overlay.Fun.BuddySplash"),
 		Check(L"Fireman", L"When something burns near Buddy (and he isn't on fire himself), he sprays water at it from his hand for a few seconds, then rests before the next fire", &fun.buddyFireman, "Overlay.Fun.BuddyFireman"),

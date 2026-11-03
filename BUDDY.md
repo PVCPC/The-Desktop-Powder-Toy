@@ -144,7 +144,9 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
 ## 4c. More interactivity (ideas agreed 2026-11-03; first: footprints, splash, fireman)
 Each one is a toggle with a description in the Fun tab (Buddy section), off by default, like the 4. extras.
 He feels the sim:
-- [ ] Electricity lights him up: he glows while a spark runs through him, and passes it on to what he holds.
+- [x] Electricity lights him up: he glows while a spark runs through him, and passes it on to what he holds.
+      Done (Overlay.Fun.BuddyGlow): SPRK, ELEC or LIGH touching him: 0.5 s blue-white flicker; carried metal powder
+      already sparks (it touches his hand).
 - [ ] Big blasts daze him: knocked out a few seconds, stars over his head, then he gets up.
 - [ ] He gets dirty: sand, coal dust and soot stick to him as a tint (like wet and frost); he shakes it off later.
 - [ ] He runs from fire and lava (he doesn't now: only the pets do): away from them, behind a window or icon.
