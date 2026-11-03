@@ -185,6 +185,7 @@ Games:
       Stun Gun -> sparks into what it touches; Shotgun pellets: check they are bullets too;
       objects (objectList): Baseballs, Rubber Balls, Bowling Balls, Infants, Magical Orb, Radio, Flail push sand and water
       and float or sink in it, like Buddy's own parts. Explosions (Grenades, Mines, Missiles, Explode At Mouse): already TPT blasts.
+      User said yes to all (2026-11-03). Plus: the Radio playing makes the pets dance too (Buddy dances to it in the game).
 - [x] Fireman: when fire starts he grabs water and puts it out, happy if he saves a window. (Overlay.Fun.BuddyFireman:
       sprays water from his hand 3 s at fire 40-250 px away, rests 10 s; no "happy" yet, needs the game's emotes)
 
