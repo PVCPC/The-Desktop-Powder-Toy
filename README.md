@@ -53,6 +53,11 @@ What's new
 - **Small extras** (switches in the Fun tab, off by default): gravity leans toward the window you are using; weekday
   weather (Monday rain, Tuesday fog, Wednesday hail, Thursday snow, Friday leaves); typing puffs cold sparks from the
   text cursor.
+- **Interactive Buddy** (Fun tab, off by default): the buddy from the Flash game Interactive Buddy lives on your desktop
+  in front of the sim. Sand piles on him and buries him, water floats him, air and explosions throw him, fire, acid and
+  sparks hurt him, and his own items (hoses, flamethrower, guns, gravity vortexes, stun gun, his toys) work on the sim
+  too, each a switch. **The game is not included**: bring your own copy (Interactive Buddy v1.01 or v1.02, a .swf
+  file) and pick it with Choose SWF. Your file is only read, never copied or uploaded. Windows only for now.
 - **The Fun tab** (everything off by default; each setting has its description under it, grouped as windows, breaking windows, marks, mouse and keyboard, taskbar and apps, pets, weather, and sky and holidays): stick figure pets that wander your windows and
   taskbar; snow, rain with lightning, leaves by the season, hail or low fog, drifting in the wind; pets run from fire, come over to a slow mouse pointer, scatter from a fast one and hop to greet you when
   you come back; the Recycle Bin eats sand that lands on it; sand hops to the beat

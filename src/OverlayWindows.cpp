@@ -3708,7 +3708,7 @@ namespace
 		{
 			using Style = Text::Style;
 			auto c = Content();
-			int pw = c.right - c.left, ph = S(1700);
+			int pw = c.right - c.left, ph = S(1800); // (room for the Buddy paragraph)
 			Canvas page;
 			page.Resize(pw, ph);
 			page.RoundRect(0, 0, pw, ph, 0, theme->page, theme->page, 255); // in the look's page, heading and ink colours
@@ -3905,6 +3905,8 @@ namespace
 				     L"Pick a material in the Elements tab, then draw anywhere on your desktop. Ctrl+Alt+E shows or hides this window.", body);
 				y = bottom + S(18);
 			}
+			header(L"Interactive Buddy");
+			y = Para(x0, y, x1, L"The buddy from the Flash game Interactive Buddy can live on your desktop in front of the sim: sand piles on him, water floats him, fire burns him, and his own items spray real water, fire and gravity into it. The game isn't included: bring your own copy (Interactive Buddy v1.01 or v1.02, a .swf file) and pick it in the Fun tab with Choose SWF. Your file is only read, never copied.", body) + S(18);
 
 			// Shortcut sections: a coloured heading and rule, then keycaps and what they do. "|" separates
 			// alternatives, "+" keys pressed together.

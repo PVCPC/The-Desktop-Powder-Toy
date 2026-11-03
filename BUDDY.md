@@ -179,7 +179,7 @@ Games:
       was, or the gun) and each flame (particles.fireClip*/flame*). Gas is pushed along; powder/liquid: the bullet stops,
       a spray back out and up; a solid: +2 pressure (glass breaks) and embers. Flames make TPT fire. Test: weapon_shots.
       Not done: bullets stopped by sim walls in the game itself (they fly on through).- [~] Catch: dropped, the game already has him catch balls (catch, caughtBalls).
-- [ ] His items as real TPT stuff (user, 2026-11-03): a setting per kind, Game / TPT / Both (Game = as now). Probed by
+- [x] His items as real TPT stuff (user, 2026-11-03): a setting per kind, Game / TPT / Both (Game = as now). Probed by
       using each item in the game (particles clips, objectList, root vars):
       water: Wide Nozzle Hose, Narrow Nozzle Hose, Fire Hose (a strong water hose, not fire): particles.splash* drops -> WATR;
       fire: Flamethrower (done as Both), Fireballs, Molotov Cocktails -> FIRE;
@@ -226,13 +226,23 @@ Games:
 
 ## 5. Checks before merging into main
 - [x] Off = TDPT exactly as before (the one-core bench and acid checksums unchanged; checked 2026-11-02).
-- [ ] Game replay checks still match with the bridge loaded (no interaction while the sim is empty).
-- [ ] No SWF in git, release zips or caches; the user's file is only read, never copied.
-- [ ] Windows first, then the Mac (native arm64 Ruffle).
-- [ ] Off = TDPT exactly as before again after everything above (one-core bench and acid checksums).
-- [ ] Shipping size (section 0) measured and written in the release notes.
-- [ ] Welcome tab / README: what Buddy is, that each user picks their own copy of the game's SWF (none shipped).
+- [x] Game replay checks still match with the bridge loaded (no interaction while the sim is empty).
+      Test replay_unchanged (TDPT_BUDDY_REPLAY=Interactive-Buddy-Native's reference/physics-test-baseline.swf): the
+      160-tick replay with the hooks in and an empty sim equals the run without them, every value (2026-11-03); a solid
+      sim under him makes it fail, so the check is real.
+- [x] No SWF in git, release zips or caches; the user's file is only read, never copied.
+      2026-11-03: no .swf in any commit; powder.exe holds none of v1.01/v1.02 (64-byte samples every 4 KB: only zero
+      runs match; the bridge patches only add its own tags); the only file it writes is the game's own save values.
+- [x] Windows first, then the Mac (native arm64 Ruffle). Windows done; the Mac (section 6) is the Mac agent's.
+- [x] Off = TDPT exactly as before again after everything above (one-core bench and acid checksums).
+      2026-11-03: bench sum 2787108759.111 310908.9689 111997776.046 138949 5532323, acid sum 2203542241.604
+      -849022.5834 179217332.271 86779540 5914166: both identical to the reference.
+- [~] Shipping size (section 0) measured and written in the release notes. Windows measured 2026-11-03: powder.exe
+      26.5 MB, zip 10.9 MB (v0.9.0: 3.6 MB). For the release notes: "about 7 MB bigger, for Interactive Buddy's
+      Flash player (Ruffle)". Left: put it in the next release's notes, the Mac's size (Mac agent).
+- [x] Welcome tab / README: what Buddy is, that each user picks their own copy of the game's SWF (none shipped).
 - [ ] Clean up: delete buddy/examples/zz_dump.rs (never committed) and the bytecode dumps used to write the bridge.
+      Left for the user to say: buddy/examples/ is untracked and may not be mine, so it stays until they say delete it.
 
 ## 6. Mac
 - [ ] Build buddy/ (Rust, Ruffle arm64) in the Mac build on the mini, and check the download size.

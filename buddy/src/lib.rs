@@ -1546,6 +1546,36 @@ mod tests {
     use ruffle_core::external::Value;
     use sha2::Digest;
     // needs the user's copy: TDPT_BUDDY_SWF=<path to Interactive Buddy v1.01 or v1.02.swf> cargo test
+    // with the bridge's hooks in and the sim empty, the game's own 160-tick physics replay (Interactive Buddy Native's
+    // fixture, TDPT_BUDDY_REPLAY=<its reference/physics-test-baseline.swf>) gives exactly what it gives without them
+    #[test]
+    fn replay_unchanged() {
+        let Some(path) = std::env::var_os("TDPT_BUDDY_REPLAY") else { return };
+        let run = |hooked: bool| {
+            let movie = ruffle_core::tag_utils::movie_from_path(&path, None).unwrap();
+            let player = ruffle_core::PlayerBuilder::new().with_movie(movie).with_autoplay(true).with_player_version(Some(32)).with_viewport_dimensions(550, 400, 1.0).build();
+            let ground = std::sync::Arc::new(std::sync::Mutex::new(super::Ground::default()));
+            let mut p = player.lock().unwrap();
+            p.preload(&mut ruffle_core::limits::ExecutionLimit::none());
+            for _ in 0..600 {
+                p.run_frame();
+                // in once the game's functions are there (its first replay tick), as frame() does once it's ready
+                if hooked && p.get_root_variable("__testTick") == Value::Number(1.0) {
+                    super::hook_ground(&mut p, &ground);
+                }
+                if p.get_root_variable("__testDone") == Value::String("true".into()) {
+                    let Value::String(out) = p.get_root_variable("__testOutput") else { panic!("no output") };
+                    return (out, ground.lock().unwrap().parts.len());
+                }
+            }
+            panic!("replay never finished");
+        };
+        let ((plain, _), (hooked, parts)) = (run(false), run(true));
+        assert!(parts > 0, "the hooks never ran");
+        assert_eq!(plain.lines().count(), 160);
+        assert!(plain == hooked, "the bridge changed the game's physics");
+    }
+
     #[test]
     fn menu_lines() {
         let mut out = String::new();
