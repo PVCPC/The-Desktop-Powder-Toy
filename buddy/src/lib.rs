@@ -183,6 +183,7 @@ const BANG: u16 = 0x200; // DEST, BOMB, a singularity: blows up on him
 const WINDOW: u16 = 0x400; // a window or icon: its sides stop him like they stop powder; he's in front of it otherwise
 const POWDER: u16 = 0x800; // a powder (sand, snow): buried in it, he digs up through it (DIG)
 const DIG: u32 = 40; // frames his head is deep in powder before he digs out
+const ICE: u16 = 0x1000; // ice: a part closed in by it is held there until it melts (or he's dragged out)
 const ACID: u16 = 31; // a kind: acid, a liquid (TPT weight 10) that eats him
 const EATER: u16 = 30; // a kind: VOID or a black hole, which swallows him (he comes back at the top)
 const PORTAL: u16 = 29; // a kind: a portal in, which moves him to its way out (Ground::exit)
@@ -284,6 +285,17 @@ impl Ground {
         let e = r + 2.0;
         (y - e) as i32 <= y as i32
             && ((y - e) as i32..y as i32).any(|py| ((x - e) as i32..=(x + e) as i32).any(|px| (px as f64 + 0.5 - x).hypot(py as f64 + 0.5 - y) <= e && self.cell(px, py) & POWDER != 0))
+    }
+
+    // ice all round a part (most of a ring just outside it): frozen in
+    fn encased(&self, x: f64, y: f64, r: f64) -> bool {
+        let (mut n, mut all) = (0, 0);
+        for k in 0..32 {
+            let a = k as f64 * std::f64::consts::TAU / 32.0;
+            all += 1;
+            n += (self.cell((x + a.cos() * (r + 1.5)).floor() as i32, (y + a.sin() * (r + 1.5)).floor() as i32) & ICE != 0) as u32;
+        }
+        n * 10 >= all * 7
     }
 
     // a part's circle touches a window
@@ -464,7 +476,11 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
                 x = ox;
                 xv *= -0.3;
             }
-            let out = if held { None } else { g.push_out(&mut x, &mut y, &mut xv, &mut yv, r) };
+            let frozen = !held && ox.is_finite() && oy.is_finite() && g.encased(x, y, r);
+            if frozen {
+                (x, y, xv, yv) = (ox, oy, 0.0, 0.0);
+            }
+            let out = if held || frozen { None } else { g.push_out(&mut x, &mut y, &mut xv, &mut yv, r) };
             if part == "head" {
                 covered = g.covered(x, y, r);
             }
@@ -495,7 +511,7 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
                 }
             }
             standing |= part.ends_with("Leg") && landed;
-            if wet || blown || cold > 0 || out.is_some() || landed || g.dig {
+            if wet || blown || cold > 0 || out.is_some() || landed || g.dig || frozen {
                 for (f, n) in [("x", x), ("y", y), ("xv", xv), ("yv", yv)] {
                     v.set(&format!("{part}.{f}"), Value::Number(n));
                 }
@@ -1364,6 +1380,20 @@ mod tests {
         assert!(yv < 0.0 && xv < 1.0, "bounces up with friction: {xv} {yv}");
         assert!(g.under(x, y, 10.0));
         assert!(g.push_out(&mut x, &mut y, &mut xv, &mut yv, 10.0).is_none());
+    }
+
+    #[test]
+    fn encased_in_ice() {
+        // ice everywhere but a hole of radius 11 round (100, 100): closed in a pixel from a part of radius 10
+        let ice = |hole: f64| super::Ground {
+            rect: [0, 0, 200, 200],
+            cells: (0..200 * 200).map(|i| if ((i % 200) as f64 + 0.5 - 100.0).hypot((i / 200) as f64 + 0.5 - 100.0) > hole { 1 | super::ICE } else { 0 }).collect(),
+            ..Default::default()
+        };
+        assert!(ice(11.0).encased(100.0, 100.0, 10.0));
+        assert!(!ice(40.0).encased(100.0, 100.0, 10.0), "room round it: not held");
+        let half = super::Ground { rect: [0, 0, 200, 200], cells: (0..200 * 200).map(|i| if i / 200 >= 100 { 1 | super::ICE } else { 0 }).collect(), ..Default::default() };
+        assert!(!half.encased(100.0, 95.0, 10.0), "standing on ice isn't frozen in");
     }
 
     // a block under him: he lands on it and stands there instead of falling to the bottom of the stage

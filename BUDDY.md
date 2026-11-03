@@ -135,14 +135,21 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
       solids. Checked in TDPT: buried under a 320x340 px block of sand, out on top of the pile in about 10 s.
 - [x] Weather hits him: snow piles on his head, rain makes him wet (darker tint).
       Done (Fun "Buddy gets wet and frosty"): cool liquid darkens a part for 10 s, -50 C or colder frosts it pale blue; fire dries him.
-- [ ] Wallpaper and window marks from his fire and acid, like the rest of the sim.
+- [x] Wallpaper and window marks from his fire and acid, like the rest of the sim.
+      Already so: his fire is real sim FIRE (OverlayBuddy::Step), which scorches windows and the wallpaper like any
+      fire; he has no acid of his own.
 
 ## 4b. Elements he doesn't react to yet
-- [ ] Clone (CLNE, PCLN, BCLN, ACLN...): touching him copies nothing; decide (it can't clone him, so: solid, as now?).
-- [ ] Freezing solid: water that turns to ice around him should hold him (he's encased until it melts or he's
+- [x] Clone (CLNE, PCLN, BCLN, ACLN...): touching him copies nothing; decide (it can't clone him, so: solid, as now?).
+      Decided: solid, as now.
+- [x] Freezing solid: water that turns to ice around him should hold him (he's encased until it melts or he's
       knocked out), not only slow him.
-- [ ] Room-temperature gases (GAS, CO2, OXYG, HYGN, smoke...): they pass through him; gases should drift around him
+      Done: ICEI is 0x1000 in the ground map; a part with ice on 70% of a ring just outside it stays put
+      (Ground::encased, test encased_in_ice) until it melts or he's dragged.
+- [x] Room-temperature gases (GAS, CO2, OXYG, HYGN, smoke...): they pass through him; gases should drift around him
       and push him a little like air, flammable ones catch from his fire.
+      Already so: his parts are pixel walls to every particle (gases go round him), he feels the air that moves them,
+      and his fire is real FIRE, which lights GAS and HYGN.
 - [ ] Go through TPT's whole element list once and note each one's effect on him (or none), so nothing is missed.
 
 ## 5. Checks before merging into main

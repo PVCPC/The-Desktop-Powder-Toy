@@ -259,7 +259,7 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my, void *layer
 	// portals in as 29; then how hot it is (0x20 60 C+, 0x40
 	// 400 C+: sets him on fire, 0x60 -50 C or colder), 0x80 a spark or electron (shocks him), 0x100 caustic gas, radiation
 	// or virus (hurts), 0x200 DEST, BOMB or a singularity (blows up on him), 0x800 a powder (buried, he digs up through
-	// it); light (PHOT) warms him
+	// it), 0x1000 ice (closed in by it, he's held until it melts); light (PHOT) warms him
 	int32_t r[4];
 	tdpt_buddy_area(buddy, r);
 	r[2] = std::clamp(r[2], 0, XRES * 2), r[3] = std::clamp(r[3], 0, YRES * 2);
@@ -293,6 +293,7 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my, void *layer
 			int t = TYP(p);
 			if (t == PT_CAUS || t == PT_VIRS || t == PT_VRSS || t == PT_VRSG) c |= 0x100;
 			if (t == PT_DEST || t == PT_BOMB || t == PT_SING) c |= 0x200;
+			if (t == PT_ICEI) c |= 0x1000;
 			auto temp = sim->parts[ID(p)].temp - 273.15f;
 			if (int f = temp >= 400 ? 0x40 : temp >= 60 ? 0x20 : temp <= -50 ? 0x60 : 0) c = uint16_t((c & ~0x60) | f);
 			if (TYP(p) == PT_SPRK) c |= 0x80;
