@@ -48,6 +48,7 @@ namespace
 	int dirt[8] = {};             // how dirty each part is, 0-3600 (Overlay.Fun.BuddyDirt)
 	int zapped = 0;               // ticks he still glows from a shock (Overlay.Fun.BuddyGlow)
 	int fleeRest = 0;             // ticks before he runs from fire again (Overlay.Fun.BuddyFlee)
+	int hidden = -1;              // the game's own effects last told to hide (hide: command)
 	double lastSpeed[8];          // each part's speed last tick (a splash: fast, then stopped by sand or water)
 	int hose = 0, hoseRest = 0;   // fireman: ticks left spraying, and before he looks for fire again
 	float hoseX, hoseY;           // the fire he is putting out
@@ -592,10 +593,22 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 	// he dances (to his radio): the pets dance with him
 	for (size_t s = 0; s < shot && prefs.Get("Overlay.Fun.BuddyDance", false); s++)
 		if (shots[s * 5 + 4] == 3) sim->petDance = sim->currentTick + 30;
+	// his hoses (Overlay.Fun.BuddyWater): each new drop is a little TPT water flying on as the drop does (his frames to
+	// TPT's ticks: 0.6 the speed); BuddyWaterOnly hides the game's own drops, so only TPT's are seen
+	bool water = prefs.Get("Overlay.Fun.BuddyWater", false);
+	if (int hide = water && prefs.Get("Overlay.Fun.BuddyWaterOnly", false) ? 1 : 0; hide != hidden)
+		tdpt_buddy_command(buddy, ("hide:" + std::to_string(hide)).c_str()), hidden = hide;
+	for (size_t s = 0; s < shot && water; s++)
+		if (double *b = shots + s * 5; b[4] == 4)
+			for (int k = 0; k < 3; k++)
+				if (int x = int(b[0]) + sim->rng.between(-2, 2), y = int(b[1]) + sim->rng.between(-2, 2); empty(x, y))
+					if (int i = sim->create_part(-1, x, y, PT_WATR); i >= 0)
+						sim->parts[i].vx = float(std::clamp(b[2] * 0.6, -25.0, 25.0) + sim->rng.uniform01() - 0.5),
+						sim->parts[i].vy = float(std::clamp(b[3] * 0.6, -25.0, 25.0) + sim->rng.uniform01() - 0.5);
 	for (size_t s = 0; s < shot && prefs.Get("Overlay.Fun.BuddyWeapons", false); s++)
 	{
 		double *b = shots + s * 5;
-		if (b[4] == 3) continue;
+		if (b[4] >= 3) continue;
 		if (b[4] == 2)
 		{
 			int x = int(b[0]) + sim->rng.between(-3, 3), y = int(b[1]) + sim->rng.between(-3, 3);

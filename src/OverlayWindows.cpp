@@ -223,7 +223,7 @@ namespace
 		bool buddy = false;                      // Interactive Buddy (OverlayBuddy; his file: Overlay.Fun.BuddySwf)
 		bool buddyPets = false;                  // the pets notice him (OverlayBuddy reads Overlay.Fun.BuddyPets)
 		bool buddyLooks = false;                 // he looks wet and frosted (Overlay.Fun.BuddyLooks)
-		bool buddyTracks = false, buddySplash = false, buddyFireman = false, buddyCarry = false, buddyGlow = false, buddyWeapons = false, buddyFlee = false, buddyDirt = false, buddyDance = false, buddyFeed = false; // footprints, splashes, he puts out fires, carries sand, his guns, runs from fire, dirt, radio, feeding (Overlay.Fun.Buddy*)
+		bool buddyTracks = false, buddySplash = false, buddyFireman = false, buddyCarry = false, buddyGlow = false, buddyWeapons = false, buddyFlee = false, buddyDirt = false, buddyDance = false, buddyFeed = false, buddyWater = false, buddyWaterOnly = false; // footprints, splashes, he puts out fires, carries sand, his guns, runs from fire, dirt, radio, feeding, hoses (Overlay.Fun.Buddy*)
 		// the Buddy tab (OverlayBuddy reads them from the prefs): his size and speech bubbles' (%), toys at once (0: no
 		// limit), standing on the active window, smoothing, speech
 		float buddySize = 100, buddySpeechSize = 100, buddyToys = 6, buddyVolume = 50;
@@ -359,6 +359,8 @@ namespace
 		Check(L"Buddy gets dirty", L"Coal, dust, gunpowder, clay, oil, broken metal and smoke leave dark smudges on Buddy, more the longer he's in them. Water washes them off; otherwise they wear off in about a minute", &fun.buddyDirt, "Overlay.Fun.BuddyDirt"),
 		Check(L"Pets dance to Buddy's radio", L"When Buddy dances to his radio, the desktop pets dance along with him", &fun.buddyDance, "Overlay.Fun.BuddyDance"),
 		Check(L"Buddy feeds the pets", L"Now and then, when Buddy is calm and a pet is near, he drops a few seeds for it. Pets go and eat seeds near them", &fun.buddyFeed, "Overlay.Fun.BuddyFeed"),
+		Check(L"Buddy's hoses spray TPT water", L"Water from Buddy's hoses (wide, narrow and fire hose) is also real TPT water: it soaks sand, puts out fires and floods", &fun.buddyWater, "Overlay.Fun.BuddyWater"),
+		Check(L"Only TPT water from his hoses", L"With the one above: the game's own water drops are hidden, so his hoses spray only TPT water (Buddy still feels the spray)", &fun.buddyWaterOnly, "Overlay.Fun.BuddyWaterOnly"),
 	};
 	bool BuddyTabShown() { return !GlobalPrefs::Ref().Get("Overlay.Fun.BuddySwf", ByteString("")).empty(); }
 	// Interactive Buddy's file: the game's .swf, from the user (turns him on)

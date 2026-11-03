@@ -153,6 +153,8 @@ struct Ground {
     booms: Vec<[f64; 3]>,         // the game's explosions since TDPT last asked: x, y, power (1 = its bomb)
     shots: Vec<[f64; 5]>,         // his weapons since TDPT last asked: a bullet's path this frame (x0, y0, x1, y1, 1) or a flame (x, y, x, y, 2)
     bullets: Vec<(f64, f64)>,     // the game's bullets last frame: where each was
+    drops: Vec<String>,           // his hoses' drops last frame (their clips' names)
+    hide: u8,                     // the game's own effects TDPT shows as the sim's instead, not drawn: 1 his hoses' water
     game_grav: f64,               // the game's grav this frame, before that
     ledge: Option<Ledge>,         // the active window's edges he can stand on (as in the desktop app)
     carry: (f64, f64),            // how far that window moved while he stood on it, not yet applied
@@ -198,7 +200,7 @@ const POSE: [(f64, f64); 6] = [(0.0, 0.0), (0.0, -39.4), (-22.1, -10.2), (22.1, 
 
 impl Default for Ground {
     fn default() -> Self {
-        Self { rect: [0; 4], cells: Vec::new(), want: [0; 4], last: (400.0, 300.0), air_rect: [0; 4], air: Vec::new(), cell: 4, before: ([0; 4], Vec::new()), calm: 0, zap: None, gravity: (0.0, 1.0), game_grav: 1.0, exit: None, jumped: 99, eaten: false, parts: Vec::new(), bang: None, booms: Vec::new(), shots: Vec::new(), bullets: Vec::new(), ledge: None, carry: (0.0, 0.0), buried: 0, dig: false, support: 0 }
+        Self { rect: [0; 4], cells: Vec::new(), want: [0; 4], last: (400.0, 300.0), air_rect: [0; 4], air: Vec::new(), cell: 4, before: ([0; 4], Vec::new()), calm: 0, zap: None, gravity: (0.0, 1.0), game_grav: 1.0, exit: None, jumped: 99, eaten: false, parts: Vec::new(), bang: None, booms: Vec::new(), shots: Vec::new(), bullets: Vec::new(), drops: Vec::new(), hide: 0, ledge: None, carry: (0.0, 0.0), buried: 0, dig: false, support: 0 }
     }
 }
 
@@ -609,9 +611,26 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
             let (x, y) = (num(v, "body.x"), num(v, "body.y"));
             g.shots.push([x, y, x, y, 3.0]);
         }
+        let mut drops = Vec::new();
         if let Value::Object(clips) = v.get("particles") {
             for (name, clip) in clips {
                 let Value::Object(c) = clip else { continue };
+                // his hoses' water: drops ("smoke" clips with a strength) and their splashes where they hit; each drop new
+                // since last frame
+                if name.starts_with("smoke") && c.contains_key("strength") || name.starts_with("splash") {
+                    if g.hide & 1 != 0 {
+                        v.set(&format!("particles.{name}._visible"), Value::Bool(false));
+                    }
+                    let n = |k: &str| match c.get(k) { Some(Value::Number(n)) => *n, _ => f64::NAN };
+                    if name.starts_with("smoke") {
+                        // made after this hook last ran and moved once since: back at the nozzle
+                        if !g.drops.contains(&name) && g.shots.len() < 256 {
+                            g.shots.push([n("x") - n("xv"), n("y") - n("yv"), n("xv"), n("yv"), 4.0]);
+                        }
+                        drops.push(name);
+                    }
+                    continue;
+                }
                 if !(name.starts_with("fireClip") || name.starts_with("flame")) || g.shots.len() >= 256 {
                     continue;
                 }
@@ -620,6 +639,7 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
                 }
             }
         }
+        g.drops = drops;
     }))
     .ok();
     let g = ground.clone();
@@ -1045,6 +1065,10 @@ fn run(mut game: Game, shared: Arc<Mutex<Shared>>) {
         let drawn = catch_unwind(AssertUnwindSafe(|| {
             let mut p = game.player.lock().unwrap();
             for c in commands {
+                if let Some(hide) = c.strip_prefix("hide:") {
+                    game.ground.lock().unwrap().hide = hide.parse().unwrap_or(0);
+                    continue;
+                }
                 match c.strip_prefix("act:").map(str::to_owned) {
                     Some(action) => p.call_root_method("addAction", vec![action.into(), 5.into()]).ok(),
                     None => p.call_root_method("__hostMenuCommand", vec![c.into()]).ok(),
@@ -1361,7 +1385,7 @@ pub unsafe extern "C" fn tdpt_buddy_booms(b: *mut Buddy, out: *mut f64, max: usi
 }
 
 /// His weapons since the last call (up to max): x0, y0, x1, y1, kind each (1 a bullet's path, 2 a flame at x0, y0, 3 he
-/// dances at x0, y0); how many
+/// dances at x0, y0, 4 a new drop from his hose at x0, y0 with speed x1, y1 a frame); how many
 /// # Safety
 /// b is from tdpt_buddy_open; out has room for 5 * max.
 #[unsafe(no_mangle)]
@@ -1901,6 +1925,16 @@ mod tests {
             // v1.02: from the gun (the mouse), a frame's flight
             let b = bullets.iter().find(|s| s[4] == 1.0).unwrap_or_else(|| panic!("{bullets:?}"));
             assert!((b[0] - mx).hypot(b[1] - my) < 5.0 && (b[2] - b[0]).hypot(b[3] - b[1]) > 100.0, "{b:?}");
+        }
+        // his hoses: each new drop, at the nozzle (the mouse); hidden, the game's own drops aren't drawn
+        game.ground.lock().unwrap().hide = 1;
+        if let Some(drops) = fire(&mut game, "Fire Hose") {
+            let d = drops.iter().find(|s| s[4] == 4.0).unwrap_or_else(|| panic!("{drops:?}"));
+            assert!((d[0] - mx).hypot(d[1] - my) < 20.0 && d[2].hypot(d[3]) > 10.0, "{d:?}");
+            let mut p = game.player.lock().unwrap();
+            let Value::Object(clips) = p.get_root_variable("particles") else { panic!() };
+            let name = clips.keys().find(|n| n.starts_with("smoke")).expect("no drops").clone();
+            assert_eq!(p.get_root_variable(&format!("particles.{name}._visible")), Value::Bool(false));
         }
         // the Radio: placed, it plays and he dances to it
         if fire(&mut game, "Radio").is_some() {

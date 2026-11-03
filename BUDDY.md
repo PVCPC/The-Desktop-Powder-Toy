@@ -190,6 +190,9 @@ Games:
       User said yes to all (2026-11-03). Plus: the Radio playing makes the pets dance too (Buddy dances to it in the game).
       Radio dance DONE (Fun toggle "Pets dance to Buddy's radio"): a dance in his action queue (any priority) -> shots kind 3
       -> sim->petDance; pets step left, hop, step right, hop round where they stood (tested: stay within ~12 px).
+      Hoses DONE (Fun "Buddy's hoses spray TPT water" = Both, + "Only TPT water from his hoses" = TPT): drops are
+      particles.smoke* with strength (splash* where they hit); each new one -> shots kind 4 -> 3 WATR at 0.6 its speed;
+      hide:1 sets their _visible false (he still feels the spray). Game = both off. Next: fire items, gravity items.
 - [x] Fireman: when fire starts he grabs water and puts it out, happy if he saves a window. (Overlay.Fun.BuddyFireman:
       sprays water from his hand 3 s at fire 40-250 px away, rests 10 s; no "happy" yet, needs the game's emotes)
 
