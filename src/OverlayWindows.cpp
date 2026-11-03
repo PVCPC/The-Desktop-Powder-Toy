@@ -797,6 +797,7 @@ namespace
 	struct Theme
 	{
 		const wchar_t *name = L"";
+		const wchar_t *colour = nullptr; // one of its generation's colour schemes (themeColours), or none
 		uint32_t page = 0xFFFFFF, ink = 0x000000, pressedInk = 0x000000, heading = 0x1E395B, navInk = 0x1E395B, navSelInk = 0xFFFFFFFF /* none: navInk */, edge = 0x898C95, groupEdge = 0xD5DFE5;
 		uint32_t strip = 0xF0F0F0, tabOff[2] = { 0xF2F2F2, 0xE3E3E3 }, tabHot[2] = { 0xEAF6FD, 0xA7D9F5 }, tabHotEdge = 0x3C7FB1;
 		uint32_t status[3] = { 0xF7F9FC, 0xDCE5F1, 0xA0AFC3 }, nav[3] = { 0xF1F5FB, 0xE5EDF8, 0xA0AFC3 }; // top, bottom, edge
@@ -1321,9 +1322,9 @@ namespace
 
 		XP(int col = 0) : col(col)
 		{
-			static const wchar_t *names[] = { L"Windows XP", L"Windows XP Olive Green", L"Windows XP Silver" };
+			static const wchar_t *colours[] = { L"Blue", L"Olive Green", L"Silver" };
 			static const uint32_t inks[] = { 0xFFFFFF, 0xFFFFFF, 0x0E1010 }, shadows[] = { 0x0A1883, 0x41400A, 0xC7C2D1 }, headings[] = { 0x0046D5, 0x99540A, 0x0046D5 };
-			name = names[col], captionInk = inks[col], captionShadow = shadows[col];
+			name = L"Windows XP", colour = colours[col], captionInk = inks[col], captionShadow = shadows[col];
 			page = 0xFCFCFE, heading = headings[col], navInk = 0x215DC6, navSelInk = 0xFFFFFF, edge = 0x919B9C, groupEdge = 0xD0D0BF, strip = col == 2 ? 0xE0DFE3 : 0xECE9D8;
 			tabOff[0] = 0xFEFEFE, tabOff[1] = 0xECEBE6, tabHot[0] = 0xFFFFFF, tabHot[1] = 0xF4F3EE, tabHotEdge = 0xE68B2C;
 			status[0] = status[1] = strip, status[2] = 0xACA899;
@@ -2055,8 +2056,16 @@ namespace
 	Glass glassTheme;
 	Theme *const themes[] = { &threeTheme, &ninetyFiveTheme, &ninetyEightTheme, &xpTheme, &vistaTheme, &sevenTheme, &eightTheme, &tenTheme, &elevenTheme, &classicMacTheme, &modernMacTheme, &templeTheme,
 		&system6Theme, &system7Theme, &aquaTheme, &lionTheme, &yosemiteTheme, &glassTheme, &xpOliveTheme, &xpSilverTheme }; // new ones at the end: the pref is the index
-	const std::vector<int> windowsThemes = { 0, 1, 2, 3, 18, 19, 4, 5, 6, 7, 8 }, macThemes = { 12, 13, 9, 14, 15, 16, 10, 17 };
+	const std::vector<int> windowsThemes = { 0, 1, 2, 3, 4, 5, 6, 7, 8 }, macThemes = { 12, 13, 9, 14, 15, 16, 10, 17 };
 	constexpr int templeIndex = 11;
+	// A generation's colour schemes, the first the one its picker shows (Windows XP: Blue, Olive Green, Silver)
+	const std::vector<std::vector<int>> themeColours = { { 3, 18, 19 } };
+	int Generation(int i)
+	{
+		for (auto &c : themeColours)
+			if (std::count(c.begin(), c.end(), i)) return c[0];
+		return i;
+	}
 	constexpr int defaultTheme = 4; // Vista
 	Theme *theme = &vistaTheme;
 
@@ -3432,14 +3441,14 @@ namespace
 			int pw = c.right - c.left, ph = S(1700);
 			Canvas page;
 			page.Resize(pw, ph);
-			page.RoundRect(0, 0, pw, ph, 0, 0xFFFFFF, 0xFFFFFF, 255);
+			page.RoundRect(0, 0, pw, ph, 0, theme->page, theme->page, 255); // in the look's page, heading and ink colours
 			std::swap(cv, page);
 			struct Link { RECT rc; std::function<void()> go; std::wstring tip; };
 			std::vector<Link> links;
 
 			int x0 = S(18), x1 = pw - S(18), y = S(14);
-			const Style title{ 22, FW_LIGHT, false, false, 0x1E395B }, subtitle{ 12, FW_NORMAL, true, false, 0x6D6D6D },
-			            link{ 12, FW_NORMAL, false, true, 0x0066CC }, body{ 12, FW_NORMAL, false, false, 0x1A1A1A },
+			const Style title{ 22, FW_LIGHT, false, false, theme->heading }, subtitle{ 12, FW_NORMAL, true, false, 0x6D6D6D },
+			            link{ 12, FW_NORMAL, false, true, 0x0066CC }, body{ 12, FW_NORMAL, false, false, theme->ink },
 			            note{ 11, FW_NORMAL, true, false, 0x6D6D6D }, footer{ 10, FW_NORMAL, false, false, 0x8A8A8A };
 
 			text->Draw(cv, x0, y, L"Welcome to The Powder Toy", title);
@@ -3775,13 +3784,16 @@ namespace
 			PushButton(x + S(200), top, S(40), L"\u2212", [setScale] { setScale(uiScale - 0.25f); }, L"Smaller windows and text");
 			PushButton(x + S(246), top, S(40), L"+", [setScale] { setScale(uiScale + 0.25f); }, L"Bigger windows and text");
 			y += S(116);
-			top = Group(x, y, w, S(108), L"Look");
-			int current = int(std::find(std::begin(themes), std::end(themes), theme) - std::begin(themes));
+			int current = int(std::find(std::begin(themes), std::end(themes), theme) - std::begin(themes)), gen = Generation(current);
+			const std::vector<int> *colours = nullptr;
+			for (auto &c : themeColours)
+				if (c[0] == gen) colours = &c;
+			top = Group(x, y, w, S(108) + (colours ? S(32) : 0), L"Look");
 			auto family = [&](int row, const wchar_t *label, const std::vector<int> &ids) {
 				int by = top + row * S(32), bx = x + S(200), bw = S(220);
-				bool in = std::count(ids.begin(), ids.end(), current) > 0;
+				bool in = std::count(ids.begin(), ids.end(), gen) > 0;
 				Caption(x + S(12), by, label);
-				PushButton(bx, by, bw, std::wstring(in ? themes[current]->name : L"\u2014"), [this, &ids, bx, by, bw] {
+				PushButton(bx, by, bw, std::wstring(in ? themes[gen]->name : L"\u2014"), [this, &ids, bx, by, bw] {
 					later = [this, &ids, rc = RECT{ bx, by, bx + bw, by + S(23) }] { PickTheme(ids, rc); };
 				}, L"Windows and menus look like this system's");
 				for (int i = 0, k = S(4), ax = bx + bw - S(20), ay = by + S(10); i <= k; i++) Line(cv, ax + i, ay + i, 2 * (k - i) + 1, 1, theme->ink); // the arrow
@@ -3789,7 +3801,14 @@ namespace
 			family(0, L"Windows", windowsThemes);
 			family(1, L"Mac", macThemes);
 			Toggle(x + S(12), top + 2 * S(32), L"TempleOS", current == templeIndex, true, [] { SetTheme(templeIndex); }, L"Windows and menus look like TempleOS");
-			y += S(116);
+			if (colours)
+			{
+				int cy = top + 3 * S(32), cx = x + S(200);
+				Caption(x + S(12), cy, L"Colour");
+				for (int i : *colours)
+					cx += Toggle(cx, cy, themes[i]->colour, i == current, true, [i] { SetTheme(i); }, std::wstring(themes[i]->name) + L" in " + themes[i]->colour) + S(18);
+			}
+			y += S(116) + (colours ? S(32) : 0);
 
 			auto &opts = Options();
 			top = Group(x, y, w, S(36) + 3 * S(24) + 2 * S(32), L"TPT settings");
@@ -4004,7 +4023,7 @@ namespace
 		void PickTheme(const std::vector<int> &ids, RECT rc)
 		{
 			HMENU m = CreatePopupMenu();
-			for (int i : ids) AppendMenuW(m, MF_STRING | (theme == themes[i] ? MF_CHECKED : 0), UINT(i + 1), themes[i]->name);
+			for (int i : ids) AppendMenuW(m, MF_STRING | (Generation(int(std::find(std::begin(themes), std::end(themes), theme) - std::begin(themes))) == i ? MF_CHECKED : 0), UINT(i + 1), themes[i]->name);
 			POINT p{ rc.left, rc.bottom };
 			ClientToScreen(hwnd, &p);
 			// ponytail: modal here, so the sim waits while the menu is open; NativeMenu's thread if that matters
