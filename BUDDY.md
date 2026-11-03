@@ -199,7 +199,10 @@ Games:
       Gravity DONE (Fun "Buddy's gravity items pull the sim"): gravitating + gravitatingx/y, _root.item names which
       (weak 1, shifter 2, strong 3) -> shots kind 5 -> powders/liquids/gases within 250 px get 0.3*k*(1.5-d/250) a tick
       toward it (a strong one lifts most of a sand pile). The shifter's grav 0 is NOT copied to TPT's global gravity.
-      Left of this list: objects (balls, infants, orb, radio, flail) pushing sand; stun gun sparks; shotgun pellets check.
+      Shotgun: checked, its pellets are bullets too (17 paths a shot), already hit the sim.
+      Stun gun DONE (in "Buddy's weapons hit the sim"): beingShocked -> shots kind 6 -> next tick the spark-through-him
+      path sparks conductors he touches (tested: a METL plate under him lights up).
+      Left of this list: objects (balls, infants, orb, radio, flail) pushing sand and floating in water.
 - [x] Fireman: when fire starts he grabs water and puts it out, happy if he saves a window. (Overlay.Fun.BuddyFireman:
       sprays water from his hand 3 s at fire 40-250 px away, rests 10 s; no "happy" yet, needs the game's emotes)
 

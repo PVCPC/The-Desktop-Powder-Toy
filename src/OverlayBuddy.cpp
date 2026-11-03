@@ -49,6 +49,7 @@ namespace
 	int zapped = 0;               // ticks he still glows from a shock (Overlay.Fun.BuddyGlow)
 	int fleeRest = 0;             // ticks before he runs from fire again (Overlay.Fun.BuddyFlee)
 	int hidden = -1;              // the game's own effects last told to hide (hide: command)
+	bool stunned = false;         // his stun gun was shocking him last tick (Overlay.Fun.BuddyWeapons)
 	double lastSpeed[8];          // each part's speed last tick (a splash: fast, then stopped by sand or water)
 	int hose = 0, hoseRest = 0;   // fireman: ticks left spraying, and before he looks for fire again
 	float hoseX, hoseY;           // the fire he is putting out
@@ -496,7 +497,7 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 	for (int i : touching)
 	{
 		int t = sim->parts[i].type;
-		if (t == PT_SPRK) spark = true;
+		if (t == PT_SPRK || stunned) spark = true; // a spark, or his stun gun: into the metal he touches
 		if (t == PT_SPRK || t == PT_ELEC || t == PT_LIGH) zapped = 30;
 		if (t == PT_ACID && sim->rng.chance(1, 8)) sim->kill_part(i);
 		if (t == PT_DEST || t == PT_BOMB || t == PT_SING)
@@ -619,8 +620,10 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 					if (int i = sim->create_part(-1, x, y, PT_WATR); i >= 0)
 						sim->parts[i].vx = float(std::clamp(b[2] * 0.6, -25.0, 25.0) + sim->rng.uniform01() - 0.5),
 						sim->parts[i].vy = float(std::clamp(b[3] * 0.6, -25.0, 25.0) + sim->rng.uniform01() - 0.5);
+	stunned = false;
 	for (size_t s = 0; s < shot && weapons; s++)
 	{
+		stunned |= shots[s * 5 + 4] == 6;
 		double *b = shots + s * 5;
 		if (b[4] >= 3) continue;
 		if (b[4] == 2)

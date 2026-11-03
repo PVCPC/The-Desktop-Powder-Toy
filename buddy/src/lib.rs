@@ -604,6 +604,10 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
             now.push((x, y));
         }
         g.bullets = now;
+        // his stun gun shocking him
+        if v.get("beingShocked") == Value::Bool(true) && g.shots.len() < 256 {
+            g.shots.push([num(v, "body.x"), num(v, "body.y"), 0.0, 0.0, 6.0]);
+        }
         // his gravity items: a vortex while held, the gravity shifter's point (kept till he's let go); how hard, 1-3
         if v.get("gravitating") == Value::Bool(true) && g.shots.len() < 256 {
             let pull = match v.get("item") {
@@ -1400,7 +1404,7 @@ pub unsafe extern "C" fn tdpt_buddy_booms(b: *mut Buddy, out: *mut f64, max: usi
 
 /// His weapons since the last call (up to max): x0, y0, x1, y1, kind each (1 a bullet's path, 2 a flame at x0, y0, 3 he
 /// dances at x0, y0, 4 a new drop from his hose at x0, y0 with speed x1, y1 a frame, 5 his gravity pulls to x0, y0, x1
-/// hard: 1 weak vortex, 2 gravity shifter, 3 strong vortex); how many
+/// hard: 1 weak vortex, 2 gravity shifter, 3 strong vortex, 6 his stun gun is shocking him); how many
 /// # Safety
 /// b is from tdpt_buddy_open; out has room for 5 * max.
 #[unsafe(no_mangle)]
@@ -1970,6 +1974,25 @@ mod tests {
             }
             let shots = std::mem::take(&mut game.ground.lock().unwrap().shots);
             assert!(shots.iter().any(|s| s[4] == 3.0), "not dancing: {shots:?}");
+        }
+        // the stun gun on his head: he's being shocked
+        if let Some(line) = menus.lines().find(|l| l.split('\t').nth(3) == Some("Stun Gun")) {
+            let pick = line.split('\t').nth(2).unwrap().to_owned();
+            game.player.lock().unwrap().call_root_method("__hostMenuCommand", vec![pick.into()]).unwrap();
+            for _ in 0..20 {
+                super::frame(&mut game, 25.0, mx, my, &mut out);
+            }
+            let n = |k: &str| match game.player.lock().unwrap().get_root_variable(k) { Value::Number(v) => v, o => panic!("{k} {o:?}") };
+            let (hx, hy) = (n("head.x"), n("head.y"));
+            game.ground.lock().unwrap().shots.clear();
+            game.player.lock().unwrap().handle_event(PlayerEvent::MouseMove { x: hx, y: hy });
+            game.player.lock().unwrap().handle_event(PlayerEvent::MouseDown { x: hx, y: hy, button: MouseButton::Left, index: None });
+            for _ in 0..3 {
+                super::frame(&mut game, 25.0, hx, hy, &mut out);
+            }
+            game.player.lock().unwrap().handle_event(PlayerEvent::MouseUp { x: hx, y: hy, button: MouseButton::Left });
+            let shots = std::mem::take(&mut game.ground.lock().unwrap().shots);
+            assert!(shots.iter().any(|s| s[4] == 6.0), "not shocked: {shots:?}");
         }
     }
 
