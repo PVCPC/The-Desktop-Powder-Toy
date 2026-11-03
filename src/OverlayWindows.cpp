@@ -85,6 +85,9 @@
 #include <shellapi.h>
 #include <dwmapi.h>
 #pragma comment(lib, "dwmapi.lib")
+#include <uxtheme.h>
+#include <vssym32.h>
+#pragma comment(lib, "uxtheme.lib")
 #include <commdlg.h>
 #pragma comment(lib, "comdlg32.lib")
 #include <shlobj.h>
@@ -1368,6 +1371,73 @@ namespace
 		}
 	};
 
+#ifdef _WIN32
+	// Windows' own drawing of a control (the visual style in use, its real Windows 11 parts on Windows 11): drawn over
+	// black and over white, the difference gives its alpha. False when Windows can't (no visual style).
+	bool NativePart(Canvas &cv, const wchar_t *cls, int part, int state, int x, int y, int w, int h)
+	{
+		static std::map<std::wstring, HTHEME> handles;
+		auto &t = handles[cls];
+		if (!t) t = OpenThemeData(nullptr, cls);
+		if (!t || w <= 0 || h <= 0) return false;
+		BITMAPINFO bi{};
+		bi.bmiHeader = { sizeof(BITMAPINFOHEADER), w, -h, 1, 32 };
+		HDC dc = CreateCompatibleDC(nullptr);
+		uint32_t *px[2];
+		HBITMAP bm[2];
+		RECT rc{ 0, 0, w, h };
+		for (int k = 0; k < 2; k++)
+		{
+			bm[k] = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, (void **)&px[k], nullptr, 0);
+			std::fill(px[k], px[k] + size_t(w) * h, k ? 0xFFFFFFFFu : 0xFF000000u);
+			SelectObject(dc, bm[k]);
+			DrawThemeBackground(t, dc, part, state, &rc, nullptr);
+		}
+		GdiFlush();
+		for (int j = 0; j < h; j++)
+			for (int i = 0; i < w; i++)
+			{
+				uint32_t b = px[0][size_t(j) * w + i], wh = px[1][size_t(j) * w + i];
+				int a = 255 - (int((wh >> 8) & 0xFF) - int((b >> 8) & 0xFF));
+				if (a <= 0) continue;
+				auto ch = [&](int sh) { return uint32_t(std::min(255, int((b >> sh) & 0xFF) * 255 / a)) << sh; };
+				cv.Blend(x + i, y + j, ch(16) | ch(8) | ch(0), uint8_t(a));
+			}
+		DeleteDC(dc);
+		DeleteObject(bm[0]), DeleteObject(bm[1]);
+		return true;
+	}
+
+	bool IsWindows11()
+	{
+		static int build = [] {
+			RTL_OSVERSIONINFOW v{ sizeof(v) };
+			auto get = (LONG(WINAPI *)(RTL_OSVERSIONINFOW *))GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlGetVersion");
+			return get && !get(&v) ? int(v.dwBuildNumber) : 0;
+		}();
+		return build >= 22000;
+	}
+#endif
+
+	// A look drawn by Windows itself where this PC is that Windows (Windows 11 on Windows 11), else by hand.
+	template<class Base> struct Native : Base
+	{
+#ifdef _WIN32
+		void Button(Canvas &cv, int x, int y, int w, int h, int state) override
+		{
+			if (!IsWindows11() || !NativePart(cv, L"BUTTON", BP_PUSHBUTTON, state == 2 ? PBS_PRESSED : state == 1 ? PBS_HOT : PBS_NORMAL, x, y, w, h)) Base::Button(cv, x, y, w, h, state);
+		}
+		void Tab(Canvas &cv, RECT rc, bool on, bool hot) override
+		{
+			if (!IsWindows11() || !NativePart(cv, L"TAB", TABP_TABITEM, on ? TIS_SELECTED : hot ? TIS_HOT : TIS_NORMAL, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top)) Base::Tab(cv, rc, on, hot);
+		}
+		bool CheckBox(Canvas &cv, int x, int y, int b, bool on, bool round, bool hot) override
+		{
+			return (IsWindows11() && NativePart(cv, L"BUTTON", round ? BP_RADIOBUTTON : BP_CHECKBOX, (on ? CBS_CHECKEDNORMAL : CBS_UNCHECKEDNORMAL) + hot, x, y, b, b)) || Base::CheckBox(cv, x, y, b, on, round, hot);
+		}
+#endif
+	};
+
 	template<class Base> struct Skinned : Base
 	{
 		static constexpr SkinPart captionParts[] = { SkinMin, SkinMax, SkinClose }; // by CaptionKind
@@ -2126,7 +2196,7 @@ namespace
 	Skinned<Seven> sevenTheme{ { skin_seven_png.AsCharSpan(), skin_seven_parts } };
 	Skinned<Eight> eightTheme{ { skin_eight_png.AsCharSpan(), skin_eight_parts } };
 	Skinned<Ten> tenTheme{ { skin_ten_png.AsCharSpan(), skin_ten_parts } };
-	Eleven elevenTheme;
+	Native<Eleven> elevenTheme;
 	Skinned<ClassicMac> classicMacTheme{ { skin_mac9_png.AsCharSpan(), skin_mac9_parts } };
 	Skinned<ModernMac> modernMacTheme{ { skin_macos_png.AsCharSpan(), skin_macos_parts } };
 	Temple templeTheme;
