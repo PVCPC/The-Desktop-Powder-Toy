@@ -328,12 +328,12 @@ namespace
 		Check(L"Holidays", L"Pumpkins roll about on Halloween, jelly hearts fall on Valentine's Day, fireworks go up after midnight on New Year's", &fun.holidays, "Overlay.Fun.Holidays"),
 
 		{ L"Interactive Buddy" },
-		Check(L"Interactive Buddy", L"The buddy from the Flash game Interactive Buddy lives on your desktop in front of the sim: drag him, throw him, give him toys. Bring your own copy of the game (Interactive Buddy v1.01, a .swf file; it isn't included) and pick it with Choose SWF. Once his file is chosen, his own settings are in the Buddy tab", &fun.buddy, "Overlay.Fun.Buddy"),
+		Check(L"Interactive Buddy", L"The buddy from the Flash game Interactive Buddy lives on your desktop in front of the sim: drag him, throw him, give him toys. Bring your own copy of the game (Interactive Buddy v1.01 or v1.02, a .swf file; v1.02 has the pistol and machine gun; it isn't included) and pick it with Choose SWF. Once his file is chosen, his own settings are in the Buddy tab", &fun.buddy, "Overlay.Fun.Buddy"),
 	};
 	// The Buddy tab (shown once his file is chosen): the desktop Interactive Buddy's own settings, then the sim's
 	FunRow buddyRows[] = {
 		{ L"Buddy" },
-		Check(L"Interactive Buddy", L"Turns him on or off. The game file is your own copy of Interactive Buddy v1.01 (a .swf file; it isn't included)", &fun.buddy, "Overlay.Fun.Buddy"),
+		Check(L"Interactive Buddy", L"Turns him on or off. The game file is your own copy of Interactive Buddy v1.01 or v1.02 (a .swf file; it isn't included)", &fun.buddy, "Overlay.Fun.Buddy"),
 		Slide(L"Size", L"How big Buddy is, whatever the sim's pixel size (100% is the game's own size)", &fun.buddySize, 25, 300, "Overlay.Buddy.Size", 8),
 		{ L"Windows", L"Walk through: windows don't touch him. Active window: as in the desktop Interactive Buddy, he stands on the top edge of the window you're using (and its bottom edge from inside it) and rides along when you move it. Solid: every window and icon is solid to him like it is to sand (needs Open windows are walls)", nullptr, nullptr, 0, 0, "Overlay.Buddy.Windows", 0, 1 },
 		Slide(L"Volume", L"How loud the game's sounds are (far left: silent)", &fun.buddyVolume, 0, 100, "Overlay.Buddy.Volume", 8),

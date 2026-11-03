@@ -30,7 +30,9 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
       (Windows; the Mac still needs its file picker.)
 - [x] Patch the user's SWF on load inside TDPT (today `tools/prepare_native_swf.py` needs Java + JPEXS): ship only our
       compiled bridge bytecode and splice it into their file in memory; refuse files that don't look like Interactive Buddy.
-      Done: `buddy/bridge/*.patch` hold only our inserted tags; v1.01 is checked by its hash before and after.
+      Done: `buddy/bridge/*.patch` hold only our inserted tags; v1.01 and v1.02 (2026-11-03: the pistol and machine gun) are
+      checked by their hash before and after. The v1.02 patches are v1.01's tags put at the same places (outline shape
+      583 at depth 0x99 where v1.01 has 580 at 0x88); all 27 tests pass on both.
 - [x] Run the game, and draw its frame in TDPT's overlay layer (same transparency rules as the sim). He runs on his
       own thread (about 1 ms a frame left on TDPT's).
       120 frames a second with smoothing on (60 off): only the drawn areas are read back from the GPU, a frame
@@ -155,6 +157,9 @@ He changes the sim:
 - [ ] He builds when bored: scoops sand into a little pile or castle.
 - [ ] He feeds his pets: drops plant or seed particles for them to eat.
 Games:
+- [ ] His weapons hit the sim: bullets (pistol, machine gun in v1.02, and the rest) knock particles about and break
+      what they hit; the flamethrower lights what burns (wood, plant, gunpowder, oil...); sand doesn't burn in TPT
+      but melts to glass if hot enough.
 - [ ] Catch: drop a ball of a material (sand, water, a bomb); he tries to catch it before it lands.
 - [x] Fireman: when fire starts he grabs water and puts it out, happy if he saves a window. (Overlay.Fun.BuddyFireman:
       sprays water from his hand 3 s at fire 40-250 px away, rests 10 s; no "happy" yet, needs the game's emotes)

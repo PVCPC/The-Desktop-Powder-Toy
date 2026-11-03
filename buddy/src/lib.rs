@@ -14,9 +14,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-// SHA-256 of Interactive Buddy v1.01 (uncompressed), the only version the bridge fits
-const ORIGINAL: &str = "76da8a05bfe3472afe4a2bca2c09486b5be614881d45621489fa2f2686d16b0f";
-const PATCHES: [&[u8]; 2] = [include_bytes!("../bridge/enhanced.patch"), include_bytes!("../bridge/native.patch")];
+// SHA-256 of each version the bridge fits (uncompressed), and its patches. v1.02 adds the pistol and machine gun.
+const VERSIONS: [(&str, [&[u8]; 2]); 2] = [
+    ("76da8a05bfe3472afe4a2bca2c09486b5be614881d45621489fa2f2686d16b0f", [include_bytes!("../bridge/enhanced.patch"), include_bytes!("../bridge/native.patch")]),
+    ("b39c6e324240dd1ba90e7f5314e3ecfb3256071c1fa4508cc1b7a06ed400ffdf", [include_bytes!("../bridge/enhanced102.patch"), include_bytes!("../bridge/native102.patch")]),
+];
 
 fn hex(data: &[u8]) -> String {
     data.iter().map(|b| format!("{b:02x}")).collect()
@@ -70,10 +72,11 @@ fn patch(mut swf: Vec<u8>) -> Result<Vec<u8>, String> {
         std::io::Read::read_to_end(&mut flate2::read::ZlibDecoder::new(&swf[8..]), &mut body).map_err(|e| e.to_string())?;
         swf = [b"FWS", &swf[3..4], &(body.len() as u32 + 8).to_le_bytes()[..], &body].concat();
     }
-    if hex(&Sha256::digest(&swf)) != ORIGINAL {
-        return Err("That file isn't Interactive Buddy v1.01".into());
-    }
-    for p in PATCHES {
+    let hash = hex(&Sha256::digest(&swf));
+    let Some((_, patches)) = VERSIONS.iter().find(|v| v.0 == hash) else {
+        return Err("That file isn't Interactive Buddy v1.01 or v1.02".into());
+    };
+    for p in patches {
         swf = apply(&swf, p);
         assert_eq!(Sha256::digest(&swf)[..], p[8..40], "bridge patch");
     }
@@ -1346,7 +1349,7 @@ mod tests {
     use ruffle_core::events::{MouseButton, PlayerEvent};
     use ruffle_core::external::Value;
     use sha2::Digest;
-    // needs the user's copy: TDPT_BUDDY_SWF=<path to Interactive Buddy v1.01.swf> cargo test
+    // needs the user's copy: TDPT_BUDDY_SWF=<path to Interactive Buddy v1.01 or v1.02.swf> cargo test
     #[test]
     fn menu_lines() {
         let mut out = String::new();
@@ -2050,8 +2053,13 @@ mod tests {
     #[test]
     fn patches_rebuild_native() {
         let Some(path) = std::env::var_os("TDPT_BUDDY_SWF") else { return };
-        let swf = super::patch(std::fs::read(path).unwrap()).unwrap();
-        assert_eq!(super::hex(&sha2::Sha256::digest(&swf)), "9720616ea241c1b7a4004c90b91ed100dfa21812701141a6bc89a961d28ae9eb");
+        let original = std::fs::read(path).unwrap();
+        let v101 = super::hex(&sha2::Sha256::digest(&original)) == super::VERSIONS[0].0;
+        let swf = super::patch(original).unwrap(); // (each patch's result is checked by its hash in there)
+        if v101 {
+            // the desktop app's own native build of v1.01
+            assert_eq!(super::hex(&sha2::Sha256::digest(&swf)), "9720616ea241c1b7a4004c90b91ed100dfa21812701141a6bc89a961d28ae9eb");
+        }
     }
 }
 
