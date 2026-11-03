@@ -150,7 +150,9 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
       and push him a little like air, flammable ones catch from his fire.
       Already so: his parts are pixel walls to every particle (gases go round him), he feels the air that moves them,
       and his fire is real FIRE, which lights GAS and HYGN.
-- [ ] Go through TPT's whole element list once and note each one's effect on him (or none), so nothing is missed.
+- [x] Go through TPT's whole element list once and note each one's effect on him (or none), so nothing is missed.
+      Done: BUDDY-ELEMENTS.md (every element, by his ground map's rules). Gap found and fixed: lightning (LIGH)
+      now shocks him like a spark.
 
 ## 5. Checks before merging into main
 - [x] Off = TDPT exactly as before (the one-core bench and acid checksums unchanged; checked 2026-11-02).

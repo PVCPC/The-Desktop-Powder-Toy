@@ -296,7 +296,7 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my, void *layer
 			if (t == PT_ICEI) c |= 0x1000;
 			auto temp = sim->parts[ID(p)].temp - 273.15f;
 			if (int f = temp >= 400 ? 0x40 : temp >= 60 ? 0x20 : temp <= -50 ? 0x60 : 0) c = uint16_t((c & ~0x60) | f);
-			if (TYP(p) == PT_SPRK) c |= 0x80;
+			if (TYP(p) == PT_SPRK || TYP(p) == PT_LIGH) c |= 0x80; // (lightning too)
 		}
 	tdpt_buddy_ground(buddy, r, ground.data());
 	// where that portal comes out
