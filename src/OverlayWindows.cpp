@@ -3652,21 +3652,29 @@ namespace
 
 			// Headers: H1 is the title, H2 a part of the page (with a rule), H3 a group of shortcuts.
 			auto header = [&](const wchar_t *name) {
-				const Style h2{ 17, FW_SEMIBOLD, false, false, 0x1E395B };
+				const Style h2{ 17, FW_SEMIBOLD, false, false, theme->heading };
 				text->Draw(cv, x0, y, name, h2);
 				y += text->Measure(L"Ag", h2).cy + S(3);
-				for (int i = x0; i < x1; i++) cv.Blend(i, y, 0xB9CDE5, 255);
+				for (int i = x0; i < x1; i++) cv.Blend(i, y, theme->groupEdge, 255);
 				y += S(12);
 			};
 
 			header(L"Getting started");
-			// The tip: a Vista information bar.
+			// The tip: in the look's tooltip
 			{
 				int top = y, tx = x0 + S(30);
 				int bottom = Para(tx + S(32), top + S(8), x1 - S(10),
 				                  L"Pick a material in the Elements tab, then draw anywhere on your desktop. Ctrl+Alt+E shows or hides this window.", body) + S(8);
-				cv.RoundRect(x0, top, x1 - x0, bottom - top, S(3), 0xFFFBE5, 0xFFF4C4, 255);
-				cv.RoundFrame(x0, top, x1 - x0, bottom - top, S(3), 0xE5C365, 255);
+				Canvas tip;
+				tip.Resize(x1 - x0, bottom - top);
+				theme->Popup(tip);
+				for (int j = 0; j < tip.h; j++)
+					for (int i = 0; i < tip.w; i++)
+						if (uint32_t c = tip.px[size_t(j) * tip.w + i], a = c >> 24; a) // (premultiplied: it was drawn over nothing)
+						{
+							auto ch = [&](int sh) { return std::min(255u, ((c >> sh) & 0xFF) * 255 / a) << sh; };
+							cv.Blend(x0 + i, top + j, ch(16) | ch(8) | ch(0), int(a));
+						}
 				cv.RoundRect(x0 + S(10), top + S(9), S(16), S(16), S(8), 0x3C8DDE, 0x1E5FAA, 255);
 				text->Draw(cv, x0 + S(16), top + S(9), L"i", Style{ 11, FW_BOLD, true, false, 0xFFFFFF });
 				text->Draw(cv, tx, top + S(8), L"Tip", Style{ 12, FW_BOLD, false, false, 0x7A5B00 });
@@ -3716,11 +3724,9 @@ namespace
 								kx += text->Measure(L"+").cx + S(3);
 							}
 							firstKey = false;
-							const Style cap{ 11, FW_SEMIBOLD, false, false, 0x2B2B2B };
+							const Style cap{ 11, FW_SEMIBOLD, false, false, theme->ink };
 							int cw = text->Measure(key, cap).cx + S(12), ch = S(20);
-							cv.RoundRect(kx, ky, cw, ch, S(3), 0xFDFDFD, 0xE4E7EB, 255);
-							cv.RoundFrame(kx, ky, cw, ch, S(3), 0xA9AFB8, 255);
-							for (int i = kx + S(2); i < kx + cw - S(2); i++) cv.Blend(i, ky + ch - 2, 0x8E959E, 120);
+							theme->Button(cv, kx, ky, cw, ch, 0); // a key: the look's push button
 							text->Draw(cv, kx + S(6), ky + (ch - text->Measure(key, cap).cy) / 2, key, cap);
 							kx += cw + S(3);
 						}
