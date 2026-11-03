@@ -243,7 +243,7 @@ Games:
       Flash player (Ruffle)". Left: put it in the next release's notes, the Mac's size (Mac agent).
 - [x] Welcome tab / README: what Buddy is, that each user picks their own copy of the game's SWF (none shipped).
 - [ ] Clean up: delete buddy/examples/zz_dump.rs (never committed) and the bytecode dumps used to write the bridge.
-      Left for the user to say: buddy/examples/ is untracked and may not be mine, so it stays until they say delete it.
+      User, 2026-11-03: don't delete it. buddy/examples/zz_dump.rs stays (untracked, never committed).
 
 ## 6. Mac
 - [ ] Build buddy/ (Rust, Ruffle arm64) in the Mac build on the mini, and check the download size.
