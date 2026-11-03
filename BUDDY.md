@@ -139,8 +139,8 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
       Already so: his fire is real sim FIRE (OverlayBuddy::Step), which scorches windows and the wallpaper like any
       fire; he has no acid of his own.
 
-## 4c. More interactivity (ideas agreed 2026-11-03; first: footprints, splash, fireman). EACH ONE a toggle with a
-## description in the Fun tab (Buddy section), off by default, like the 4. extras
+## 4c. More interactivity (ideas agreed 2026-11-03; first: footprints, splash, fireman)
+Each one is a toggle with a description in the Fun tab (Buddy section), off by default, like the 4. extras.
 He feels the sim:
 - [ ] Electricity lights him up: he glows while a spark runs through him, and passes it on to what he holds.
 - [ ] Big blasts daze him: knocked out a few seconds, stars over his head, then he gets up.
