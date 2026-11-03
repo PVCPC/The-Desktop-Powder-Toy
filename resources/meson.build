@@ -145,4 +145,5 @@ embedded_files += [
 	[ 'save_online_png', files('save_online.png') ],
 	[ 'font_bz2', files('font.bz2') ],
 	[ 'credits_json', files('credits.json') ],
+	[ 'luna_png', files('luna.png') ], # Windows XP Luna's own images (luna.py)
 ]

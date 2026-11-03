@@ -36,6 +36,7 @@
 #include "gui/options/OptionsModel.h"
 #include "lua/CommandInterface.h"
 #include "Format.h"
+#include "luna_png.h"
 #include "gui/dialogues/ErrorMessage.h"
 #include "client/Client.h"
 #include "simulation/SaveRenderer.h"
@@ -834,6 +835,10 @@ namespace
 		// Grabs what's behind; true when the look should change with it (a repaint).
 		virtual bool Prepare(Backdrop &bd, HWND hwnd, int w, int h) { (void)bd, (void)hwnd, (void)w, (void)h; return false; }
 		virtual uint32_t TabInk(bool on) const { (void)on; return ink; }
+		// A check box (round: radio button) b square at x, y; false: drawn here in the theme's colours.
+		virtual bool CheckBox(Canvas &cv, int x, int y, int b, bool on, bool round, bool hot) { (void)cv, (void)x, (void)y, (void)b, (void)on, (void)round, (void)hot; return false; }
+		// A group box's outline; false: drawn here in groupEdge.
+		virtual bool GroupFrame(Canvas &cv, int x, int y, int w, int h) { (void)cv, (void)x, (void)y, (void)w, (void)h; return false; }
 		virtual void Underlay(Backdrop &bd, Canvas &cv, const Canvas &ui, const std::vector<Baked> &baked) { (void)bd, (void)cv, (void)ui, (void)baked; }
 		virtual void Popup(Canvas &cv)
 		{
@@ -1269,66 +1274,104 @@ namespace
 		}
 	};
 
-	// Windows XP Luna: a rounded blue title bar with bold white text, blue and red rounded caption buttons, white
-	// buttons with an orange glow on hover, green ticks.
+	// Windows XP's own Luna images (resources/luna.png, made by resources/luna.py from luna.msstyles, via
+	// github.com/listumps/wine_themes): Blue, Olive Green and Silver blocks side by side, each part at the same place
+	// in each, its states stacked down it.
+	enum LunaPart { LunaCaption, LunaLeft, LunaRight, LunaBottom, LunaCapButton, LunaClose, LunaCloseGlyph, LunaMinGlyph, LunaMaxGlyph, LunaRestoreGlyph, LunaButton, LunaCheck, LunaRadio, LunaGroup, LunaTab, LunaPane };
+	constexpr int lunaParts[][4] = { // x, y, w, h in a colour's block
+		{ 0, 0, 66, 58 }, { 0, 58, 5, 62 }, { 0, 120, 5, 62 }, { 0, 182, 49, 10 }, { 0, 192, 21, 168 }, { 66, 0, 21, 168 }, { 66, 168, 13, 104 },
+		{ 66, 272, 13, 104 }, { 87, 0, 13, 104 }, { 87, 104, 13, 104 }, { 87, 208, 20, 115 }, { 107, 0, 13, 156 }, { 107, 156, 13, 104 },
+		{ 107, 260, 22, 20 }, { 107, 280, 18, 90 }, { 129, 0, 48, 48 },
+	};
+	constexpr int lunaBlock = 177;
+
+	// State f (of n) of part p in column col over x, y, w, h: its l, r, t, b source pixels at the edges kept (scaled
+	// as the UI is), the middle stretched, as the msstyles' SizingMargins.
+	void Luna(Canvas &cv, int col, LunaPart p, int f, int n, int x, int y, int w, int h, int l = 0, int r = 0, int t = 0, int b = 0)
+	{
+		static auto atlas = format::PixelsFromPNG(luna_png.AsCharSpan());
+		if (!atlas || w <= 0 || h <= 0) return;
+		int aw = atlas->Size().X, sw = lunaParts[p][2], sh = lunaParts[p][3] / n, sx = col * lunaBlock + lunaParts[p][0], sy = lunaParts[p][1] + f * sh;
+		// a destination pixel's source along one side: margins lo and hi (source px) are S()-sized, shrunk to fit
+		auto along = [&](int len, int src, int lo, int hi) {
+			int dlo = S(float(lo)), dhi = S(float(hi));
+			if (dlo + dhi > len) dlo = len * lo / std::max(1, lo + hi), dhi = len - dlo;
+			std::vector<int> m(len);
+			for (int d = 0; d < len; d++)
+				m[d] = d < dlo ? d * lo / std::max(1, dlo)
+				     : d >= len - dhi ? src - hi + (d - (len - dhi)) * hi / std::max(1, dhi)
+				     : lo + (d - dlo) * (src - lo - hi) / std::max(1, len - dlo - dhi);
+			return m;
+		};
+		auto mx = along(w, sw, l, r), my = along(h, sh, t, b);
+		auto *px = atlas->data();
+		for (int j = 0; j < h; j++)
+			for (int i = 0; i < w; i++)
+			{
+				uint32_t c = px[size_t(sy + my[j]) * aw + sx + mx[i]];
+				cv.Blend(x + i, y + j, c & 0xFFFFFF, c >> 24);
+			}
+	}
+
+	// Windows XP Luna, in its own images: Blue (col 0), Olive Green (1) or Silver (2).
 	struct XP : Theme
 	{
-		XP()
+		int col;
+		uint32_t captionInk, captionShadow;
+
+		XP(int col = 0) : col(col)
 		{
-			name = L"Windows XP";
-			page = 0xFCFCFE, heading = 0x0046D5, navInk = 0x215DC6, navSelInk = 0xFFFFFF, edge = 0x919B9C, groupEdge = 0xD0D0BF, strip = 0xECE9D8;
+			static const wchar_t *names[] = { L"Windows XP", L"Windows XP Olive Green", L"Windows XP Silver" };
+			static const uint32_t inks[] = { 0xFFFFFF, 0xFFFFFF, 0x0E1010 }, shadows[] = { 0x0A1883, 0x41400A, 0xC7C2D1 }, headings[] = { 0x0046D5, 0x99540A, 0x0046D5 };
+			name = names[col], captionInk = inks[col], captionShadow = shadows[col];
+			page = 0xFCFCFE, heading = headings[col], navInk = 0x215DC6, navSelInk = 0xFFFFFF, edge = 0x919B9C, groupEdge = 0xD0D0BF, strip = col == 2 ? 0xE0DFE3 : 0xECE9D8;
 			tabOff[0] = 0xFEFEFE, tabOff[1] = 0xECEBE6, tabHot[0] = 0xFFFFFF, tabHot[1] = 0xF4F3EE, tabHotEdge = 0xE68B2C;
-			status[0] = status[1] = 0xECE9D8, status[2] = 0xACA899;
+			status[0] = status[1] = strip, status[2] = 0xACA899;
 			nav[0] = 0xD6DFF7, nav[1] = 0xC6D3F7, nav[2] = 0x7BA2E7;
 			navHot[0] = navHot[1] = 0xE8EEFB, navHot[2] = 0x7BA2E7, navSel[0] = navSel[1] = navSel[2] = 0x316AC5;
-			box[0] = 0xDCDCD7, box[1] = 0xFFFFFF, box[2] = 0x1C5180, boxHot[0] = 0xFEDF9C, boxHot[1] = 0xFFFFFF, boxHot[2] = 0x1C5180;
-			mark = 0x21A121, dot[0] = 0x55D551, dot[1] = 0x0E8E0A;
 			radius = 3, boxRadius = 0;
-			capW[0] = capW[1] = capW[2] = 21, capH = 21, capTop = 4, capGap = 2, capInset = 5;
+			capW[0] = capW[1] = capW[2] = 21, capH = 21, capTop = 5, capGap = 3, capInset = 5;
 		}
 
 		void Frame(Canvas &cv, int titleH, int border, const std::wstring &title) override
 		{
-			int r = S(8);
-			cv.RoundRect(0, 0, cv.w, cv.h, r, 0x0058EE, 0x0046D5, 255, true);
-			cv.RoundRect(1, 1, cv.w - 2, S(6), r, 0x8CBAFF, 0x2D7BF6, 255, true); // the light top edge
-			cv.RoundRect(0, titleH - S(4), cv.w, S(4), 0, 0x0A50D8, 0x0040C0, 255);
-			cv.RoundFrame(0, 0, cv.w, cv.h, r, 0x001EA0, 255, true);
+			Luna(cv, col, LunaCaption, 0, 2, 0, 0, cv.w, titleH, 28, 35, 9, 17);
+			Luna(cv, col, LunaLeft, 0, 2, 0, titleH, border, cv.h - titleH - border, 0, 0, 2, 2);
+			Luna(cv, col, LunaRight, 0, 2, cv.w - border, titleH, border, cv.h - titleH - border, 0, 0, 2, 2);
+			Luna(cv, col, LunaBottom, 0, 2, 0, cv.h - border, cv.w, border, 5, 5, 2, 2);
 			auto size = text->Measure(title, true);
 			int ty = (titleH - size.cy) / 2;
-			text->Draw(cv, S(9) + 1, ty + 1, title, 0x0A1883, true, cv.w - S(100));
-			text->Draw(cv, S(9), ty, title, 0xFFFFFF, true, cv.w - S(100));
-			cv.RoundFrame(border - 1, titleH - 1, cv.w - 2 * border + 2, cv.h - titleH - border + 2, 0, 0x001EA0, 255);
+			text->Draw(cv, S(9) + 1, ty + 1, title, captionShadow, true, cv.w - S(100));
+			text->Draw(cv, S(9), ty, title, captionInk, true, cv.w - S(100));
 		}
 
 		void CaptionButton(Canvas &cv, RECT rc, bool hover, CaptionKind kind) override
 		{
-			int w = rc.right - rc.left, h = rc.bottom - rc.top;
-			bool close = kind == CaptionClose;
-			uint32_t top = close ? (hover ? 0xF5A189 : 0xE5866A) : (hover ? 0x8DBBFF : 0x6A9EFC);
-			uint32_t bottom = close ? (hover ? 0xD0482A : 0xC2391C) : (hover ? 0x2A6CF0 : 0x1B57D9);
-			cv.RoundRect(rc.left, rc.top, w, h, S(3), top, bottom, 255);
-			cv.RoundFrame(rc.left, rc.top, w, h, S(3), 0xFFFFFF, 230);
-			int cx = rc.left + w / 2, cy = rc.top + h / 2;
-			if (kind == CaptionMax)
-			{
-				int k = S(4.5f);
-				cv.RoundFrame(cx - k, cy - k, 2 * k + 1, 2 * k + 1, 0, 0xFFFFFF, 255);
-				Line(cv, cx - k, cy - k, 2 * k + 1, S(2.5f), 0xFFFFFF);
-			}
-			else Glyph(cv, cx, cy + (kind == CaptionMin ? S(4) : 0), kind, 0xFFFFFF, S(close ? 8.f : 7.f), S(2.5f));
+			int w = rc.right - rc.left, h = rc.bottom - rc.top, g = S(13);
+			Luna(cv, col, kind == CaptionClose ? LunaClose : LunaCapButton, hover, 8, rc.left, rc.top, w, h, 5, 5, 5, 5);
+			Luna(cv, col, kind == CaptionClose ? LunaCloseGlyph : kind == CaptionMin ? LunaMinGlyph : LunaMaxGlyph, hover, 8, rc.left + (w - g) / 2, rc.top + (h - g) / 2, g, g);
 		}
 
 		void Button(Canvas &cv, int x, int y, int w, int h, int state) override
 		{
-			int r = S(3);
-			cv.RoundRect(x, y, w, h, r, state == 2 ? 0xE6E6E0 : 0xFFFFFF, state == 2 ? 0xE2E2DA : 0xECEBE6, 255);
-			cv.RoundFrame(x, y, w, h, r, 0x003C74, 255);
-			if (state == 1)
-			{
-				cv.RoundFrame(x + 1, y + 1, w - 2, h - 2, r - 1, 0xF8B330, 255);
-				cv.RoundFrame(x + 2, y + 2, w - 4, h - 4, std::max(0, r - 2), 0xFDD889, 255);
-			}
+			Luna(cv, col, LunaButton, state, 5, x, y, w, h, 8, 8, 9, 9); // normal, hot, pressed (then disabled, default)
+		}
+
+		void Tab(Canvas &cv, RECT rc, bool on, bool hot) override
+		{
+			Luna(cv, col, LunaTab, on ? 2 : hot ? 1 : 0, 5, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, 6, 6, 6, 6);
+		}
+
+		bool CheckBox(Canvas &cv, int x, int y, int b, bool on, bool round, bool hot) override
+		{
+			Luna(cv, col, round ? LunaRadio : LunaCheck, (on ? 4 : 0) + hot, round ? 8 : 12, x, y, b, b);
+			return true;
+		}
+
+		bool GroupFrame(Canvas &cv, int x, int y, int w, int h) override
+		{
+			Luna(cv, col, LunaGroup, 0, 1, x, y, w, h, 4, 4, 4, 4);
+			return true;
 		}
 
 		void Popup(Canvas &cv) override
@@ -1995,7 +2038,7 @@ namespace
 	Three threeTheme;
 	NinetyFive ninetyFiveTheme;
 	NinetyEight ninetyEightTheme;
-	XP xpTheme;
+	XP xpTheme, xpOliveTheme{ 1 }, xpSilverTheme{ 2 };
 	Vista vistaTheme;
 	Seven sevenTheme;
 	Eight eightTheme;
@@ -2011,8 +2054,8 @@ namespace
 	Yosemite yosemiteTheme;
 	Glass glassTheme;
 	Theme *const themes[] = { &threeTheme, &ninetyFiveTheme, &ninetyEightTheme, &xpTheme, &vistaTheme, &sevenTheme, &eightTheme, &tenTheme, &elevenTheme, &classicMacTheme, &modernMacTheme, &templeTheme,
-		&system6Theme, &system7Theme, &aquaTheme, &lionTheme, &yosemiteTheme, &glassTheme }; // new ones at the end: the pref is the index
-	const std::vector<int> windowsThemes = { 0, 1, 2, 3, 4, 5, 6, 7, 8 }, macThemes = { 12, 13, 9, 14, 15, 16, 10, 17 };
+		&system6Theme, &system7Theme, &aquaTheme, &lionTheme, &yosemiteTheme, &glassTheme, &xpOliveTheme, &xpSilverTheme }; // new ones at the end: the pref is the index
+	const std::vector<int> windowsThemes = { 0, 1, 2, 3, 18, 19, 4, 5, 6, 7, 8 }, macThemes = { 12, 13, 9, 14, 15, 16, 10, 17 };
 	constexpr int templeIndex = 11;
 	constexpr int defaultTheme = 4; // Vista
 	Theme *theme = &vistaTheme;
@@ -2624,22 +2667,25 @@ namespace
 			RECT rc{ x, y, x + w, y + S(20) };
 			bool hot = Hovered(rc);
 			int by = y + (S(20) - b) / 2, r = round ? b / 2 : S(float(theme->boxRadius));
-			auto *c = hot ? theme->boxHot : theme->box;
-			bool filled = on && theme->boxOn;
-			cv.RoundRect(x, by, b, b, r, filled ? theme->boxOn : c[0], filled ? theme->boxOn : c[1], 255);
-			cv.RoundFrame(x, by, b, b, r, filled ? theme->boxOn : c[2], 255);
-			if (on && round)
+			if (!theme->CheckBox(cv, x, by, b, on, round, hot))
 			{
-				int d = b / 2;
-				cv.RoundRect(x + (b - d) / 2, by + (b - d) / 2, d, d, d / 2, theme->dot[0], theme->dot[1], 255);
-			}
-			if (on && !round)
-			{
-				int cx = x + b / 2, cy = by + b / 2, k = S(2.5f);
-				for (int t = 0; t < S(1.6f); t++)
+				auto *c = hot ? theme->boxHot : theme->box;
+				bool filled = on && theme->boxOn;
+				cv.RoundRect(x, by, b, b, r, filled ? theme->boxOn : c[0], filled ? theme->boxOn : c[1], 255);
+				cv.RoundFrame(x, by, b, b, r, filled ? theme->boxOn : c[2], 255);
+				if (on && round)
 				{
-					for (int i = 0; i <= k; i++) cv.Blend(cx - k - 1 + i, cy + i - 1 + t, theme->mark, 255);
-					for (int i = 0; i <= 2 * k; i++) cv.Blend(cx - 1 + i, cy + k - 1 - i + t, theme->mark, 255);
+					int d = b / 2;
+					cv.RoundRect(x + (b - d) / 2, by + (b - d) / 2, d, d, d / 2, theme->dot[0], theme->dot[1], 255);
+				}
+				if (on && !round)
+				{
+					int cx = x + b / 2, cy = by + b / 2, k = S(2.5f);
+					for (int t = 0; t < S(1.6f); t++)
+					{
+						for (int i = 0; i <= k; i++) cv.Blend(cx - k - 1 + i, cy + i - 1 + t, theme->mark, 255);
+						for (int i = 0; i <= 2 * k; i++) cv.Blend(cx - 1 + i, cy + k - 1 - i + t, theme->mark, 255);
+					}
 				}
 			}
 			text->Draw(cv, x + b + S(6), y + (S(20) - text->Measure(label).cy) / 2, label, theme->ink);
@@ -2650,7 +2696,7 @@ namespace
 		// A group box: an outline with a heading; returns the top of its inside.
 		int Group(int x, int y, int w, int h, const std::wstring &title)
 		{
-			cv.RoundFrame(x, y + S(8), w, h - S(8), S(float(std::min(theme->radius, 6))), theme->groupEdge, 255);
+			if (!theme->GroupFrame(cv, x, y + S(8), w, h - S(8))) cv.RoundFrame(x, y + S(8), w, h - S(8), S(float(std::min(theme->radius, 6))), theme->groupEdge, 255);
 			auto size = text->Measure(title);
 			cv.RoundRect(x + S(8), y, size.cx + S(8), size.cy, 0, theme->page, theme->page, 255);
 			text->Draw(cv, x + S(12), y, title, theme->heading);
