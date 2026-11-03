@@ -936,8 +936,8 @@ fn run(mut game: Game, shared: Arc<Mutex<Shared>>) {
     let mut last = Instant::now();
     let mut menus_at = Instant::now();
     let mut saved_at = Instant::now();
+    let mut due = Instant::now(); // when the next frame starts: on a fixed beat, so a late wake-up isn't carried on
     loop {
-        let start = Instant::now();
         let (mouse, clicks, commands) = {
             let mut s = shared.lock().unwrap();
             if s.quit {
@@ -999,7 +999,12 @@ fn run(mut game: Game, shared: Arc<Mutex<Shared>>) {
         drop(s);
         // the game's smoothing draws him between its 40 Hz steps: 120 frames a second, as in the desktop app
         let rate = if game.settings[4] != 0.0 { 120.0 } else { 60.0 };
-        std::thread::sleep(Duration::from_secs_f64(1.0 / rate).saturating_sub(start.elapsed()));
+        due += Duration::from_secs_f64(1.0 / rate);
+        let now = Instant::now();
+        if due + Duration::from_secs_f64(1.0 / rate) < now {
+            due = now; // a frame or more behind: start the beat again rather than rush to catch up
+        }
+        std::thread::sleep(due.saturating_duration_since(now));
     }
 }
 
@@ -1332,6 +1337,8 @@ mod tests {
         assert!((ly + lr - 400.0).abs() < 4.0, "feet not on the block: {}", ly + lr);
         assert!(by < 400.0, "body sank: {by}");
     }
+
+    #[test]
 
     #[test]
 

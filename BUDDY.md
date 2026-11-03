@@ -53,7 +53,7 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
       thread of its own each screen refresh, only where his frame changed (tdpt_buddy_boxes; ~2-3 ms a frame); the
       overlay catches clicks on his pixels (alpha 1). The window he stands on is read there too, every refresh.
       Not behind the icons or with the wet/frosty looks: those still draw him into the overlay's frame.
-      He makes ~80 frames a second on a 5120x1440 stage (TPT pixel size 1); 120 needs a cheaper game frame.
+      He makes 120 frames a second in TDPT, even on a 5120x1440 stage (~6 ms each; frames on a fixed beat).
 - [ ] The game's zapper: shock() also lights its toys near the mouse, not only near the spark that touched him.
 - [x] Buddy tab (shown once his SWF is chosen in Fun): on/off + Choose SWF, size 25-300 % (the game's own
       __nativeSetBuddySize, so independent of TDPT's pixel size), active-window ledges, smoothing, speech bubbles and
