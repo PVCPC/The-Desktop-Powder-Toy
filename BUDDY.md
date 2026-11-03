@@ -203,8 +203,8 @@ Games:
       Stun gun DONE (in "Buddy's weapons hit the sim"): beingShocked -> shots kind 6 -> next tick the spark-through-him
       path sparks conductors he touches (tested: a METL plate under him lights up).
       Toys DONE (Fun "Buddy's toys feel the sim", toys: command): objectList circles (not group buddy), read through
-      objectList.N.targ.* (x y rad xv yv mass); same float (mass < 0.6) / wind / push_out as his parts; ground rect grows
-      to toys within 800 px of him; stopped fast -> shots kind 7 -> his splash fling. Test: a bowling ball rests on a
+      objectList.N.targ.* (x y rad xv yv mass); same float (mass < 0.6) / wind / push_out as his parts; each toy gets its own
+      patch of sim + air anywhere on the stage (tdpt_buddy_toys/tdpt_buddy_toy); stopped fast -> shots kind 7 -> his splash fling. Test: a bowling ball rests on a
       block (falls through with it off). Flail (wreckingBall, immovable) left out. The items list is DONE.
 - [x] Fireman: when fire starts he grabs water and puts it out, happy if he saves a window. (Overlay.Fun.BuddyFireman:
       sprays water from his hand 3 s at fire 40-250 px away, rests 10 s; no "happy" yet, needs the game's emotes)
