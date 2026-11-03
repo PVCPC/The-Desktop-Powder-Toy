@@ -13,6 +13,13 @@ README credit every source. Not worth images: 3.1/95/98 (B00merang's are the sam
 XPMs use GTK colour symbols), 7's xfwm4 caption buttons (7 Basic's, one width), macOS 26 Tahoe (CSS only, no images).
 Private copies: PVCPC/<repo name> (8 made, the rest retried slowly: GitHub rate-limits repo creation).
 
+Also done 2026-11-03: Windows 11 is drawn by Windows itself on Windows 11 (Native<Eleven>: OpenThemeData /
+DrawThemeBackground, nothing shipped; the hand-drawn look elsewhere). XP has Royale, Royale Noir and Zune colours
+(resources/xp2.png, luna.py with colour prefixes). The Welcome page draws its keys as the look's push buttons and its
+tip as the look's tooltip, and its top as each family greeted you: 95's "Welcome to" with buttons and "Did you know...",
+XP/Vista's Welcome Center banner with tiles, 7 to 11's Getting Started, the old Macs' small centred page, the modern
+Macs' icon, heading and Continue. Left from the list: XP Embedded, 10 Dark, macOS Dark, 95's colour check.
+
 Done so far: Windows XP uses the real Luna images (resources/luna.png and luna.py, from wine_themes). Blue, Olive Green
 and Silver are a Colour row under it. The Welcome page takes the look's page, heading and text colours.
 

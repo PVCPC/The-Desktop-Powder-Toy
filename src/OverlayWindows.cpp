@@ -1375,14 +1375,11 @@ namespace
 	};
 
 #ifdef _WIN32
-	// Windows' own drawing of a control (the visual style in use, its real Windows 11 parts on Windows 11): drawn over
-	// black and over white, the difference gives its alpha. False when Windows can't (no visual style).
-	bool NativePart(Canvas &cv, const wchar_t *cls, int part, int state, int x, int y, int w, int h)
+	// Windows' own drawing of a control (the visual style in use, its real Windows 11 parts on Windows 11). False when
+	// Windows can't (no visual style).
+	// Something GDI draws (draw(dc, rc)), drawn over black and over white: the difference gives its alpha.
+	void CaptureGdi(Canvas &cv, int x, int y, int w, int h, const std::function<void(HDC, RECT &)> &draw)
 	{
-		static std::map<std::wstring, HTHEME> handles;
-		auto &t = handles[cls];
-		if (!t) t = OpenThemeData(nullptr, cls);
-		if (!t || w <= 0 || h <= 0) return false;
 		BITMAPINFO bi{};
 		bi.bmiHeader = { sizeof(BITMAPINFOHEADER), w, -h, 1, 32 };
 		HDC dc = CreateCompatibleDC(nullptr);
@@ -1394,7 +1391,7 @@ namespace
 			bm[k] = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, (void **)&px[k], nullptr, 0);
 			std::fill(px[k], px[k] + size_t(w) * h, k ? 0xFFFFFFFFu : 0xFF000000u);
 			SelectObject(dc, bm[k]);
-			DrawThemeBackground(t, dc, part, state, &rc, nullptr);
+			draw(dc, rc);
 		}
 		GdiFlush();
 		for (int j = 0; j < h; j++)
@@ -1408,6 +1405,15 @@ namespace
 			}
 		DeleteDC(dc);
 		DeleteObject(bm[0]), DeleteObject(bm[1]);
+	}
+
+	bool NativePart(Canvas &cv, const wchar_t *cls, int part, int state, int x, int y, int w, int h)
+	{
+		static std::map<std::wstring, HTHEME> handles;
+		auto &t = handles[cls];
+		if (!t) t = OpenThemeData(nullptr, cls);
+		if (!t || w <= 0 || h <= 0) return false;
+		CaptureGdi(cv, x, y, w, h, [&](HDC dc, RECT &rc) { DrawThemeBackground(t, dc, part, state, &rc, nullptr); });
 		return true;
 	}
 
@@ -3607,23 +3613,131 @@ namespace
 			            link{ 12, FW_NORMAL, false, true, 0x0066CC }, body{ 12, FW_NORMAL, false, false, theme->ink },
 			            note{ 11, FW_NORMAL, true, false, 0x6D6D6D }, footer{ 10, FW_NORMAL, false, false, 0x8A8A8A };
 
-			text->Draw(cv, x0, y, L"Welcome to The Powder Toy", title);
-			y += text->Measure(L"Ag", title).cy + S(2);
-			text->Draw(cv, x0, y, L"Desktop " DESKTOP_VERSION L"  \u00B7  The Powder Toy " + std::to_wstring(DISPLAY_VERSION[0]) + L"." +
-			                          std::to_wstring(DISPLAY_VERSION[1]), subtitle);
-			y += text->Measure(L"Ag", subtitle).cy + S(8);
-			int lx = x0;
+			// The top of the page as each family greeted you: 95's Welcome dialog, XP and Vista's Welcome Center, 7 to 11's
+			// Getting Started, the old Macs' small plain window, the modern Macs' icon, heading and Continue.
+			int gen = Generation(int(std::find(std::begin(themes), std::end(themes), theme) - std::begin(themes)));
+			enum { Classic, Center, Started, OldMac, NewMac } family = gen <= 2 ? Classic : gen <= 4 ? Center
+			                                                         : gen == 9 || gen == 12 || gen == 13 ? OldMac
+			                                                         : gen == 10 || gen >= 14 ? NewMac : Started;
+			const std::wstring version = L"Desktop " DESKTOP_VERSION L"  ·  The Powder Toy " + std::to_wstring(DISPLAY_VERSION[0]) + L"." +
+			                             std::to_wstring(DISPLAY_VERSION[1]);
+			std::vector<std::pair<const wchar_t *, std::function<void()>>> sites;
 			for (auto [label, url] : { std::pair{ L"powdertoy.co.uk", L"https://powdertoy.co.uk" },
 			                           std::pair{ L"Discord", L"https://tpt.io/discord" },
 			                           std::pair{ L"Create an account", L"https://powdertoy.co.uk/Register.html" } })
+				sites.push_back({ label, [url = std::wstring(url)] { ShellExecuteW(nullptr, L"open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL); } });
+			auto centred = [&](const std::wstring &s, const Style &st) {
+				auto size = text->Measure(s, st);
+				text->Draw(cv, (pw - int(size.cx)) / 2, y, s, st);
+				y += size.cy;
+			};
+			// the sites as links in a row, from x (or centred: x < 0)
+			auto siteLinks = [&](int x) {
+				if (x < 0)
+				{
+					x = -S(18);
+					for (auto &site : sites) x += int(text->Measure(site.first, link).cx) + S(18);
+					x = (pw - x) / 2;
+				}
+				for (auto &[label, go] : sites)
+				{
+					auto size = text->Measure(label, link);
+					text->Draw(cv, x, y, label, link);
+					links.push_back({ RECT{ x, y, x + int(size.cx), y + int(size.cy) }, go, label });
+					x += size.cx + S(18);
+				}
+				y += S(30);
+			};
+			// a row of the look's push buttons, from x (or centred: x < 0)
+			auto buttons = [&](int x, int bw, int bh, const std::vector<std::pair<const wchar_t *, std::function<void()>>> &list) {
+				int gap = S(10);
+				bw = std::min(bw, (x1 - x0 - gap * (int(list.size()) - 1)) / int(list.size())); // fit the page
+				int total = int(list.size()) * (bw + gap) - gap;
+				if (x < 0) x = (pw - total) / 2;
+				const Style cap{ 12, FW_NORMAL, false, false, theme->ink };
+				for (auto &[label, go] : list)
+				{
+					theme->Button(cv, x, y, bw, bh, 0);
+					auto size = text->Measure(label, cap);
+					text->Draw(cv, x + (bw - int(size.cx)) / 2, y + (bh - int(size.cy)) / 2, label, cap);
+					links.push_back({ RECT{ x, y, x + bw, y + bh }, go, label });
+					x += bw + gap;
+				}
+				y += bh;
+			};
+			const wchar_t *tipLabel = L"Tip";
+			if (family == Classic)
 			{
-				auto size = text->Measure(label, link);
-				text->Draw(cv, lx, y, label, link);
-				links.push_back({ RECT{ lx, y, lx + int(size.cx), y + int(size.cy) },
-				                  [url = std::wstring(url)] { ShellExecuteW(nullptr, L"open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL); }, url });
-				lx += size.cx + S(18);
+				// "Welcome to" then the name in bold, an etched rule, and its buttons
+				const Style light{ 22, FW_NORMAL, false, false, theme->ink }, bold{ 22, FW_BOLD, false, false, theme->ink };
+				text->Draw(cv, x0, y, L"Welcome to ", light);
+				text->Draw(cv, x0 + text->Measure(L"Welcome to ", light).cx, y, L"The Powder Toy", bold);
+				y += text->Measure(L"Ag", light).cy + S(6);
+				for (int i = x0; i < x1; i++) cv.Blend(i, y, 0x808080, 255), cv.Blend(i, y + 1, 0xFFFFFF, 255);
+				y += S(8);
+				text->Draw(cv, x0, y, version, body);
+				y += text->Measure(L"Ag", body).cy + S(10);
+				buttons(x0, S(140), S(24), sites);
+				y += S(18);
+				tipLabel = L"Did you know...";
 			}
-			y += S(30);
+			else if (family == Center)
+			{
+				// the Welcome Center's banner, in the look's heading colour fading out
+				int bh = S(74);
+				auto mix = [](uint32_t a, uint32_t b, int t) {
+					auto ch = [&](int sh) { return uint32_t((int((a >> sh) & 0xFF) * (255 - t) + int((b >> sh) & 0xFF) * t) / 255) << sh; };
+					return ch(16) | ch(8) | ch(0);
+				};
+				for (int i = 0; i < pw; i++)
+				{
+					uint32_t c = mix(theme->heading, theme->page, i * 200 / std::max(1, pw));
+					for (int j = 0; j < bh; j++) cv.Blend(i, j, c, 255);
+				}
+				y = S(12);
+				text->Draw(cv, x0, y, L"Welcome to The Powder Toy", Style{ 22, FW_LIGHT, false, false, 0xFFFFFF });
+				y += text->Measure(L"Ag", title).cy + S(2);
+				text->Draw(cv, x0, y, version, Style{ 12, FW_NORMAL, false, false, 0xFFFFFF });
+				y = bh + S(14);
+				buttons(x0, S(170), S(40), sites);
+				y += S(20);
+			}
+			else if (family == OldMac || family == NewMac)
+			{
+				// centred: the app's icon (modern Macs), the name, the version, the sites, and Continue
+#ifdef _WIN32
+				static HICON icon = HICON(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(101), IMAGE_ICON, 256, 256, 0));
+				if (family == NewMac && icon)
+				{
+					int is = S(64);
+					CaptureGdi(cv, (pw - is) / 2, y, is, is, [&](HDC dc, RECT &rc) {
+						DrawIconEx(dc, 0, 0, icon, rc.right, rc.bottom, 0, nullptr, DI_NORMAL);
+					});
+					y += is + S(10);
+				}
+#endif
+				centred(L"Welcome to The Powder Toy", Style{ family == NewMac ? 22 : 18, FW_BOLD, false, false, theme->heading });
+				y += S(4);
+				centred(version, family == NewMac ? subtitle : body);
+				y += S(12);
+				if (family == OldMac)
+					for (int i = x0 + S(40); i < x1 - S(40); i++) cv.Blend(i, y, theme->ink, 255);
+				y += S(12);
+				siteLinks(-1);
+				if (family == NewMac)
+				{
+					buttons(-1, S(110), S(24), { { L"Continue", [this] { tab = 0, scroll = 0; } } });
+					y += S(24);
+				}
+			}
+			else
+			{
+				text->Draw(cv, x0, y, L"Welcome to The Powder Toy", title);
+				y += text->Measure(L"Ag", title).cy + S(2);
+				text->Draw(cv, x0, y, version, subtitle);
+				y += text->Measure(L"Ag", subtitle).cy + S(8);
+				siteLinks(x0);
+			}
 
 			// TPT's notifications (update news, server messages): a yellow row each, with Open and Dismiss.
 			for (auto *n : GameController::Ref().GetModel()->GetNotifications())
@@ -3662,8 +3776,9 @@ namespace
 			header(L"Getting started");
 			// The tip: in the look's tooltip
 			{
-				int top = y, tx = x0 + S(30);
-				int bottom = Para(tx + S(32), top + S(8), x1 - S(10),
+				const Style tipStyle{ 12, FW_BOLD, false, false, 0x7A5B00 };
+				int top = y, tx = x0 + S(30), px = tx + std::max(S(32), int(text->Measure(tipLabel, tipStyle).cx) + S(8));
+				int bottom = Para(px, top + S(8), x1 - S(10),
 				                  L"Pick a material in the Elements tab, then draw anywhere on your desktop. Ctrl+Alt+E shows or hides this window.", body) + S(8);
 				Canvas tip;
 				tip.Resize(x1 - x0, bottom - top);
@@ -3677,8 +3792,8 @@ namespace
 						}
 				cv.RoundRect(x0 + S(10), top + S(9), S(16), S(16), S(8), 0x3C8DDE, 0x1E5FAA, 255);
 				text->Draw(cv, x0 + S(16), top + S(9), L"i", Style{ 11, FW_BOLD, true, false, 0xFFFFFF });
-				text->Draw(cv, tx, top + S(8), L"Tip", Style{ 12, FW_BOLD, false, false, 0x7A5B00 });
-				Para(tx + S(32), top + S(8), x1 - S(10),
+				text->Draw(cv, tx, top + S(8), tipLabel, tipStyle);
+				Para(px, top + S(8), x1 - S(10),
 				     L"Pick a material in the Elements tab, then draw anywhere on your desktop. Ctrl+Alt+E shows or hides this window.", body);
 				y = bottom + S(18);
 			}
