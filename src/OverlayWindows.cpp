@@ -480,6 +480,7 @@ namespace
 		std::map<int, HFONT> styled;
 		const wchar_t *face = L"Segoe UI"; // the look's (Theme::font, at Theme::fontScale)
 		float faceScale = 1;
+		bool darkPage = false; // the look's page is dark: black and grey text is drawn light instead
 
 		void SetScale()
 		{
@@ -547,6 +548,8 @@ namespace
 		void Draw(Canvas &cv, int x, int y, const std::wstring &in, uint32_t rgb, bool isBold = false, int maxW = 1 << 20, int glow = 0)
 		{
 			auto s = Plain(in);
+			if (int r = rgb >> 16 & 0xFF, g = rgb >> 8 & 0xFF, b = rgb & 0xFF; darkPage && std::max({ r, g, b }) < 0x90 && std::max({ r, g, b }) - std::min({ r, g, b }) < 24)
+				rgb = 0xFFFFFF - rgb; // ponytail: assumes it sits on the page; text on its own light box would need its own colour
 			auto size = Measure(s, isBold);
 			int pad = glow;
 			int tw = std::min(int(size.cx), maxW) + 2 * pad, th = size.cy + 2 * pad;
@@ -4107,7 +4110,7 @@ namespace
 				int ry = top + i * S(26);
 				Caption(x + S(12), ry, rows[i][0]);
 				bool rec = recording == names[i];
-				Caption(x + S(200), ry, rec ? L"Press the new keys (Esc cancels)" : rows[i][1], rec ? 0xC25100 : 0x1E395B);
+				Caption(x + S(200), ry, rec ? L"Press the new keys (Esc cancels)" : rows[i][1], rec ? 0xC25100 : theme->heading);
 				PushButton(x + w - S(100), ry, S(88), rec ? L"Cancel" : L"Change\u2026", [rec, name = std::string(names[i])] {
 					recording = rec ? "" : name;
 				}, L"Ctrl, Alt, Shift or Win plus a letter, digit or F key");
@@ -5259,6 +5262,7 @@ namespace
 	// The look's font: the UI text is remade in it (TempleOS's is embedded, registered for this process on first use).
 	void UseThemeFont()
 	{
+		text->darkPage = ((theme->page >> 16 & 0xFF) + (theme->page >> 8 & 0xFF) + (theme->page & 0xFF)) < 3 * 0x60;
 #ifdef _WIN32
 		static bool registered = false;
 		if (!registered && !wcscmp(theme->font, L"TempleOS"))
