@@ -151,6 +151,8 @@ embedded_files += [
 	[ 'skin_eight_png', files('skin_eight.png') ],
 	[ 'skin_ten_png', files('skin_ten.png') ],
 	[ 'skin_system6_png', files('skin_system6.png') ],
+	[ 'skin_system7_png', files('skin_system7.png') ],
+	[ 'templeos_font_ttf', files('templeos_font.ttf') ], # TempleOS's own font (PhilipPanda/TempleOS-Theme)
 	[ 'skin_mac9_png', files('skin_mac9.png') ],
 	[ 'skin_aqua_png', files('skin_aqua.png') ],
 	[ 'skin_lion_png', files('skin_lion.png') ],

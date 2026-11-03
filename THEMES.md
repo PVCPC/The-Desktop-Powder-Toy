@@ -5,6 +5,14 @@ hand-drawn guess. The user's call: use these public repos and credit each one in
 used"). Each look's images get packed into one PNG in resources/ (no taller than 384 px: TPT's PNG reader refuses
 anything bigger), with a script beside it that rebuilds it. Each look should add well under 100 KB.
 
+Done 2026-11-03: Vista, 7, 8, 10, System 1-6, System 7, Mac OS 8-9, 10.0-10.6, 10.7-10.9, 10.10-10.15 and 11-15 draw
+their buttons, check boxes, radio buttons and tabs (where the source has them) from resources/skin_<look>.png
+(resources/skins.py <checkouts> resources src/OverlaySkins.h; Skinned<Look> in OverlayWindows.cpp). TempleOS uses
+its own font (resources/templeos_font.ttf, 0.65 size: it is wide; Plain() swaps symbols it lacks). Credits screen and
+README credit every source. Not worth images: 3.1/95/98 (B00merang's are the same flat bevels we draw; their xfwm4
+XPMs use GTK colour symbols), 7's xfwm4 caption buttons (7 Basic's, one width), macOS 26 Tahoe (CSS only, no images).
+Private copies: PVCPC/<repo name> (8 made, the rest retried slowly: GitHub rate-limits repo creation).
+
 Done so far: Windows XP uses the real Luna images (resources/luna.png and luna.py, from wine_themes). Blue, Olive Green
 and Silver are a Colour row under it. The Welcome page takes the look's page, heading and text colours.
 

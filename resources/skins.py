@@ -36,6 +36,10 @@ LOOKS = {
         'Check': ([f'System-4/gtk-2.0/assets/checkbox-{s}.png' for s in ('unchecked', 'unchecked', 'checked', 'checked')], 0),
         'Radio': ([f'System-4/gtk-2.0/assets/radio-{s}.png' for s in ('unchecked', 'unchecked', 'checked', 'checked')], 0),
     },
+    'system7': {  # moltensoftware's Symptom-7 (GPL-3; its buttons are drawn by GTK 3: the look keeps its own)
+        'Check': ([f'Symptom-7/Symptom 7/gtk-3.0/assets/checkbox-{s}.png' for s in ('unchecked', 'unchecked', 'checked', 'checked')], 0),
+        'Radio': ([f'Symptom-7/Symptom 7/gtk-3.0/assets/radio-{s}.png' for s in ('unchecked', 'unchecked', 'checked', 'checked')], 0),
+    },
     'mac9': {  # Platinum
         'Button': ([f'Mac-OS-9/gtk-2.0/button{s}alpha.png' for s in (12, 12, 11)], 9),
         'Check': ([f'Mac-OS-9/gtk-2.0/check{i}.png' for i in (1, 1, 2, 2)], 0),

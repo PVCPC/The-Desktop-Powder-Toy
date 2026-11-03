@@ -42,6 +42,8 @@
 #include "skin_eight_png.h"
 #include "skin_ten_png.h"
 #include "skin_system6_png.h"
+#include "skin_system7_png.h"
+#include "templeos_font_ttf.h"
 #include "skin_mac9_png.h"
 #include "skin_aqua_png.h"
 #include "skin_lion_png.h"
@@ -470,6 +472,8 @@ namespace
 		HDC dc = CreateCompatibleDC(nullptr);
 		HFONT font = nullptr, bold = nullptr;
 		std::map<int, HFONT> styled;
+		const wchar_t *face = L"Segoe UI"; // the look's (Theme::font, at Theme::fontScale)
+		float faceScale = 1;
 
 		void SetScale()
 		{
@@ -477,12 +481,23 @@ namespace
 			if (bold) DeleteObject(bold);
 			for (auto &[key, f] : styled) DeleteObject(f);
 			styled.clear();
-			font = CreateFontW(-S(12), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, ANTIALIASED_QUALITY, 0, L"Segoe UI");
-			bold = CreateFontW(-S(12), 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0, ANTIALIASED_QUALITY, 0, L"Segoe UI");
+			font = CreateFontW(-S(12 * faceScale), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, ANTIALIASED_QUALITY, 0, face);
+			bold = CreateFontW(-S(12 * faceScale), 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0, ANTIALIASED_QUALITY, 0, face);
 		}
 
-		SIZE Measure(const std::wstring &s, bool isBold = false)
+		// A look's own font (TempleOS's) lacks some of the UI's symbols: plain stand-ins for those.
+		std::wstring Plain(const std::wstring &in) const
 		{
+			if (!wcscmp(face, L"Segoe UI")) return in;
+			std::wstring out;
+			for (auto c : in)
+				out += c == L'…' ? L"..." : c == L'·' ? L"-" : c == L'□' ? L"#" : c == L'—' ? L"--" : std::wstring(1, c);
+			return out;
+		}
+
+		SIZE Measure(const std::wstring &in, bool isBold = false)
+		{
+			auto s = Plain(in);
 			SelectObject(dc, isBold ? bold : font);
 			SIZE size{};
 			GetTextExtentPoint32W(dc, s.c_str(), int(s.size()), &size);
@@ -502,7 +517,7 @@ namespace
 			auto &f = styled[(st.px ? 1000 + st.px : st.size) * 10000 + st.weight * 4 + st.italic * 2 + st.underline];
 			if (!f)
 			{
-				f = CreateFontW(st.px ? -st.px : -S(float(st.size)), 0, 0, 0, st.weight, st.italic, st.underline, 0, DEFAULT_CHARSET, 0, 0, ANTIALIASED_QUALITY, 0, L"Segoe UI");
+				f = CreateFontW(st.px ? -st.px : -S(st.size * faceScale), 0, 0, 0, st.weight, st.italic, st.underline, 0, DEFAULT_CHARSET, 0, 0, ANTIALIASED_QUALITY, 0, face);
 			}
 			return f;
 		}
@@ -523,8 +538,9 @@ namespace
 		}
 
 		// Draws s with its top-left at (x, y), clipped to maxW. glow > 0 adds Vista's soft white halo behind it.
-		void Draw(Canvas &cv, int x, int y, const std::wstring &s, uint32_t rgb, bool isBold = false, int maxW = 1 << 20, int glow = 0)
+		void Draw(Canvas &cv, int x, int y, const std::wstring &in, uint32_t rgb, bool isBold = false, int maxW = 1 << 20, int glow = 0)
 		{
+			auto s = Plain(in);
 			auto size = Measure(s, isBold);
 			int pad = glow;
 			int tw = std::min(int(size.cx), maxW) + 2 * pad, th = size.cy + 2 * pad;
@@ -809,6 +825,8 @@ namespace
 	{
 		const wchar_t *name = L"";
 		const wchar_t *colour = nullptr; // one of its generation's colour schemes (themeColours), or none
+		const wchar_t *font = L"Segoe UI";
+		float fontScale = 1;
 		uint32_t page = 0xFFFFFF, ink = 0x000000, pressedInk = 0x000000, heading = 0x1E395B, navInk = 0x1E395B, navSelInk = 0xFFFFFFFF /* none: navInk */, edge = 0x898C95, groupEdge = 0xD5DFE5;
 		uint32_t strip = 0xF0F0F0, tabOff[2] = { 0xF2F2F2, 0xE3E3E3 }, tabHot[2] = { 0xEAF6FD, 0xA7D9F5 }, tabHotEdge = 0x3C7FB1;
 		uint32_t status[3] = { 0xF7F9FC, 0xDCE5F1, 0xA0AFC3 }, nav[3] = { 0xF1F5FB, 0xE5EDF8, 0xA0AFC3 }; // top, bottom, edge
@@ -1453,6 +1471,7 @@ namespace
 		Temple()
 		{
 			name = L"TempleOS";
+			font = L"TempleOS", fontScale = 0.65f; // its own, from github.com/PhilipPanda/TempleOS-Theme: wide, so smaller
 			ink = blue, pressedInk = 0xFFFFFF, heading = blue, navInk = blue, navSelInk = 0xFFFFFF, edge = blue, groupEdge = blue, strip = 0xFFFFFF;
 			tabOff[0] = tabOff[1] = 0xFFFFFF, tabHot[0] = tabHot[1] = cyan, tabHotEdge = blue;
 			status[0] = status[1] = 0xFFFFFF, status[2] = blue;
@@ -2112,7 +2131,7 @@ namespace
 	Skinned<ModernMac> modernMacTheme{ { skin_macos_png.AsCharSpan(), skin_macos_parts } };
 	Temple templeTheme;
 	Skinned<System6> system6Theme{ { skin_system6_png.AsCharSpan(), skin_system6_parts } };
-	System7 system7Theme;
+	Skinned<System7> system7Theme{ { skin_system7_png.AsCharSpan(), skin_system7_parts } };
 	Skinned<Aqua> aquaTheme{ { skin_aqua_png.AsCharSpan(), skin_aqua_parts } };
 	Skinned<Lion> lionTheme{ { skin_lion_png.AsCharSpan(), skin_lion_parts } };
 	Skinned<Yosemite> yosemiteTheme{ { skin_yosemite_png.AsCharSpan(), skin_yosemite_parts } };
@@ -4917,8 +4936,26 @@ namespace
 		ThemeChanged();
 	}
 
+	// The look's font: the UI text is remade in it (TempleOS's is embedded, registered for this process on first use).
+	void UseThemeFont()
+	{
+#ifdef _WIN32
+		static bool registered = false;
+		if (!registered && !wcscmp(theme->font, L"TempleOS"))
+		{
+			DWORD n = 0;
+			auto ttf = templeos_font_ttf.AsCharSpan();
+			AddFontMemResourceEx(const_cast<char *>(ttf.data()), DWORD(ttf.size()), nullptr, &n);
+			registered = true;
+		}
+#endif // ponytail: Mac doesn't register it, and its Segoe UI stand-in shows
+		if (text && (wcscmp(text->face, theme->font) || text->faceScale != theme->fontScale))
+			text->face = theme->font, text->faceScale = theme->fontScale, text->SetScale();
+	}
+
 	void ThemeChanged()
 	{
+		UseThemeFont();
 		DirtyAll();
 		for (auto &h : hosts)
 			if (h) h->dirty = true;
@@ -5446,6 +5483,7 @@ void OverlayWindows::Init(void *mainHwnd)
 #endif
 	text = new Text;
 	text->SetScale();
+	UseThemeFont();
 	AddTrayIcon();
 }
 
