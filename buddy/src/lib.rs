@@ -659,9 +659,11 @@ fn frame(b: &mut Game, dt_ms: f64, mx: f64, my: f64, out: &mut [u32]) -> bool {
             p.call_root_method("explode", vec![x.into(), y.into(), power.into()]).ok();
             OURS.store(false, Ordering::Relaxed);
         }
-        // ponytail: the game's shock() also lights its toys near the mouse (it was the mouse's zapper); fine for now
+        // the game's shock() was the mouse's zapper: it also lights toys near the mouse, so the mouse is at the spark for it
         if let Some((x, y)) = g.zap.take() {
+            p.handle_event(PlayerEvent::MouseMove { x, y });
             p.call_root_method("shock", vec![x.into(), y.into()]).ok();
+            p.handle_event(PlayerEvent::MouseMove { x: mx, y: my });
         }
         if g.calm == 0 && let Some((x, y)) = g.bang.take() {
             OURS.store(true, Ordering::Relaxed);
