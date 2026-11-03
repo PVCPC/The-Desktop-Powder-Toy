@@ -151,7 +151,9 @@ He feels the sim:
       already sparks (it touches his hand).
 - [x] Big blasts daze him: knocked out a few seconds, stars over his head, then he gets up.
       Already in the game: a blast lays him flat ~7 s with its own stars round his head (starNum), then he gets up.
-- [ ] He gets dirty: sand, coal dust and soot stick to him as a tint (like wet and frost); he shakes it off later.
+- [x] He gets dirty: sand, coal dust and soot stick to him as a tint (like wet and frost); he shakes it off later.
+      Done (Fun toggle "Buddy gets dirty"): COAL/BCOL/DUST/GUNP/CLST/OIL/BRMT/SMKE touching a part: +1 a grain a tick
+      (0-3600), -1 a tick, water -3 a grain; dark brown smudges in fixed spots, more the dirtier. Tested by counters.
 - [x] He runs from fire and lava (he doesn't now: only the pets do): away from them, behind a window or icon.
       Done (Fun toggle "Buddy runs from fire and lava"): fire/lava/plasma within 100 px -> tdpt_buddy_command
       "act:runToPoint:X" (the game's addAction(action, 5)), 250 px away from most of it; every 2 s at most; not while he

@@ -45,6 +45,7 @@ namespace
 	}
 	std::vector<float> air;       // and its air (velocity, pressure), for tdpt_buddy_air
 	int wet[8], frost[8];         // ticks each part still looks wet / frosted (Overlay.Fun.BuddyLooks)
+	int dirt[8] = {};             // how dirty each part is, 0-3600 (Overlay.Fun.BuddyDirt)
 	int zapped = 0;               // ticks he still glows from a shock (Overlay.Fun.BuddyGlow)
 	int fleeRest = 0;             // ticks before he runs from fire again (Overlay.Fun.BuddyFlee)
 	double lastSpeed[8];          // each part's speed last tick (a splash: fast, then stopped by sand or water)
@@ -351,9 +352,10 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my, void *layer
 	                    int(prefs.Get("Overlay.Buddy.Toys", 6.f)), prefs.Get("Overlay.Buddy.Smooth", true));
 	tdpt_buddy_volume(buddy, prefs.Get("Overlay.Buddy.Volume", 50.f) / 100.f);
 	bool looks = GlobalPrefs::Ref().Get("Overlay.Fun.BuddyLooks", false), glows = GlobalPrefs::Ref().Get("Overlay.Fun.BuddyGlow", false);
+	bool dirty = GlobalPrefs::Ref().Get("Overlay.Fun.BuddyDirt", false);
 #ifdef _WIN32
-	// in his own window (not with the wet/frosty looks or the glow: those are drawn into the overlay's frame)
-	if (layer && !looks && !glows)
+	// in his own window (not with the wet/frosty looks, the glow or dirt: those are drawn into the overlay's frame)
+	if (layer && !looks && !glows && !dirty)
 	{
 		if (!shown)
 		{
@@ -402,15 +404,16 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my, void *layer
 				d = s + ((((d & 0xFF00FF) * k) >> 8) & 0xFF00FF) + ((((d & 0xFF00) * k) >> 8) & 0xFF00) + ((((d >> 24) * k) >> 8) << 24);
 			}
 	});
-	// wet parts look darker, frosted ones paler blue, fading over 10 s; shocked, all of him flickers bright blue-white for
-	// a moment: his own pixels there, recoloured in place
+	// wet parts look darker, frosted ones paler blue, fading over 10 s; dirty ones have dark brown smudges (fixed spots
+	// on each part, more of them the dirtier it is); shocked, all of him flickers bright blue-white for a moment: his
+	// own pixels there, recoloured in place
 	static int flicker = 0;
 	float zap = glows && zapped ? (++flicker & 2 ? 0.9f : 0.5f) * std::min(1.f, zapped / 10.f) : 0;
-	for (size_t n = 0; (looks || zap) && n < parts.size(); n++)
+	for (size_t n = 0; (looks || zap || dirty) && n < parts.size(); n++)
 	{
 		auto &p = parts[n];
-		float dark = looks ? 0.3f * wet[n] / 600 : 0, ice = looks ? 0.5f * frost[n] / 600 : 0;
-		if ((!dark && !ice && !zap) || !std::isfinite(p[0] + p[1] + p[2])) continue;
+		float dark = looks ? 0.3f * wet[n] / 600 : 0, ice = looks ? 0.5f * frost[n] / 600 : 0, cover = dirty ? 0.6f * std::min(1.f, dirt[n] / 1800.f) : 0;
+		if ((!dark && !ice && !zap && !cover) || !std::isfinite(p[0] + p[1] + p[2])) continue;
 		for (int y = std::max(0, int(p[1] - p[2]) - 2); y <= std::min(fh - 1, int(p[1] + p[2]) + 2); y++)
 			for (int x = std::max(0, int(p[0] - p[2]) - 2); x <= std::min(fw - 1, int(p[0] + p[2]) + 2); x++)
 			{
@@ -418,9 +421,13 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my, void *layer
 				if (!a || std::hypot(x + 0.5 - p[0], y + 0.5 - p[1]) > p[2] + 2) continue;
 				auto &d = argb[size_t(y) * w + x];
 				uint32_t out = d & 0xFF000000;
+				uint32_t spot = uint32_t((x - int(p[0])) >> 1) * 73856093u ^ uint32_t((y - int(p[1])) >> 1) * 19349663u ^ uint32_t(n) * 83492791u;
+				spot ^= spot >> 13, spot *= 0x5bd1e995u, spot ^= spot >> 15;
+				float grime = (spot & 255) < cover * 256 ? 0.8f : 0;
 				for (int c = 0; c < 3; c++)
 				{
 					float sc = float(s >> (c * 8) & 0xFF), want = sc * (1 - dark);
+					want += (a * (c == 0 ? 0.12f : c == 1 ? 0.16f : 0.23f) - want) * grime; // toward dark brown
 					want += (a * (c == 0 ? 0.95f : c == 1 ? 0.85f : 0.75f) - want) * ice; // toward pale blue (b, g, r)
 					want += (a * (c == 0 ? 1.f : c == 1 ? 0.97f : 0.8f) - want) * zap;  // toward blue-white
 					int v = int(d >> (c * 8) & 0xFF) - int(sc) + int(want);
@@ -454,6 +461,7 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 	{
 		auto &p = parts[k];
 		wet[k] = p[5] != 0 ? 0 : std::max(0, wet[k] - 1), frost[k] = std::max(0, frost[k] - 1); // fire dries him
+		dirt[k] = std::max(0, dirt[k] - 1); // a minute to wear off
 		if (!std::isfinite(p[0] + p[1] + p[2] + p[3] + p[4])) continue;
 		int cx = int(p[0]) / CELL, cy = int(p[1]) / CELL;
 		// only fast moves (kicks, throws): he feels the air too, so a slow drift would feed itself and float him away
@@ -468,6 +476,11 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 					auto &t = sim->parts[ID(q)];
 					if (t.temp < 223.15f) frost[k] = 600;
 					else if (t.type != PT_ACID && t.temp < 333.15f && (SimulationData::CRef().elements[t.type].Properties & TYPE_LIQUID)) wet[k] = 600;
+					// dirt: coal, dust, gunpowder, clay, oil, broken metal, smoke rub off on him; water washes it off
+					if (t.type == PT_COAL || t.type == PT_BCOL || t.type == PT_DUST || t.type == PT_GUNP || t.type == PT_CLST || t.type == PT_OIL || t.type == PT_BRMT || t.type == PT_SMKE)
+						dirt[k] = std::min(3600, dirt[k] + 1); // each grain: buried, a few seconds to get filthy
+					else if (t.type == PT_WATR || t.type == PT_DSTW || t.type == PT_SLTW || t.type == PT_CBNW)
+						dirt[k] = std::max(0, dirt[k] - 3);
 				}
 		for (int k = 0; p[5] != 0 && k < 2; k++)
 		{
