@@ -139,6 +139,24 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
       Already so: his fire is real sim FIRE (OverlayBuddy::Step), which scorches windows and the wallpaper like any
       fire; he has no acid of his own.
 
+## 4c. More interactivity (ideas agreed 2026-11-03; user's picks to do first: footprints, splash, fireman)
+He feels the sim:
+- [ ] Electricity lights him up: he glows while a spark runs through him, and passes it on to what he holds.
+- [ ] Big blasts daze him: knocked out a few seconds, stars over his head, then he gets up.
+- [ ] He gets dirty: sand, coal dust and soot stick to him as a tint (like wet and frost); he shakes it off later.
+- [ ] He runs from fire and lava (he doesn't now: only the pets do): away from them, behind a window or icon.
+- [ ] A spinning gravity well makes him orbit it and get dizzy.
+He changes the sim:
+- [ ] Footprints: walking through powder leaves dents; wet feet leave drops on dry ground.
+- [ ] Splash: flung into sand or water, it sprays out around where he lands.
+- [ ] He picks up and throws particles: an arm scoops a handful (sand, water...), it rides with his hand, and his
+      swing or a fling throws it as real particles.
+- [ ] He builds when bored: scoops sand into a little pile or castle.
+- [ ] He feeds his pets: drops plant or seed particles for them to eat.
+Games:
+- [ ] Catch: drop a ball of a material (sand, water, a bomb); he tries to catch it before it lands.
+- [ ] Fireman: when fire starts he grabs water and puts it out, happy if he saves a window.
+
 ## 4b. Elements he doesn't react to yet
 - [x] Clone (CLNE, PCLN, BCLN, ACLN...): touching him copies nothing; decide (it can't clone him, so: solid, as now?).
       Decided: solid, as now.
