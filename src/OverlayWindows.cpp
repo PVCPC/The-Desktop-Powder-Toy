@@ -39,6 +39,8 @@
 #include "luna_png.h"
 #include "skin_vista_png.h"
 #include "skin_seven_png.h"
+#include "skin_eight_png.h"
+#include "skin_ten_png.h"
 #include "OverlaySkins.h"
 #include "gui/dialogues/ErrorMessage.h"
 #include "client/Client.h"
@@ -2097,8 +2099,8 @@ namespace
 	XP xpTheme, xpOliveTheme{ 1 }, xpSilverTheme{ 2 };
 	Skinned<Vista> vistaTheme{ { skin_vista_png.AsCharSpan(), skin_vista_parts } };
 	Skinned<Seven> sevenTheme{ { skin_seven_png.AsCharSpan(), skin_seven_parts } };
-	Eight eightTheme;
-	Ten tenTheme;
+	Skinned<Eight> eightTheme{ { skin_eight_png.AsCharSpan(), skin_eight_parts } };
+	Skinned<Ten> tenTheme{ { skin_ten_png.AsCharSpan(), skin_ten_parts } };
 	Eleven elevenTheme;
 	ClassicMac classicMacTheme;
 	ModernMac modernMacTheme;

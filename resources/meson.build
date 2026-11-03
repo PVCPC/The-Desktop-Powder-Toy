@@ -148,4 +148,6 @@ embedded_files += [
 	[ 'luna_png', files('luna.png') ], # Windows XP Luna's own images (luna.py)
 	[ 'skin_vista_png', files('skin_vista.png') ], # looks' controls from faithful recreations (skins.py)
 	[ 'skin_seven_png', files('skin_seven.png') ],
+	[ 'skin_eight_png', files('skin_eight.png') ],
+	[ 'skin_ten_png', files('skin_ten.png') ],
 ]

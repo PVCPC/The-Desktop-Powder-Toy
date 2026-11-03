@@ -19,6 +19,17 @@ LOOKS = {
     'vista': AERO('Windows-Vista'),
     # (its xfwm4 caption buttons are 7 Basic's, all one width: the glass look keeps its own)
     'seven': dict(AERO('Windows-7'), Radio=([f'Windows-7/gtk-2.0/Check-Radio/option{i}.png' for i in (1, 3, 2, 4)], 0)),
+    'eight': {
+        'Button': ([f'Windows-8.1/gtk-2.0/Buttons/button-{s}.png' for s in ('default', 'prelight', 'pressed')], 4),
+        'Check': ([f'Windows-8.1/gtk-2.0/Check-Radio/checkbox-{s}.png' for s in ('unchecked', 'unchecked-over', 'checked', 'checked-over')], 0),
+        'Radio': ([f'Windows-8.1/gtk-2.0/Check-Radio/radio-{s}.png' for s in ('unselected', 'unselected-over', 'selected', 'selected-over')], 0),
+        'Tab': ([f'Windows-8.1/gtk-2.0/Tabs/tab-top{s}.png' for s in ('', '', '-active')], 3),
+    },
+    # (its buttons are the Settings app's, not a desktop program's: the look keeps its own)
+    'ten': {
+        'Check': ([f'Windows-10/gtk-2.0/assets/checkbox-{s}.png' for s in ('unchecked', 'unchecked-over', 'checked', 'checked-over')], 0),
+        'Radio': ([f'Windows-10/gtk-2.0/assets/radio-{s}.png' for s in ('unchecked', 'unchecked-over', 'checked', 'checked-over')], 0),
+    },
 }
 
 src, res, header = sys.argv[1:4]
