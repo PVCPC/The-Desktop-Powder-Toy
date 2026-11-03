@@ -154,7 +154,7 @@ struct Ground {
     shots: Vec<[f64; 5]>,         // his weapons since TDPT last asked: a bullet's path this frame (x0, y0, x1, y1, 1) or a flame (x, y, x, y, 2)
     bullets: Vec<(f64, f64)>,     // the game's bullets last frame: where each was
     drops: Vec<String>,           // his hoses' drops last frame (their clips' names)
-    hide: u8,                     // the game's own effects TDPT shows as the sim's instead, not drawn: 1 his hoses' water
+    hide: u8,                     // the game's own effects TDPT shows as the sim's instead, not drawn: 1 his hoses' water, 2 fire
     game_grav: f64,               // the game's grav this frame, before that
     ledge: Option<Ledge>,         // the active window's edges he can stand on (as in the desktop app)
     carry: (f64, f64),            // how far that window moved while he stood on it, not yet applied
@@ -631,7 +631,12 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
                     }
                     continue;
                 }
-                if !(name.starts_with("fireClip") || name.starts_with("flame")) || g.shots.len() >= 256 {
+                // fire: flames (flamethrower, fireballs, molotovs), fire clips and burning debris (a molotov's glass)
+                let fire = name.starts_with("fireClip") || name.starts_with("flame");
+                if g.hide & 2 != 0 && (fire || name.starts_with("fireGlowClip")) {
+                    v.set(&format!("particles.{name}._visible"), Value::Bool(false));
+                }
+                if !(fire || name.starts_with("debris") && c.get("onFire") == Some(&Value::Bool(true))) || g.shots.len() >= 256 {
                     continue;
                 }
                 if let (Some(Value::Number(x)), Some(Value::Number(y))) = (c.get("x"), c.get("y")) {
@@ -1919,8 +1924,15 @@ mod tests {
             game.player.lock().unwrap().handle_event(PlayerEvent::MouseUp { x: mx, y: my, button: MouseButton::Left });
             Some(std::mem::take(&mut game.ground.lock().unwrap().shots))
         };
+        game.ground.lock().unwrap().hide = 2; // TPT fire only: the game's flames aren't drawn
         let flames = fire(&mut game, "Flamethrower").expect("no Flamethrower");
         assert!(flames.iter().filter(|s| s[4] == 2.0).count() > 10, "{flames:?}");
+        {
+            let mut p = game.player.lock().unwrap();
+            let Value::Object(clips) = p.get_root_variable("particles") else { panic!() };
+            let name = clips.keys().find(|n| n.starts_with("flame")).expect("no flames").clone();
+            assert_eq!(p.get_root_variable(&format!("particles.{name}._visible")), Value::Bool(false));
+        }
         if let Some(bullets) = fire(&mut game, "Pistol") {
             // v1.02: from the gun (the mouse), a frame's flight
             let b = bullets.iter().find(|s| s[4] == 1.0).unwrap_or_else(|| panic!("{bullets:?}"));

@@ -192,7 +192,10 @@ Games:
       -> sim->petDance; pets step left, hop, step right, hop round where they stood (tested: stay within ~12 px).
       Hoses DONE (Fun "Buddy's hoses spray TPT water" = Both, + "Only TPT water from his hoses" = TPT): drops are
       particles.smoke* with strength (splash* where they hit); each new one -> shots kind 4 -> 3 WATR at 0.6 its speed;
-      hide:1 sets their _visible false (he still feels the spray). Game = both off. Next: fire items, gravity items.
+      hide:1 sets their _visible false (he still feels the spray). Game = both off.
+      Fire DONE: fireballs and molotovs make the same particles.flame* as the flamethrower, so "Buddy's weapons hit the sim"
+      already made them TPT fire (Both); now also a molotov's burning debris (debris* onFire). "Only TPT fire from his
+      items" = hide:2 (flame*, fireClip*, fireGlowClip* not drawn). Next: gravity items.
 - [x] Fireman: when fire starts he grabs water and puts it out, happy if he saves a window. (Overlay.Fun.BuddyFireman:
       sprays water from his hand 3 s at fire 40-250 px away, rests 10 s; no "happy" yet, needs the game's emotes)
 

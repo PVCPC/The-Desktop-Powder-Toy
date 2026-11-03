@@ -594,9 +594,10 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 	for (size_t s = 0; s < shot && prefs.Get("Overlay.Fun.BuddyDance", false); s++)
 		if (shots[s * 5 + 4] == 3) sim->petDance = sim->currentTick + 30;
 	// his hoses (Overlay.Fun.BuddyWater): each new drop is a little TPT water flying on as the drop does (his frames to
-	// TPT's ticks: 0.6 the speed); BuddyWaterOnly hides the game's own drops, so only TPT's are seen
+	// TPT's ticks: 0.6 the speed); BuddyWaterOnly hides the game's own drops, so only TPT's are seen (BuddyFireOnly: his flames)
 	bool water = prefs.Get("Overlay.Fun.BuddyWater", false);
-	if (int hide = water && prefs.Get("Overlay.Fun.BuddyWaterOnly", false) ? 1 : 0; hide != hidden)
+	bool weapons = prefs.Get("Overlay.Fun.BuddyWeapons", false);
+	if (int hide = (water && prefs.Get("Overlay.Fun.BuddyWaterOnly", false) ? 1 : 0) | (weapons && prefs.Get("Overlay.Fun.BuddyFireOnly", false) ? 2 : 0); hide != hidden)
 		tdpt_buddy_command(buddy, ("hide:" + std::to_string(hide)).c_str()), hidden = hide;
 	for (size_t s = 0; s < shot && water; s++)
 		if (double *b = shots + s * 5; b[4] == 4)
@@ -605,7 +606,7 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 					if (int i = sim->create_part(-1, x, y, PT_WATR); i >= 0)
 						sim->parts[i].vx = float(std::clamp(b[2] * 0.6, -25.0, 25.0) + sim->rng.uniform01() - 0.5),
 						sim->parts[i].vy = float(std::clamp(b[3] * 0.6, -25.0, 25.0) + sim->rng.uniform01() - 0.5);
-	for (size_t s = 0; s < shot && prefs.Get("Overlay.Fun.BuddyWeapons", false); s++)
+	for (size_t s = 0; s < shot && weapons; s++)
 	{
 		double *b = shots + s * 5;
 		if (b[4] >= 3) continue;

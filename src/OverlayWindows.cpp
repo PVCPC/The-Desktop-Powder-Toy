@@ -223,7 +223,7 @@ namespace
 		bool buddy = false;                      // Interactive Buddy (OverlayBuddy; his file: Overlay.Fun.BuddySwf)
 		bool buddyPets = false;                  // the pets notice him (OverlayBuddy reads Overlay.Fun.BuddyPets)
 		bool buddyLooks = false;                 // he looks wet and frosted (Overlay.Fun.BuddyLooks)
-		bool buddyTracks = false, buddySplash = false, buddyFireman = false, buddyCarry = false, buddyGlow = false, buddyWeapons = false, buddyFlee = false, buddyDirt = false, buddyDance = false, buddyFeed = false, buddyWater = false, buddyWaterOnly = false; // footprints, splashes, he puts out fires, carries sand, his guns, runs from fire, dirt, radio, feeding, hoses (Overlay.Fun.Buddy*)
+		bool buddyTracks = false, buddySplash = false, buddyFireman = false, buddyCarry = false, buddyGlow = false, buddyWeapons = false, buddyFlee = false, buddyDirt = false, buddyDance = false, buddyFeed = false, buddyWater = false, buddyWaterOnly = false, buddyFireOnly = false; // footprints, splashes, he puts out fires, carries sand, his guns, runs from fire, dirt, radio, feeding, hoses (Overlay.Fun.Buddy*)
 		// the Buddy tab (OverlayBuddy reads them from the prefs): his size and speech bubbles' (%), toys at once (0: no
 		// limit), standing on the active window, smoothing, speech
 		float buddySize = 100, buddySpeechSize = 100, buddyToys = 6, buddyVolume = 50;
@@ -354,7 +354,8 @@ namespace
 		Check(L"Splash", L"Thrown into sand or water, Buddy sends it flying up and out around where he lands", &fun.buddySplash, "Overlay.Fun.BuddySplash"),
 		Check(L"Fireman", L"When something burns near Buddy (and he isn't on fire himself), he sprays water at it from his hand for a few seconds, then rests before the next fire", &fun.buddyFireman, "Overlay.Fun.BuddyFireman"),
 		Check(L"Buddy carries sand and water", L"When his hand goes into sand, water or another powder or liquid that isn't hot, he scoops up a handful that rides on his hand. Swing or throw him and it flies off; otherwise he drops it after a few seconds", &fun.buddyCarry, "Overlay.Fun.BuddyCarry"),
-		Check(L"Buddy's weapons hit the sim", L"Bullets from his pistol and machine gun knock sand, water and gas along their path, break glass and throw sparks off what stops them; his flamethrower's flames are real fire that lights wood, oil, gunpowder and anything else that burns", &fun.buddyWeapons, "Overlay.Fun.BuddyWeapons"),
+		Check(L"Buddy's weapons hit the sim", L"Bullets from his pistol and machine gun knock sand, water and gas along their path, break glass and throw sparks off what stops them; flames from his flamethrower, fireballs and molotov cocktails are real fire that lights wood, oil, gunpowder and anything else that burns", &fun.buddyWeapons, "Overlay.Fun.BuddyWeapons"),
+		Check(L"Only TPT fire from his items", L"With the one above: the game's own flames are hidden, so his flamethrower, fireballs and molotovs make only TPT fire", &fun.buddyFireOnly, "Overlay.Fun.BuddyFireOnly"),
 		Check(L"Buddy runs from fire and lava", L"Fire, lava or plasma close to Buddy and he runs away from it, the way he runs in his own game. (With Fireman on he still sprays water at fires further away)", &fun.buddyFlee, "Overlay.Fun.BuddyFlee"),
 		Check(L"Buddy gets dirty", L"Coal, dust, gunpowder, clay, oil, broken metal and smoke leave dark smudges on Buddy, more the longer he's in them. Water washes them off; otherwise they wear off in about a minute", &fun.buddyDirt, "Overlay.Fun.BuddyDirt"),
 		Check(L"Pets dance to Buddy's radio", L"When Buddy dances to his radio, the desktop pets dance along with him", &fun.buddyDance, "Overlay.Fun.BuddyDance"),
