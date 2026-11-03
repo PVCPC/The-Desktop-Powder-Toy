@@ -354,13 +354,15 @@ impl Ground {
         true
     }
 
-    // the solid pixels inside a circle: how many, and the sum of their offsets from its centre
+    // the solid pixels inside a circle: how many, and the sum of their offsets from its centre. Powder over the centre
+    // doesn't count: poured on him it would press him down into the floor (crushed, he glitched through it); the sim
+    // moves it out of his way instead
     fn overlap(&self, x: f64, y: f64, r: f64) -> (u32, f64, f64) {
         let (mut n, mut sx, mut sy) = (0, 0.0, 0.0);
         for py in (y - r).floor() as i32..=(y + r).ceil() as i32 {
             for px in (x - r).floor() as i32..=(x + r).ceil() as i32 {
                 let (dx, dy) = (px as f64 + 0.5 - x, py as f64 + 0.5 - y);
-                if dx * dx + dy * dy <= r * r && self.solid(px, py) {
+                if dx * dx + dy * dy <= r * r && self.solid(px, py) && !(dy < 0.0 && self.cell(px, py) & POWDER != 0) {
                     n += 1;
                     sx += dx;
                     sy += dy;
@@ -1383,6 +1385,20 @@ mod tests {
         assert!(yv < 0.0 && xv < 1.0, "bounces up with friction: {xv} {yv}");
         assert!(g.under(x, y, 10.0));
         assert!(g.push_out(&mut x, &mut y, &mut xv, &mut yv, 10.0).is_none());
+    }
+
+    // sand poured on him rests on him without pressing him down (he was crushed into the floor); sand under him still holds him
+    #[test]
+    fn sand_on_top() {
+        let sand = |top: bool| super::Ground {
+            rect: [0, 0, 200, 200],
+            cells: (0..200 * 200).map(|i| if (i / 200 < 100) == top { 1 | super::POWDER } else { 0 }).collect(),
+            ..Default::default()
+        };
+        let (mut x, mut y, mut xv, mut yv) = (50.0, 105.0, 0.0, 0.0);
+        assert!(sand(true).push_out(&mut x, &mut y, &mut xv, &mut yv, 10.0).is_none() && y == 105.0, "pushed down: {y}");
+        let (mut x, mut y, mut xv, mut yv) = (50.0, 95.0, 0.0, 3.0);
+        assert!(sand(false).push_out(&mut x, &mut y, &mut xv, &mut yv, 10.0).is_some() && y <= 90.5, "sank in: {y}");
     }
 
     #[test]

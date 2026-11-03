@@ -48,6 +48,9 @@ namespace
 	double lastSpeed[8];          // each part's speed last tick (a splash: fast, then stopped by sand or water)
 	int hose = 0, hoseRest = 0;   // fireman: ticks left spraying, and before he looks for fire again
 	float hoseX, hoseY;           // the fire he is putting out
+	std::vector<Particle> handful; // what his hand carries (Overlay.Fun.BuddyCarry); in the sim each tick, by carried
+	std::vector<int> carried;      // their ids this tick (-1: no room for that one this tick)
+	int carryTicks = 0, carryRest = 0; // ticks he has held it, and before he scoops again
 	bool held = false;            // a press that went to him, until its release
 	double heldX, heldY;          // where TPT's window last saw the mouse while held (it has the mouse captured)
 
@@ -529,7 +532,7 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 				{
 					double dx = x + 0.5 - p[0], dy = y + 0.5 - p[1], d = std::max(1.0, std::hypot(dx, dy));
 					auto &t = sim->parts[ID(q)];
-					float f = float(was * (0.3 + 0.3 * sim->rng.uniform01()));
+					float f = float(std::min(was, 10.0) * (0.2 + 0.2 * sim->rng.uniform01())); // (harder flung it left the play area)
 					t.vx += float(dx / d) * f, t.vy += float(std::min(dy / d, -0.3)) * f; // out, and up
 				}
 	}
@@ -558,6 +561,46 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 			float v = 7, lob = float(std::min(4.0, d / 80)); // aimed a bit high: it falls on the way
 			sim->parts[i].vx = float(dx / d) * v + float(sim->rng.uniform01() - 0.5), sim->parts[i].vy = float(dy / d) * v - lob;
 		}
+	}
+	// Carrying: his hand in a powder or liquid that isn't hot scoops up a handful (up to 40) that rides on it as real
+	// particles; a fast swing or throw (hand over 6 px a frame) sends it off at the hand's speed, else he drops it after
+	// 8 s; he scoops again 4 s later
+	for (size_t j = 0; j < carried.size(); j++)
+		if (int i = carried[j]; i >= 0 && sim->parts[i].type == handful[j].type)
+			handful[j] = sim->parts[i], sim->kill_part(i); // as it is now (its heat, life...)
+	carried.clear();
+	if (!prefs.Get("Overlay.Fun.BuddyCarry", false) || parts.size() != 6 || !std::isfinite(parts[3][0] + parts[3][1] + parts[3][3] + parts[3][4]))
+		handful.clear();
+	else
+	{
+		auto &hand = parts[3];
+		if (carryRest > 0) carryRest--;
+		else if (handful.empty())
+		{
+			for (int y = std::max(0, int(hand[1] - hand[2]) - 2); y <= std::min(YRES - 1, int(hand[1] + hand[2]) + 2); y++)
+				for (int x = std::max(0, int(hand[0] - hand[2]) - 2); x <= std::min(XRES - 1, int(hand[0] + hand[2]) + 2); x++)
+					if (int q = sim->pmap[y][x]; q && handful.size() < 40 && (isPowder(ID(q)) || isLiquid(ID(q))) && sim->parts[ID(q)].temp < 333.15f)
+						handful.push_back(sim->parts[ID(q)]), sim->kill_part(ID(q));
+			carryTicks = 0;
+		}
+		double speed = std::hypot(hand[3], hand[4]);
+		bool letGo = !handful.empty() && ((carryTicks > 15 && speed > 6) || ++carryTicks > 480);
+		for (size_t j = 0; j < handful.size(); j++)
+		{
+			// a clump round the hand: a spiral just outside it, or further out that way when that's full (buried)
+			double a = j * 2.39996, d = hand[2] + 1.5 + j * 0.15;
+			int x = int(hand[0] + std::cos(a) * d), y = int(hand[1] + std::sin(a) * d), i = -1;
+			for (int out = 1; !empty(x, y) && out < 25; out++) x = int(hand[0] + std::cos(a) * (d + out)), y = int(hand[1] + std::sin(a) * (d + out));
+			if (empty(x, y) && (i = sim->create_part(-1, x, y, handful[j].type)) >= 0)
+			{
+				sim->parts[i] = handful[j];
+				sim->parts[i].x = float(x), sim->parts[i].y = float(y);
+				float k = letGo && speed > 6 ? float(std::min(1.0, 20 / speed)) : 0; // thrown (at most 20 px a tick), or dropped
+				sim->parts[i].vx = float(hand[3]) * k + (k ? float(sim->rng.uniform01() - 0.5) : 0), sim->parts[i].vy = float(hand[4]) * k;
+			}
+			carried.push_back(i); // ponytail: one with no room the tick he lets go is lost; look further out if it shows
+		}
+		if (letGo) handful.clear(), carried.clear(), carryRest = 240;
 	}
 	std::vector<OverlayWall> mine;
 	for (auto &p : parts)

@@ -152,8 +152,9 @@ He feels the sim:
 He changes the sim:
 - [x] Footprints: walking through powder leaves dents; wet feet leave drops on dry ground. (Overlay.Fun.BuddyTracks)
 - [x] Splash: flung into sand or water, it sprays out around where he lands. (Overlay.Fun.BuddySplash)
-- [ ] He picks up and throws particles: an arm scoops a handful (sand, water...), it rides with his hand, and his
+- [x] He picks up and throws particles: an arm scoops a handful (sand, water...), it rides with his hand, and his
       swing or a fling throws it as real particles.
+      Done (Overlay.Fun.BuddyCarry): up to 40 from his right hand, thrown over 6 px a frame, else dropped after 8 s.
 - [ ] He builds when bored: scoops sand into a little pile or castle.
 - [ ] He feeds his pets: drops plant or seed particles for them to eat.
 Games:

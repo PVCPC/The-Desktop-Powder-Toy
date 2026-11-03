@@ -223,7 +223,7 @@ namespace
 		bool buddy = false;                      // Interactive Buddy (OverlayBuddy; his file: Overlay.Fun.BuddySwf)
 		bool buddyPets = false;                  // the pets notice him (OverlayBuddy reads Overlay.Fun.BuddyPets)
 		bool buddyLooks = false;                 // he looks wet and frosted (Overlay.Fun.BuddyLooks)
-		bool buddyTracks = false, buddySplash = false, buddyFireman = false; // footprints, splashes, he puts out fires (Overlay.Fun.Buddy*)
+		bool buddyTracks = false, buddySplash = false, buddyFireman = false, buddyCarry = false; // footprints, splashes, he puts out fires, carries sand (Overlay.Fun.Buddy*)
 		// the Buddy tab (OverlayBuddy reads them from the prefs): his size and speech bubbles' (%), toys at once (0: no
 		// limit), standing on the active window, smoothing, speech
 		float buddySize = 100, buddySpeechSize = 100, buddyToys = 6, buddyVolume = 50;
@@ -352,6 +352,7 @@ namespace
 		Check(L"Footprints", L"Walking through sand and other powders, Buddy's feet push it aside and leave dents; with wet feet he leaves drops of water on dry ground", &fun.buddyTracks, "Overlay.Fun.BuddyTracks"),
 		Check(L"Splash", L"Thrown into sand or water, Buddy sends it flying up and out around where he lands", &fun.buddySplash, "Overlay.Fun.BuddySplash"),
 		Check(L"Fireman", L"When something burns near Buddy (and he isn't on fire himself), he sprays water at it from his hand for a few seconds, then rests before the next fire", &fun.buddyFireman, "Overlay.Fun.BuddyFireman"),
+		Check(L"Buddy carries sand and water", L"When his hand goes into sand, water or another powder or liquid that isn't hot, he scoops up a handful that rides on his hand. Swing or throw him and it flies off; otherwise he drops it after a few seconds", &fun.buddyCarry, "Overlay.Fun.BuddyCarry"),
 	};
 	bool BuddyTabShown() { return !GlobalPrefs::Ref().Get("Overlay.Fun.BuddySwf", ByteString("")).empty(); }
 	// Interactive Buddy's file: the game's .swf, from the user (turns him on)
