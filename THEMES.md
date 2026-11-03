@@ -1,0 +1,63 @@
+# Real looks for TDPT's themes (branch `buddy`)
+
+Goal: every look in Overlay > Look draws from the real thing, or from a very faithful recreation of it, not a
+hand-drawn guess. The user's call: use these public repos and credit each one in README.md ("Libraries and other assets
+used"). Each look's images get packed into one PNG in resources/ (no taller than 384 px: TPT's PNG reader refuses
+anything bigger), with a script beside it that rebuilds it. Each look should add well under 100 KB.
+
+Done so far: Windows XP uses the real Luna images (resources/luna.png and luna.py, from wine_themes). Blue, Olive Green
+and Silver are a Colour row under it. The Welcome page takes the look's page, heading and text colours.
+
+## Rules (learned)
+- The theme pref is the index into `themes[]`: add new looks **only at the end**. List them in `windowsThemes` /
+  `macThemes` in display order.
+- A generation's colours or variants go in `themeColours` (the first one is the picker's) and show as the Colour row.
+- Themes draw through `Luna()`-style 9-slice blits with the source's own sizing margins. The hooks are Frame,
+  CaptionButton, Button, Tab, CheckBox, GroupFrame and Popup.
+- .gitignore ignores `*.png` and `*.py`: add these with `git add -f`.
+- Windows 11 on Windows: draw from the PC's own C:\Windows\Resources\Themes\aero.msstyles at run time (never ship it).
+  On Mac, keep the hand-drawn Windows 11.
+
+## Sources (private PVCPC copies of each, as the user asked)
+| Our look | Source | Licence |
+|---|---|---|
+| Windows 3.1 | github.com/B00merang-Project/Windows-3.11 (also github.com/matthewmx86/Win3xE) | GPL-3 / BSD-2 |
+| Windows 95 | github.com/B00merang-Project/Windows-95; exact colours: github.com/ke2083/Windows95Theme | GPL-3 |
+| Windows 98 | github.com/B00merang-Project/Windows-Classic | GPL-3 |
+| Windows XP | github.com/listumps/wine_themes (real luna.msstyles; Royale, Zune too); B00merang Windows-XP (Royale Noir, Embedded) | none / GPL-3 |
+| Windows Vista | github.com/B00merang-Project/Windows-Vista | GPL-3 |
+| Windows 7 | github.com/B00merang-Project/Windows-7 | GPL-3 |
+| Windows 8 | github.com/B00merang-Project/Windows-8.1 | GPL-3 |
+| Windows 10 | github.com/B00merang-Project/Windows-10 (+ Windows-10-Dark, Windows-10-Fluent) | GPL-3 |
+| Windows 11 | the PC's own aero.msstyles (Windows only) | |
+| System 1-6 | github.com/B00merang-Project/System-4 | GPL-3 |
+| System 7 | github.com/moltensoftware/Symptom-7 (icons: moltensoftware/SevenIcons) | GPL-3 / none |
+| Mac OS 8-9 | github.com/B00merang-Project/Mac-OS-9 | GPL-3 |
+| Mac OS X 10.0-10.6 | github.com/B00merang-Project/Mac-OS-X-Cheetah, OS-X-Leopard | GPL-3 |
+| OS X 10.7-10.9 | github.com/B00merang-Project/OS-X-Mavericks | GPL-3 |
+| OS X 10.10-10.15 | github.com/B00merang-Project/OS-X-Yosemite | GPL-3 |
+| macOS 11-15 | github.com/B00merang-Project/macOS (+ macOS-Dark) | GPL-3 |
+| macOS 26 | github.com/kayozxo/GNOME-macOS-Tahoe | MIT |
+| TempleOS | github.com/PhilipPanda/TempleOS-Theme (fonts/templeos_font.ttf) | MIT |
+
+Also: github.com/bartekl1/windows-ui-assets (icons, cursors, sounds and wallpapers per Windows version; no frames or
+buttons). Index of B00merang's themes: b00merang-project.github.io/windows and /macos.
+
+## To do (in order)
+1. Private PVCPC copies of every repo above.
+2. Swap each look to its source's images, oldest Windows first: 3.1, 95, 98, Vista, 7, 8, 10, then 11 (from the PC),
+   then the Macs: System 1-6, System 7, Mac OS 8-9, 10.0-10.6, 10.7-10.9, 10.10-10.15, 11-15, 26. Then TempleOS's
+   real font.
+3. Extra colours and variants as Colour rows: XP Royale, Royale Noir, Zune, Embedded; 10 Dark; macOS Dark; possibly
+   B00merang's Windows 1.0, 2.0, Longhorn and Catalina as their own looks.
+4. Welcome page in each look's parts: key boxes as the look's push buttons, the tip box as its tooltip, and headings,
+   underlines and links in its colours.
+5. Welcome screen per family, in our own words (no copied Microsoft or Apple text):
+   - Classic Windows (3.1, 95, 98): a grey dialog with a side banner, a topic list and a "Did you know" tip.
+   - Welcome Center (XP, Vista): a header and a grid of task tiles.
+   - Getting Started (7, 8, 10, 11): in each one's colours.
+   - Classic Mac (System 1-9): a small window with a picture and plain text.
+   - Modern Mac (10.0 to 26): an icon, a centred heading and a Continue button.
+6. Check 95's colours against Windows95Theme's .theme file.
+7. Credit every source in README.md as each look lands.
+8. Then back to Buddy: more interactivity (BUDDY.md).
