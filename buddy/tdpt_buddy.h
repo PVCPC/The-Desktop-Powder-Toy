@@ -21,7 +21,7 @@ extern "C"
 	// the game's own menus: lines of "depth	flags	command	label" (flags p submenu, g greyed, c ticked, s separator),
 	// into out (cut short to len); returns the length needed
 	size_t tdpt_buddy_menus(Buddy *b, char *out, size_t len);
-	void tdpt_buddy_command(Buddy *b, const char *command); // a command from those lines, for the game
+	void tdpt_buddy_command(Buddy *b, const char *command); // a command from those lines, for the game; "act:runToPoint:200": an action of his
 	// the part of the sim he needs next: rect = x, y, w, h sim pixels (maybe partly off the sim)
 	void tdpt_buddy_area(Buddy *b, int32_t rect[4]);
 	// the sim over rect: w * h cells, rows top down; low 5 bits 0 nothing, 1 solid for him, 2 + weight/4 liquid, 31 acid, 30 VOID or

@@ -1038,7 +1038,10 @@ fn run(mut game: Game, shared: Arc<Mutex<Shared>>) {
         let drawn = catch_unwind(AssertUnwindSafe(|| {
             let mut p = game.player.lock().unwrap();
             for c in commands {
-                p.call_root_method("__hostMenuCommand", vec![c.into()]).ok();
+                match c.strip_prefix("act:").map(str::to_owned) {
+                    Some(action) => p.call_root_method("addAction", vec![action.into(), 5.into()]).ok(),
+                    None => p.call_root_method("__hostMenuCommand", vec![c.into()]).ok(),
+                };
             }
             let k = game.scale.max(1) as f64; // clicks come in stage pixels, the player wants the frame's
             for c in clicks {
@@ -1223,7 +1226,7 @@ pub unsafe extern "C" fn tdpt_buddy_menus(b: *mut Buddy, out: *mut c_char, len: 
     menus.len() + 1
 }
 
-/// A command from tdpt_buddy_menus, for the game
+/// A command from tdpt_buddy_menus, for the game; or "act:" and one of his own actions ("act:runToPoint:200") for him to do next
 /// # Safety
 /// b is from tdpt_buddy_open; command is NUL-terminated.
 #[unsafe(no_mangle)]

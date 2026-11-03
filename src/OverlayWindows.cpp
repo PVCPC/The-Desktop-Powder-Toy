@@ -223,7 +223,7 @@ namespace
 		bool buddy = false;                      // Interactive Buddy (OverlayBuddy; his file: Overlay.Fun.BuddySwf)
 		bool buddyPets = false;                  // the pets notice him (OverlayBuddy reads Overlay.Fun.BuddyPets)
 		bool buddyLooks = false;                 // he looks wet and frosted (Overlay.Fun.BuddyLooks)
-		bool buddyTracks = false, buddySplash = false, buddyFireman = false, buddyCarry = false, buddyGlow = false, buddyWeapons = false; // footprints, splashes, he puts out fires, carries sand, his guns (Overlay.Fun.Buddy*)
+		bool buddyTracks = false, buddySplash = false, buddyFireman = false, buddyCarry = false, buddyGlow = false, buddyWeapons = false, buddyFlee = false; // footprints, splashes, he puts out fires, carries sand, his guns, runs from fire (Overlay.Fun.Buddy*)
 		// the Buddy tab (OverlayBuddy reads them from the prefs): his size and speech bubbles' (%), toys at once (0: no
 		// limit), standing on the active window, smoothing, speech
 		float buddySize = 100, buddySpeechSize = 100, buddyToys = 6, buddyVolume = 50;
@@ -355,6 +355,7 @@ namespace
 		Check(L"Fireman", L"When something burns near Buddy (and he isn't on fire himself), he sprays water at it from his hand for a few seconds, then rests before the next fire", &fun.buddyFireman, "Overlay.Fun.BuddyFireman"),
 		Check(L"Buddy carries sand and water", L"When his hand goes into sand, water or another powder or liquid that isn't hot, he scoops up a handful that rides on his hand. Swing or throw him and it flies off; otherwise he drops it after a few seconds", &fun.buddyCarry, "Overlay.Fun.BuddyCarry"),
 		Check(L"Buddy's weapons hit the sim", L"Bullets from his pistol and machine gun knock sand, water and gas along their path, break glass and throw sparks off what stops them; his flamethrower's flames are real fire that lights wood, oil, gunpowder and anything else that burns", &fun.buddyWeapons, "Overlay.Fun.BuddyWeapons"),
+		Check(L"Buddy runs from fire and lava", L"Fire, lava or plasma close to Buddy and he runs away from it, the way he runs in his own game. (With Fireman on he still sprays water at fires further away)", &fun.buddyFlee, "Overlay.Fun.BuddyFlee"),
 	};
 	bool BuddyTabShown() { return !GlobalPrefs::Ref().Get("Overlay.Fun.BuddySwf", ByteString("")).empty(); }
 	// Interactive Buddy's file: the game's .swf, from the user (turns him on)

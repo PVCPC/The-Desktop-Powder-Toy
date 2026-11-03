@@ -152,7 +152,10 @@ He feels the sim:
 - [x] Big blasts daze him: knocked out a few seconds, stars over his head, then he gets up.
       Already in the game: a blast lays him flat ~7 s with its own stars round his head (starNum), then he gets up.
 - [ ] He gets dirty: sand, coal dust and soot stick to him as a tint (like wet and frost); he shakes it off later.
-- [ ] He runs from fire and lava (he doesn't now: only the pets do): away from them, behind a window or icon.
+- [x] He runs from fire and lava (he doesn't now: only the pets do): away from them, behind a window or icon.
+      Done (Fun toggle "Buddy runs from fire and lava"): fire/lava/plasma within 100 px -> tdpt_buddy_command
+      "act:runToPoint:X" (the game's addAction(action, 5)), 250 px away from most of it; every 2 s at most; not while he
+      burns (the game's own panic). Not behind windows or icons: he runs along the floor.
       The game has its own running away (runFromGrenade, scared, runToPoint): trigger that from sim fire and lava.
 - [ ] A spinning gravity well makes him orbit it and get dizzy. The game has its own pull (gravitateToPoint,
       gravitating): link sim gravity wells to it; no new dizzy effect.

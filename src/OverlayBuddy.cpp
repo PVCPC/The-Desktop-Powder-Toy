@@ -46,6 +46,7 @@ namespace
 	std::vector<float> air;       // and its air (velocity, pressure), for tdpt_buddy_air
 	int wet[8], frost[8];         // ticks each part still looks wet / frosted (Overlay.Fun.BuddyLooks)
 	int zapped = 0;               // ticks he still glows from a shock (Overlay.Fun.BuddyGlow)
+	int fleeRest = 0;             // ticks before he runs from fire again (Overlay.Fun.BuddyFlee)
 	double lastSpeed[8];          // each part's speed last tick (a splash: fast, then stopped by sand or water)
 	int hose = 0, hoseRest = 0;   // fireman: ticks left spraying, and before he looks for fire again
 	float hoseX, hoseY;           // the fire he is putting out
@@ -618,6 +619,26 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 				if (int e = empty(px, py) ? sim->create_part(-1, px, py, PT_EMBR) : -1; e >= 0)
 					sim->parts[e].vx = float(-dx * 2 + sim->rng.uniform01() * 2 - 1), sim->parts[e].vy = float(-dy * 2 - sim->rng.uniform01()), sim->parts[e].life = 15;
 			break;
+		}
+	}
+	// Running from fire: fire, lava or plasma within 100 px of him and he runs 250 px away from (most of) it, with the game's
+	// own run (its runToPoint action); again 2 s later if it's still there. Not while he burns: then the game's own panic
+	if (fleeRest > 0) fleeRest--;
+	else if (prefs.Get("Overlay.Fun.BuddyFlee", false) && parts.size() == 6 && sim->currentTick % 10 == 0 && std::isfinite(parts[0][0] + parts[0][1]) &&
+		std::none_of(parts.begin(), parts.end(), [](auto &p) { return p[5] != 0; }))
+	{
+		auto &body = parts[0];
+		double side = 0; // the fire round him: more to his right (+) or left (-)
+		int n = 0;
+		for (int i = 0; i <= sim->parts.active; i++)
+			if (int t = sim->parts[i].type; t == PT_FIRE || t == PT_LAVA || t == PT_PLSM)
+				if (std::pow(sim->parts[i].x - body[0], 2) + std::pow(sim->parts[i].y - body[1], 2) < 100 * 100)
+					side += sim->parts[i].x - body[0], n++;
+		if (n)
+		{
+			int to = int(std::clamp(body[0] + (side > 0 ? -250 : 250), 30.0, std::max(30.0, fw - 30.0)));
+			tdpt_buddy_command(buddy, ("act:runToPoint:" + std::to_string(to)).c_str());
+			fleeRest = 120;
 		}
 	}
 	// Carrying: his hand in a powder or liquid that isn't hot scoops up a handful (up to 40) that rides on it as real
