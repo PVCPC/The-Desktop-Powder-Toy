@@ -50,6 +50,8 @@
 #include "skin_lion_png.h"
 #include "skin_yosemite_png.h"
 #include "skin_macos_png.h"
+#include "skin_tendark_png.h"
+#include "skin_macosdark_png.h"
 #include "OverlaySkins.h"
 #include "gui/dialogues/ErrorMessage.h"
 #include "client/Client.h"
@@ -1119,6 +1121,45 @@ namespace
 		}
 	};
 
+	// Windows 10 in light and dark mode (dark: Windows-10-Dark's colours and controls)
+	struct TenLight : Ten { TenLight() { colour = L"Light"; } };
+	struct TenDark : Ten
+	{
+		TenDark()
+		{
+			colour = L"Dark";
+			page = 0x202020, ink = 0xFFFFFF, pressedInk = 0xFFFFFF, heading = 0xFFFFFF, navInk = 0xFFFFFF, edge = 0x3F3F3F, groupEdge = 0x3F3F3F, strip = 0x191919;
+			tabOff[0] = tabOff[1] = 0x2B2B2B, tabHot[0] = tabHot[1] = 0x3A3A3A, tabHotEdge = 0x5A5A5A;
+			status[0] = status[1] = 0x191919, status[2] = 0x2B2B2B;
+			nav[0] = nav[1] = 0x191919, nav[2] = 0x2B2B2B;
+			navHot[0] = navHot[1] = navHot[2] = 0x2D2D2D, navSel[0] = navSel[1] = 0x4D4D4D, navSel[2] = 0x666666;
+			box[0] = box[1] = 0x202020, box[2] = 0xCCCCCC, boxHot[0] = boxHot[1] = 0x202020, boxHot[2] = 0xFFFFFF;
+			mark = 0xFFFFFF, dot[0] = dot[1] = 0xFFFFFF;
+		}
+
+		void Frame(Canvas &cv, int titleH, int border, const std::wstring &title) override
+		{
+			cv.RoundRect(0, 0, cv.w, cv.h, 0, 0x202020, 0x202020, 255);
+			cv.RoundFrame(0, 0, cv.w, cv.h, 0, 0x434343, 255);
+			text->Draw(cv, S(10), (titleH - text->Measure(title).cy) / 2, title, 0xFFFFFF, false, cv.w - S(160));
+			(void)border;
+		}
+
+		void CaptionButton(Canvas &cv, RECT rc, bool hover, CaptionKind kind) override
+		{
+			int w = rc.right - rc.left, h = rc.bottom - rc.top;
+			bool close = kind == CaptionClose;
+			if (hover) cv.RoundRect(rc.left, rc.top, w, h, 0, close ? 0xE81123 : 0x333333, close ? 0xE81123 : 0x333333, 255);
+			Glyph(cv, rc.left + w / 2, rc.top + h / 2, kind, 0xFFFFFF, S(10), 1);
+		}
+
+		void Popup(Canvas &cv) override
+		{
+			cv.RoundRect(0, 0, cv.w, cv.h, 0, 0x2B2B2B, 0x2B2B2B, 255);
+			cv.RoundFrame(0, 0, cv.w, cv.h, 0, 0x767676, 255);
+		}
+	};
+
 	// Classic Mac OS (Platinum): grey windows, a ridged title bar with the name centred on a plain patch, a close
 	// box on the left, zoom and collapse boxes on the right, black-edged rounded buttons.
 	struct ClassicMac : Theme
@@ -1236,6 +1277,52 @@ namespace
 		{
 			cv.RoundRect(0, 0, cv.w, cv.h, S(10), 0xF2F2F2, 0xF2F2F2, 245);
 			cv.RoundFrame(0, 0, cv.w, cv.h, S(10), 0x000000, 45);
+		}
+	};
+
+	// macOS in light and dark mode (dark: macOS-Dark's colours and controls)
+	struct MacLight : ModernMac { MacLight() { colour = L"Light"; } };
+	struct MacDark : ModernMac
+	{
+		MacDark()
+		{
+			colour = L"Dark";
+			page = 0x1E1E1E, ink = 0xFFFFFF, pressedInk = 0xFFFFFF, heading = 0x98989D, navInk = 0xFFFFFF, edge = 0x3A3A3A, groupEdge = 0x3A3A3A, strip = 0x2A2A2A;
+			status[0] = status[1] = 0x2A2A2A, status[2] = 0x1A1A1A;
+			nav[0] = nav[1] = 0x2B2B2F, nav[2] = 0x1A1A1A;
+			navHot[0] = navHot[1] = navHot[2] = 0x38383C, navSel[0] = navSel[1] = navSel[2] = 0x46464B;
+			box[0] = box[1] = 0x3A3A3C, box[2] = 0x5A5A5E, boxHot[0] = boxHot[1] = 0x3A3A3C, boxHot[2] = 0x7A7A7E;
+		}
+
+		void Frame(Canvas &cv, int titleH, int border, const std::wstring &title) override
+		{
+			int r = S(10);
+			cv.RoundRect(0, 0, cv.w, cv.h, r, 0x323232, 0x2C2C2C, 255);
+			cv.RoundFrame(0, 0, cv.w, cv.h, r, 0x000000, 200);
+			cv.RoundFrame(1, 1, cv.w - 2, cv.h - 2, r - 1, 0xFFFFFF, 30);
+			auto size = text->Measure(title, true);
+			text->Draw(cv, std::max(S(80), (cv.w - int(size.cx)) / 2), (titleH - size.cy) / 2, title, 0xDCDCDC, true, cv.w - S(160));
+			cv.RoundFrame(border - 1, titleH - 1, cv.w - 2 * border + 2, cv.h - titleH - border + 2, 0, 0x1A1A1A, 255);
+		}
+
+		void Button(Canvas &cv, int x, int y, int w, int h, int state) override
+		{
+			static const uint32_t top[] = { 0x6A6A6E, 0x75757A, 0x3B95FF }, bottom[] = { 0x5C5C60, 0x66666A, 0x0A6CF0 };
+			int r = S(5);
+			cv.RoundRect(x, y, w, h, r, top[state], bottom[state], 255);
+			cv.RoundFrame(x, y, w, h, r, 0x000000, 90);
+		}
+
+		void Tab(Canvas &cv, RECT rc, bool on, bool hot) override
+		{
+			int w = rc.right - rc.left, h = rc.bottom - rc.top;
+			if (on || hot) cv.RoundRect(rc.left, rc.top + S(1), w, h - S(4), S(5), on ? 0x636366 : 0x48484A, on ? 0x636366 : 0x48484A, 255);
+		}
+
+		void Popup(Canvas &cv) override
+		{
+			cv.RoundRect(0, 0, cv.w, cv.h, S(10), 0x2C2C2E, 0x2C2C2E, 245);
+			cv.RoundFrame(0, 0, cv.w, cv.h, S(10), 0x000000, 160);
 		}
 	};
 
@@ -2205,23 +2292,25 @@ namespace
 	Skinned<Vista> vistaTheme{ { skin_vista_png.AsCharSpan(), skin_vista_parts } };
 	Skinned<Seven> sevenTheme{ { skin_seven_png.AsCharSpan(), skin_seven_parts } };
 	Skinned<Eight> eightTheme{ { skin_eight_png.AsCharSpan(), skin_eight_parts } };
-	Skinned<Ten> tenTheme{ { skin_ten_png.AsCharSpan(), skin_ten_parts } };
+	Skinned<TenLight> tenTheme{ { skin_ten_png.AsCharSpan(), skin_ten_parts } };
 	Native<Eleven> elevenTheme;
 	Skinned<ClassicMac> classicMacTheme{ { skin_mac9_png.AsCharSpan(), skin_mac9_parts } };
-	Skinned<ModernMac> modernMacTheme{ { skin_macos_png.AsCharSpan(), skin_macos_parts } };
+	Skinned<MacLight> modernMacTheme{ { skin_macos_png.AsCharSpan(), skin_macos_parts } };
 	Temple templeTheme;
 	Skinned<System6> system6Theme{ { skin_system6_png.AsCharSpan(), skin_system6_parts } };
 	Skinned<System7> system7Theme{ { skin_system7_png.AsCharSpan(), skin_system7_parts } };
 	Skinned<Aqua> aquaTheme{ { skin_aqua_png.AsCharSpan(), skin_aqua_parts } };
 	Skinned<Lion> lionTheme{ { skin_lion_png.AsCharSpan(), skin_lion_parts } };
 	Skinned<Yosemite> yosemiteTheme{ { skin_yosemite_png.AsCharSpan(), skin_yosemite_parts } };
+	Skinned<TenDark> tenDarkTheme{ { skin_tendark_png.AsCharSpan(), skin_tendark_parts } };
+	Skinned<MacDark> macDarkTheme{ { skin_macosdark_png.AsCharSpan(), skin_macosdark_parts } };
 	Glass glassTheme;
 	Theme *const themes[] = { &threeTheme, &ninetyFiveTheme, &ninetyEightTheme, &xpTheme, &vistaTheme, &sevenTheme, &eightTheme, &tenTheme, &elevenTheme, &classicMacTheme, &modernMacTheme, &templeTheme,
-		&system6Theme, &system7Theme, &aquaTheme, &lionTheme, &yosemiteTheme, &glassTheme, &xpOliveTheme, &xpSilverTheme, &xpRoyaleTheme, &xpNoirTheme, &xpZuneTheme }; // new ones at the end: the pref is the index
+		&system6Theme, &system7Theme, &aquaTheme, &lionTheme, &yosemiteTheme, &glassTheme, &xpOliveTheme, &xpSilverTheme, &xpRoyaleTheme, &xpNoirTheme, &xpZuneTheme, &tenDarkTheme, &macDarkTheme }; // new ones at the end: the pref is the index
 	const std::vector<int> windowsThemes = { 0, 1, 2, 3, 4, 5, 6, 7, 8 }, macThemes = { 12, 13, 9, 14, 15, 16, 10, 17 };
 	constexpr int templeIndex = 11;
 	// A generation's colour schemes, the first the one its picker shows (Windows XP: Blue, Olive Green, Silver, Royale, Royale Noir, Zune)
-	const std::vector<std::vector<int>> themeColours = { { 3, 18, 19, 20, 21, 22 } };
+	const std::vector<std::vector<int>> themeColours = { { 3, 18, 19, 20, 21, 22 }, { 7, 23 }, { 10, 24 } };
 	int Generation(int i)
 	{
 		for (auto &c : themeColours)
@@ -4066,7 +4155,7 @@ namespace
 			for (auto &c : themeColours)
 				if (c[0] == gen) colours = &c;
 			int colourRows = colours ? int(colours->size() + 2) / 3 : 0; // three to a row
-			top = Group(x, y, w, S(108) + colourRows * S(32), L"Look");
+			top = Group(x, y, w, S(140) + colourRows * S(32), L"Look");
 			auto family = [&](int row, const wchar_t *label, const std::vector<int> &ids) {
 				int by = top + row * S(32), bx = x + S(200), bw = S(220);
 				bool in = std::count(ids.begin(), ids.end(), gen) > 0;
@@ -4090,7 +4179,38 @@ namespace
 					cx += Toggle(cx, cy, themes[i]->colour, i == current, true, [i] { SetTheme(i); }, std::wstring(themes[i]->name) + L" in " + themes[i]->colour) + S(18);
 				}
 			}
-			y += S(116) + colourRows * S(32);
+			{
+				// the gradient wallpaper and its two colours
+				int gy = top + (3 + colourRows) * S(32), bx = x + S(200);
+				Caption(x + S(12), gy, L"Wallpaper");
+				bx += Toggle(bx, gy, L"Gradient", overlayFeel.gradient, false, [this] {
+					overlayFeel.gradient = !overlayFeel.gradient;
+					GlobalPrefs::Ref().Set("Overlay.Gradient", overlayFeel.gradient);
+				}, L"The desktop background as a gradient where it shows (needs windows solid, or the sim under windows). Only drawn by the overlay: your real wallpaper is never changed") + S(18);
+				for (auto [c, label, pref] : { std::tuple{ &overlayFeel.gradientTop, L"Top", "Overlay.GradientTop" }, std::tuple{ &overlayFeel.gradientBottom, L"Bottom", "Overlay.GradientBottom" } })
+				{
+					int bw = S(90);
+					PushButton(bx, gy - S(3), bw, label, [this, c, pref] {
+						later = [this, c, pref] {
+							static COLORREF custom[16] = {};
+							CHOOSECOLORW cc{ sizeof(cc) };
+							cc.hwndOwner = hwnd, cc.rgbResult = RGB(*c >> 16, (*c >> 8) & 0xFF, *c & 0xFF), cc.lpCustColors = custom;
+							cc.Flags = CC_FULLOPEN | CC_RGBINIT | CC_ANYCOLOR;
+							if (ChooseColorW(&cc))
+							{
+								*c = uint32_t(GetRValue(cc.rgbResult)) << 16 | GetGValue(cc.rgbResult) << 8 | GetBValue(cc.rgbResult);
+								GlobalPrefs::Ref().Set(pref, int(*c));
+							}
+							dirty = true;
+						};
+					}, std::wstring(L"Pick the gradient's ") + (c == &overlayFeel.gradientTop ? L"top" : L"bottom") + L" colour");
+					int sw = S(12);
+					cv.RoundRect(bx + S(8), gy - S(3) + (S(23) - sw) / 2, sw, sw, S(2), *c, *c, 255); // the colour
+					cv.RoundFrame(bx + S(8), gy - S(3) + (S(23) - sw) / 2, sw, sw, S(2), theme->edge, 255);
+					bx += bw + S(10);
+				}
+			}
+			y += S(148) + colourRows * S(32);
 
 			auto &opts = Options();
 			top = Group(x, y, w, S(36) + 3 * S(24) + 2 * S(32), L"TPT settings");
@@ -5655,6 +5775,9 @@ void OverlayWindows::Init(void *mainHwnd)
 	overlayFeel.shardParticles = prefs.Get("Overlay.Feel.ShardParticles", false);
 	overlayFeel.holeBorder = prefs.Get("Overlay.Feel.HoleBorder", true);
 	overlayFeel.wallpaper = prefs.Get("Overlay.Feel.Wallpaper", false);
+	overlayFeel.gradient = prefs.Get("Overlay.Gradient", false);
+	overlayFeel.gradientTop = uint32_t(prefs.Get("Overlay.GradientTop", int(overlayFeel.gradientTop)));
+	overlayFeel.gradientBottom = uint32_t(prefs.Get("Overlay.GradientBottom", int(overlayFeel.gradientBottom)));
 	for (auto [v, name] : { std::pair{ &overlayFeel.grip, "Grip" }, { &overlayFeel.fling, "Fling" }, { &overlayFeel.push, "Push" }, { &overlayFeel.wind, "Wind" }, { &overlayFeel.scorch, "Scorch" }, { &overlayFeel.frost, "Frost" }, { &overlayFeel.acid, "Acid" }, { &overlayFeel.water, "Water" }, { &overlayFeel.acidEat, "AcidEat" }, { &overlayFeel.blast, "Blast" }, { &overlayFeel.holeOpacity, "HoleSolid" }, { &overlayFeel.shards, "Shards" }, { &overlayFeel.shardSize, "ShardSize" }, { &overlayFeel.blackHole, "BlackHole" }, { &overlayFeel.shake, "Shake" } })
 		*v = prefs.Get(ByteString("Overlay.Feel.") + name, *v);
 	fun.weatherKind = prefs.Get("Overlay.Fun.WeatherKind", 0);

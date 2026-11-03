@@ -159,4 +159,6 @@ embedded_files += [
 	[ 'skin_lion_png', files('skin_lion.png') ],
 	[ 'skin_yosemite_png', files('skin_yosemite.png') ],
 	[ 'skin_macos_png', files('skin_macos.png') ],
+	[ 'skin_tendark_png', files('skin_tendark.png') ],
+	[ 'skin_macosdark_png', files('skin_macosdark.png') ],
 ]

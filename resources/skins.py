@@ -56,11 +56,20 @@ LOOKS = {
         'Check': ([f'OS-X-Mavericks/gtk-2.0/assets/l-checkbox-{s}-18.png' for s in ('unchecked', 'unchecked', 'checked', 'checked')], 0),
         'Radio': ([f'OS-X-Mavericks/gtk-2.0/assets/l-radio-{s}-18.png' for s in ('unselected', 'unselected', 'selected', 'selected')], 0),
     },
+    'tendark': {  # Windows-10-Dark
+        'Button': ([f'Windows-10-Dark/gtk-2.0/assets/button-{s}.png' for s in ('default', 'hover', 'pressed')], 4),
+        'Check': ([f'Windows-10-Dark/gtk-2.0/assets/checkbox-{s}.png' for s in ('unchecked', 'unchecked-over', 'checked', 'checked-over')], 0),
+        'Radio': ([f'Windows-10-Dark/gtk-2.0/assets/radio-{s}.png' for s in ('unchecked', 'unchecked-over', 'checked', 'checked-over')], 0),
+    },
     **{look: {
         'Button': ([f'{repo}/gtk-2.0/assets/button-{s}.png' for s in ('default', 'default', 'pressed')], 4),
         'Check': ([f'{repo}/gtk-2.0/assets/checkbox-{s}.png' for s in ('unchecked', 'unchecked', 'checked', 'checked')], 0),
         'Radio': ([f'{repo}/gtk-2.0/assets/radio-{s}.png' for s in ('unchecked', 'unchecked', 'checked', 'checked')], 0),
     } for look, repo in (('yosemite', 'OS-X-Yosemite'), ('macos', 'macOS'))},
+    'macosdark': {  # macOS-Dark (its GTK 2 buttons are still the light ones: the look draws its own)
+        'Check': ([f'macOS-Dark/gtk-2.0/assets/checkbox-{s}.png' for s in ('unchecked', 'unchecked', 'checked', 'checked')], 0),
+        'Radio': ([f'macOS-Dark/gtk-2.0/assets/radio-{s}.png' for s in ('unchecked', 'unchecked', 'checked', 'checked')], 0),
+    },
 }
 
 src, res, header = sys.argv[1:4]

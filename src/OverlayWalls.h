@@ -31,6 +31,8 @@ struct OverlayFeel
 	bool shardParticles = false; // shards are sim particles (broken glass) instead of drawn chunks
 	bool holeBorder = true;      // where a hole reaches a window's edge, cover the thin border Windows draws round it
 	bool wallpaper = false;      // fire and acid mark the desktop background too (Simulation::windowMarks[0])
+	bool gradient = false;       // the desktop background drawn as a gradient, top to bottom (Overlay > Look)
+	uint32_t gradientTop = 0x101F38, gradientBottom = 0x22596B;
 };
 extern OverlayFeel overlayFeel;
 

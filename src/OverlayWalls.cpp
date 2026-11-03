@@ -632,6 +632,28 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 
 void OverlayDrawMarks(const Simulation *sim, uint32_t *argb, int stride, const uint8_t *occupied, uint8_t wallBit, const uint32_t *backdrop)
 {
+	// Gradient wallpaper: where the desktop shows (no window or icon), under everything drawn there. Only drawn by the
+	// overlay, the real wallpaper is never changed.
+	if (overlayFeel.gradient && overlayWallpaperSeen)
+		OverlayParallel((YRES + 31) / 32, [&](int k) {
+			for (int y = k * 32; y < std::min(YRES, k * 32 + 32); y++)
+			{
+				auto mix = [&](int sh) {
+					int a = (overlayFeel.gradientTop >> sh) & 0xFF, b = (overlayFeel.gradientBottom >> sh) & 0xFF;
+					return uint32_t(a + (b - a) * y / std::max(1, YRES - 1));
+				};
+				uint32_t r = mix(16), g = mix(8), b = mix(0);
+				for (int x = 0; x < XRES; x++)
+				{
+					if (occupied[size_t(y) * XRES + x] & wallBit) continue;
+					auto &p = argb[size_t(y) * stride + x];
+					uint32_t f = 255 - (p >> 24);
+					auto under = [&](uint32_t s, int sh) { return std::min(255u, ((p >> sh) & 0xFF) + s * f / 255) << sh; };
+					p = 0xFF000000 | under(r, 16) | under(g, 8) | under(b, 0);
+				}
+			}
+		});
+
 	// per kind: colour (premultiplied below) and how opaque at full strength, of 256
 	constexpr uint32_t colour[] = { 0x8AA8C8, 0xE4F0FF, 0x7A9A2A, 0x221A12, 0x16191C };
 	constexpr int opacity[] = { 110, 170, 190, 224, 235 };

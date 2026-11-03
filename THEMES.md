@@ -18,7 +18,11 @@ DrawThemeBackground, nothing shipped; the hand-drawn look elsewhere). XP has Roy
 (resources/xp2.png, luna.py with colour prefixes). The Welcome page draws its keys as the look's push buttons and its
 tip as the look's tooltip, and its top as each family greeted you: 95's "Welcome to" with buttons and "Did you know...",
 XP/Vista's Welcome Center banner with tiles, 7 to 11's Getting Started, the old Macs' small centred page, the modern
-Macs' icon, heading and Continue. Left from the list: XP Embedded, 10 Dark, macOS Dark, 95's colour check.
+Macs' icon, heading and Continue. Windows 10 and macOS 11-15 have Light and Dark colours (Windows-10-Dark, macOS-Dark; macOS-Dark's GTK 2
+buttons are still light, so that look draws its own). 95's colours: Windows95Theme's .theme only sets the teal
+desktop, the rest are Windows 10 defaults; ours are 95's own. Look also has a Gradient wallpaper (overlay-drawn where
+the desktop shows, two colours picked with Windows' colour dialog; default the README gif's navy to teal). Left: XP
+Embedded.
 
 Done so far: Windows XP uses the real Luna images (resources/luna.png and luna.py, from wine_themes). Blue, Olive Green
 and Silver are a Colour row under it. The Welcome page takes the look's page, heading and text colours.
