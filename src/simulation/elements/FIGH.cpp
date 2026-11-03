@@ -148,6 +148,38 @@ static int PetComm(Simulation *sim, playerst *figh, int f)
 			}
 		}
 	}
+	// seeds (Buddy feeds them): run to the nearest one close by (looked for twice a second) and eat it with a hop
+	static int seedX[MAX_FIGHTERS], hasSeed[MAX_FIGHTERS];
+	if (sim->petEat && flee[f] <= 0)
+	{
+		bool look = (sim->currentTick + f) % 10 == 0;
+		if (look) hasSeed[f] = 0;
+		int range = look ? 60 : 5, best = 1 << 30;
+		for (int y = std::max(0, cy - 20); y < std::min(YRES, cy + 10); y++)
+			for (int x = std::max(0, cx - range); x < std::min(XRES, cx + range); x++)
+				if (int r = sim->pmap[y][x]; r && TYP(r) == PT_SEED)
+				{
+					if (std::abs(x - cx) < 5)
+					{
+						sim->kill_part(ID(r));
+						hasSeed[f] = 0;
+						return 0x04;
+					}
+					if (std::abs(x - cx) < best) best = std::abs(x - cx), seedX[f] = x, hasSeed[f] = 1;
+				}
+		if (hasSeed[f]) left[f] = 10, dir[f] = seedX[f] < cx ? 1 : 2;
+	}
+	// Buddy's radio: they dance with him: a little step left, a hop, a step right, a hop (each a little off the others),
+	// round where they were when the music started (a step back there when they slide off it)
+	static int home[MAX_FIGHTERS];
+	if (sim->petDance <= sim->currentTick) home[f] = cx;
+	else if (flee[f] <= 0)
+	{
+		int t = int(sim->currentTick + f * 5) % 48;
+		int step = t < 4 ? 0x01 : t >= 24 && t < 28 ? 0x02 : 0;
+		if (step) return cx > home[f] + 6 ? 0x01 : cx < home[f] - 6 ? 0x02 : step;
+		return (t >= 4 && t < 8) || (t >= 28 && t < 32) ? 0x04 : 0;
+	}
 	if (sim->petNap && flee[f] <= 0)
 	{
 		return 0;

@@ -168,7 +168,9 @@ He changes the sim:
       swing or a fling throws it as real particles.
       Done (Overlay.Fun.BuddyCarry): up to 40 from his right hand, thrown over 6 px a frame, else dropped after 8 s.
 - [~] He builds when bored: dropped, the game has its own idle and bored actions (idleAction, bored).
-- [ ] He feeds his pets: drops plant or seed particles for them to eat.
+- [x] He feeds his pets: drops plant or seed particles for them to eat.
+      Done (Fun toggle "Buddy feeds the pets"): calm, with a pet within 150 px, about every 10 s he drops 4 SEED from
+      his hand; pets run to the nearest seed within 60 px and eat it with a hop (any seeds, while on).
 Games:
 - [x] His weapons hit the sim: bullets (pistol, machine gun in v1.02, and the rest) knock particles about and break
       what they hit; the flamethrower lights what burns (wood, plant, gunpowder, oil...); sand doesn't burn in TPT
@@ -186,6 +188,8 @@ Games:
       objects (objectList): Baseballs, Rubber Balls, Bowling Balls, Infants, Magical Orb, Radio, Flail push sand and water
       and float or sink in it, like Buddy's own parts. Explosions (Grenades, Mines, Missiles, Explode At Mouse): already TPT blasts.
       User said yes to all (2026-11-03). Plus: the Radio playing makes the pets dance too (Buddy dances to it in the game).
+      Radio dance DONE (Fun toggle "Pets dance to Buddy's radio"): a dance in his action queue (any priority) -> shots kind 3
+      -> sim->petDance; pets step left, hop, step right, hop round where they stood (tested: stay within ~12 px).
 - [x] Fireman: when fire starts he grabs water and puts it out, happy if he saves a window. (Overlay.Fun.BuddyFireman:
       sprays water from his hand 3 s at fire 40-250 px away, rests 10 s; no "happy" yet, needs the game's emotes)
 

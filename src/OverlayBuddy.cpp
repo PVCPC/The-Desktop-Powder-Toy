@@ -589,9 +589,13 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 	// where it is, so it lights what burns
 	double shots[256 * 5];
 	size_t shot = tdpt_buddy_shots(buddy, shots, 256);
+	// he dances (to his radio): the pets dance with him
+	for (size_t s = 0; s < shot && prefs.Get("Overlay.Fun.BuddyDance", false); s++)
+		if (shots[s * 5 + 4] == 3) sim->petDance = sim->currentTick + 30;
 	for (size_t s = 0; s < shot && prefs.Get("Overlay.Fun.BuddyWeapons", false); s++)
 	{
 		double *b = shots + s * 5;
+		if (b[4] == 3) continue;
 		if (b[4] == 2)
 		{
 			int x = int(b[0]) + sim->rng.between(-3, 3), y = int(b[1]) + sim->rng.between(-3, 3);
@@ -652,6 +656,21 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 			int to = int(std::clamp(body[0] + (side > 0 ? -250 : 250), 30.0, std::max(30.0, fw - 30.0)));
 			tdpt_buddy_command(buddy, ("act:runToPoint:" + std::to_string(to)).c_str());
 			fleeRest = 120;
+		}
+	}
+	// Feeding: when he stands calm with a pet near him, every 10 s or so he drops a few seeds from his hand; the pets eat
+	// them (any seeds near them, while this is on)
+	sim->petEat = prefs.Get("Overlay.Fun.BuddyFeed", false);
+	if (sim->petEat && parts.size() == 6 && sim->rng.chance(1, 600) && std::isfinite(parts[3][0] + parts[3][1]) &&
+		std::all_of(parts.begin(), parts.end(), [](auto &p) { return p[5] == 0 && std::hypot(p[3], p[4]) < 2; }))
+	{
+		bool pet = false;
+		for (int i = 0; i <= sim->parts.active && !pet; i++)
+			pet = sim->parts[i].type == PT_FIGH && std::abs(sim->parts[i].x - parts[0][0]) < 150 && std::abs(sim->parts[i].y - parts[0][1]) < 80;
+		for (int k = 0; pet && k < 4; k++)
+		{
+			int x = int(parts[3][0]) + sim->rng.between(-3, 3), y = int(parts[3][1] + parts[3][2]) + 2;
+			if (x >= 0 && y >= 0 && x < XRES && y < YRES && !sim->pmap[y][x]) sim->create_part(-1, x, y, PT_SEED);
 		}
 	}
 	// Carrying: his hand in a powder or liquid that isn't hot scoops up a handful (up to 40) that rides on it as real

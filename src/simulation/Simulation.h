@@ -146,6 +146,8 @@ public:
 	int petGreet = 0; // pets hop until this tick: the user is back
 	struct { int x = -1, y = -1; float speed = 0; int scare = 0; } petBuddy; // Interactive Buddy, if the pets notice him
 	                                                                         // (x -1: no); scare: they run until this tick
+	int petDance = 0;       // pets dance until this tick (Buddy dances to his radio)
+	bool petEat = false;    // pets go and eat seeds near them (Buddy feeds them)
 	bool petNap = false;    // pets stand still asleep (the overlay draws their z's)
 	bool petGather = false; // the user is away: pets make for the middle of the screen
 	bool petHoles = false;  // pets drop through holes in windows and stop to look out of them

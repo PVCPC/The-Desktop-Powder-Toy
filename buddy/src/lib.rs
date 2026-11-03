@@ -602,6 +602,13 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
             now.push((x, y));
         }
         g.bullets = now;
+        // dancing (to his radio): a dance next in his actions (the game queues it at one of its priorities)
+        if (0..9).any(|i| matches!(v.get(&format!("queue.{i}.0")), Value::String(a) if a.starts_with("dance")))
+            && g.shots.len() < 256
+        {
+            let (x, y) = (num(v, "body.x"), num(v, "body.y"));
+            g.shots.push([x, y, x, y, 3.0]);
+        }
         if let Value::Object(clips) = v.get("particles") {
             for (name, clip) in clips {
                 let Value::Object(c) = clip else { continue };
@@ -1353,7 +1360,8 @@ pub unsafe extern "C" fn tdpt_buddy_booms(b: *mut Buddy, out: *mut f64, max: usi
     n
 }
 
-/// His weapons since the last call (up to max): x0, y0, x1, y1, kind each (1 a bullet's path, 2 a flame at x0, y0); how many
+/// His weapons since the last call (up to max): x0, y0, x1, y1, kind each (1 a bullet's path, 2 a flame at x0, y0, 3 he
+/// dances at x0, y0); how many
 /// # Safety
 /// b is from tdpt_buddy_open; out has room for 5 * max.
 #[unsafe(no_mangle)]
@@ -1893,6 +1901,14 @@ mod tests {
             // v1.02: from the gun (the mouse), a frame's flight
             let b = bullets.iter().find(|s| s[4] == 1.0).unwrap_or_else(|| panic!("{bullets:?}"));
             assert!((b[0] - mx).hypot(b[1] - my) < 5.0 && (b[2] - b[0]).hypot(b[3] - b[1]) > 100.0, "{b:?}");
+        }
+        // the Radio: placed, it plays and he dances to it
+        if fire(&mut game, "Radio").is_some() {
+            for _ in 0..40 {
+                super::frame(&mut game, 25.0, mx, my, &mut out);
+            }
+            let shots = std::mem::take(&mut game.ground.lock().unwrap().shots);
+            assert!(shots.iter().any(|s| s[4] == 3.0), "not dancing: {shots:?}");
         }
     }
 
