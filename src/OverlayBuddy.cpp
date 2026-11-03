@@ -597,6 +597,19 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 	// TPT's ticks: 0.6 the speed); BuddyWaterOnly hides the game's own drops, so only TPT's are seen (BuddyFireOnly: his flames)
 	bool water = prefs.Get("Overlay.Fun.BuddyWater", false);
 	bool weapons = prefs.Get("Overlay.Fun.BuddyWeapons", false);
+	// his gravity vortexes and shifter (Overlay.Fun.BuddyGravity): what moves (powders, liquids, gases) within 250 px of
+	// where they pull falls toward it, harder closer (TPT's own gravity on sand is 0.3 a tick: a weak vortex about
+	// holds it up)
+	for (size_t s = 0; s < shot && prefs.Get("Overlay.Fun.BuddyGravity", false); s++)
+		if (double *b = shots + s * 5; b[4] == 5 && std::isfinite(b[0] + b[1]))
+			for (int i = 0; i <= sim->parts.active; i++)
+				if (auto &p = sim->parts[i]; p.type && !(elements[p.type].Properties & (TYPE_SOLID | TYPE_ENERGY)))
+				{
+					double dx = b[0] - p.x, dy = b[1] - p.y, d = std::hypot(dx, dy);
+					if (d < 4 || d > 250) continue;
+					double a = 0.3 * b[2] * (1.5 - d / 250);
+					p.vx += float(dx / d * a), p.vy += float(dy / d * a);
+				}
 	if (int hide = (water && prefs.Get("Overlay.Fun.BuddyWaterOnly", false) ? 1 : 0) | (weapons && prefs.Get("Overlay.Fun.BuddyFireOnly", false) ? 2 : 0); hide != hidden)
 		tdpt_buddy_command(buddy, ("hide:" + std::to_string(hide)).c_str()), hidden = hide;
 	for (size_t s = 0; s < shot && water; s++)

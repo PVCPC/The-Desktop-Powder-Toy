@@ -604,6 +604,15 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
             now.push((x, y));
         }
         g.bullets = now;
+        // his gravity items: a vortex while held, the gravity shifter's point (kept till he's let go); how hard, 1-3
+        if v.get("gravitating") == Value::Bool(true) && g.shots.len() < 256 {
+            let pull = match v.get("item") {
+                Value::String(s) if s == "Weak Gravity Vortex" => 1.0,
+                Value::String(s) if s == "Strong Gravity Vortex" => 3.0,
+                _ => 2.0,
+            };
+            g.shots.push([num(v, "gravitatingx"), num(v, "gravitatingy"), pull, 0.0, 5.0]);
+        }
         // dancing (to his radio): a dance next in his actions (the game queues it at one of its priorities)
         if (0..9).any(|i| matches!(v.get(&format!("queue.{i}.0")), Value::String(a) if a.starts_with("dance")))
             && g.shots.len() < 256
@@ -1390,7 +1399,8 @@ pub unsafe extern "C" fn tdpt_buddy_booms(b: *mut Buddy, out: *mut f64, max: usi
 }
 
 /// His weapons since the last call (up to max): x0, y0, x1, y1, kind each (1 a bullet's path, 2 a flame at x0, y0, 3 he
-/// dances at x0, y0, 4 a new drop from his hose at x0, y0 with speed x1, y1 a frame); how many
+/// dances at x0, y0, 4 a new drop from his hose at x0, y0 with speed x1, y1 a frame, 5 his gravity pulls to x0, y0, x1
+/// hard: 1 weak vortex, 2 gravity shifter, 3 strong vortex); how many
 /// # Safety
 /// b is from tdpt_buddy_open; out has room for 5 * max.
 #[unsafe(no_mangle)]
@@ -1947,6 +1957,11 @@ mod tests {
             let Value::Object(clips) = p.get_root_variable("particles") else { panic!() };
             let name = clips.keys().find(|n| n.starts_with("smoke")).expect("no drops").clone();
             assert_eq!(p.get_root_variable(&format!("particles.{name}._visible")), Value::Bool(false));
+        }
+        // a strong vortex held: it pulls (hard) to the mouse
+        if let Some(shots) = fire(&mut game, "Strong Gravity Vortex") {
+            let w = shots.iter().find(|s| s[4] == 5.0).unwrap_or_else(|| panic!("{shots:?}"));
+            assert!((w[0] - mx).hypot(w[1] - my) < 2.0 && w[2] == 3.0, "{w:?}");
         }
         // the Radio: placed, it plays and he dances to it
         if fire(&mut game, "Radio").is_some() {

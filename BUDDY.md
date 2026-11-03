@@ -195,7 +195,11 @@ Games:
       hide:1 sets their _visible false (he still feels the spray). Game = both off.
       Fire DONE: fireballs and molotovs make the same particles.flame* as the flamethrower, so "Buddy's weapons hit the sim"
       already made them TPT fire (Both); now also a molotov's burning debris (debris* onFire). "Only TPT fire from his
-      items" = hide:2 (flame*, fireClip*, fireGlowClip* not drawn). Next: gravity items.
+      items" = hide:2 (flame*, fireClip*, fireGlowClip* not drawn).
+      Gravity DONE (Fun "Buddy's gravity items pull the sim"): gravitating + gravitatingx/y, _root.item names which
+      (weak 1, shifter 2, strong 3) -> shots kind 5 -> powders/liquids/gases within 250 px get 0.3*k*(1.5-d/250) a tick
+      toward it (a strong one lifts most of a sand pile). The shifter's grav 0 is NOT copied to TPT's global gravity.
+      Left of this list: objects (balls, infants, orb, radio, flail) pushing sand; stun gun sparks; shotgun pellets check.
 - [x] Fireman: when fire starts he grabs water and puts it out, happy if he saves a window. (Overlay.Fun.BuddyFireman:
       sprays water from his hand 3 s at fire 40-250 px away, rests 10 s; no "happy" yet, needs the game's emotes)
 
