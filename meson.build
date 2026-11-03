@@ -538,7 +538,7 @@ if get_option('build_powder')
 	)
 	powder_deps += declare_dependency(
 		link_with: buddy_lib,
-		link_args: host_platform == 'windows' ? [ 'opengl32.lib', 'ntdll.lib', 'userenv.lib', 'ws2_32.lib', 'dbghelp.lib' ] : [],
+		link_args: host_platform == 'windows' ? [ 'opengl32.lib', 'ntdll.lib', 'userenv.lib', 'ws2_32.lib', 'dbghelp.lib', 'propsys.lib', 'ole32.lib', 'oleaut32.lib', 'winmm.lib' ] : [], # (propsys etc: cpal, his sounds)
 	)
 	powder_deps += project_deps + [
 		threads_dep,

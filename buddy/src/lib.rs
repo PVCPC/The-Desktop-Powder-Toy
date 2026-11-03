@@ -1,6 +1,7 @@
 //! Interactive Buddy inside TDPT: the user's own copy of the game, patched in memory with our bridge code
 //! (bridge/*.patch: only the tags we add, none of the game) and run by Ruffle, drawn offscreen into TDPT's overlay
 //! frame. C interface in tdpt_buddy.h.
+mod sound;
 use std::collections::HashMap;
 use ruffle_core::events::{MouseButton, PlayerEvent};
 use ruffle_core::external::Value;
@@ -94,14 +95,24 @@ struct Game {
     applied: [f64; 5],  // what the game has
 }
 
+#[cfg(test)]
 fn open(path: &str, w: u32, h: u32) -> Result<Game, String> {
+    open_with::<sound::Speakers>(path, w, h, None)
+}
+
+// with sound: the game's own sounds go to the speakers (tests never: they stay silent)
+fn open_with<A: ruffle_core::backend::audio::AudioBackend + 'static>(path: &str, w: u32, h: u32, sound: Option<A>) -> Result<Game, String> {
     let data = std::fs::read(path).map_err(|e| format!("Can't read {path}: {e}"))?;
     let swf = patch(data)?;
     let movie = ruffle_core::tag_utils::SwfMovieData::from_data(&swf, "file:///tdpt/buddy.swf".into(), None, None)
         .map_err(|e| e.to_string())?;
     let renderer = WgpuRenderBackend::for_offscreen((w, h), wgpu::Backends::PRIMARY, wgpu::PowerPreference::LowPower)
         .map_err(|e| e.to_string())?;
-    let player = PlayerBuilder::new()
+    let mut builder = PlayerBuilder::new();
+    if let Some(sound) = sound {
+        builder = builder.with_audio(sound);
+    }
+    let player = builder
         .with_movie(movie)
         .with_autoplay(true)
         .with_renderer(renderer)
@@ -111,6 +122,7 @@ fn open(path: &str, w: u32, h: u32) -> Result<Game, String> {
         .with_storage(Box::new(Saves("buddy".into())))
         .build();
     load_fonts(&mut player.lock().unwrap());
+    player.lock().unwrap().audio_mut().set_volume(0.0); // silent until TDPT says how loud
     Ok(Game { player, ground: Default::default(), size: (w, h), scale: 1, mouse: (-1.0, -1.0), ready: false, readback: [None, None], pending: None, drawn: HashMap::new(), settings: SETTINGS, applied: [f64::NAN; 5] })
 }
 
@@ -921,6 +933,7 @@ struct Shared {
     settings: [f64; 5],
     size: (u32, u32),
     scale: u32,
+    volume: f32, // 0 silent, 1 the game's own loudness
     mouse: (f64, f64),
     clicks: Vec<PlayerEvent>,
     ready: Vec<u32>, // the newest finished frame, waiting for TDPT (when fresh)
@@ -957,6 +970,9 @@ fn run(mut game: Game, shared: Arc<Mutex<Shared>>) {
             game.size = s.size;
             game.scale = s.scale;
             game.settings = s.settings;
+            if let Ok(mut p) = game.player.try_lock() && p.audio().volume() != s.volume {
+                p.audio_mut().set_volume(s.volume);
+            }
             (s.mouse, std::mem::take(&mut s.clicks), std::mem::take(&mut s.commands))
         };
         let dt = last.elapsed().as_secs_f64() * 1e3;
@@ -1050,7 +1066,7 @@ pub unsafe extern "C" fn tdpt_buddy_open(path: *const c_char, w: u32, h: u32, er
         let shared = shared.clone();
         // Ruffle's AVM recursion needs more than the default 2 MB
         std::thread::Builder::new().name("buddy".into()).stack_size(16 << 20).spawn(move || {
-            match catch_unwind(|| open(&path, w, h)) {
+            match catch_unwind(|| open_with(&path, w, h, sound::Speakers::new())) {
                 Ok(Ok(game)) => {
                     tell.send(Ok(game.ground.clone())).ok();
                     run(game, shared);
@@ -1089,6 +1105,17 @@ pub unsafe extern "C" fn tdpt_buddy_frame(b: *mut Buddy, mx: f64, my: f64, w: u3
     }
     let (pw, ph) = pixels(s.size, s.scale);
     if b.front.len() == pw as usize * ph as usize { b.front.as_ptr() } else { std::ptr::null() }
+}
+
+/// His sounds' loudness: 0 silent (as he starts), 1 the game's own
+/// # Safety
+/// b is from tdpt_buddy_open.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tdpt_buddy_volume(b: *mut Buddy, volume: f32) {
+    let b = unsafe { &mut *b };
+    if let Ok(mut s) = b.shared.lock() {
+        s.volume = volume.clamp(0.0, 1.0);
+    }
 }
 
 /// Draws him scale times sharper (whole screen pixels per stage pixel, 1 or more): tdpt_buddy_frame's frames and
@@ -1369,14 +1396,6 @@ mod tests {
         assert!((ly + lr - 400.0).abs() < 4.0, "feet not on the block: {}", ly + lr);
         assert!(by < 400.0, "body sank: {by}");
     }
-
-    #[test]
-
-    #[test]
-
-    #[test]
-
-    #[test]
 
     // slopes: he slides down a 45 degree one; buried under 200 px of sand he digs up through it (not through metal)
     #[test]
@@ -1864,6 +1883,36 @@ mod tests {
                 bufs.swap(1, 2);
             }
         }
+    }
+
+    // his sounds decode and mix (into a mixer with no speakers: nothing is played): the game's punch, as its
+    // scripting's playSound(name, volume) plays it
+    #[test]
+    fn sounds() {
+        let Some(path) = std::env::var_os("TDPT_BUDDY_SWF") else { return };
+        let mixer = ruffle_core::backend::audio::AudioMixer::new(2, 44100);
+        let proxy = mixer.proxy();
+        let mut game = super::open_with(path.to_str().unwrap(), 1280, 720, Some(super::sound::Unplugged { mixer })).unwrap();
+        let mut out = vec![0u32; 1280 * 720];
+        while !super::frame(&mut game, 25.0, 0.0, 0.0, &mut out) {}
+        let mut buf = vec![0f32; 2 * 44100 / 40];
+        let mut loud = |game: &mut super::Game| {
+            let mut n = 0;
+            for _ in 0..40 {
+                super::frame(game, 25.0, 0.0, 0.0, &mut out);
+                proxy.mix::<f32>(&mut buf);
+                n += buf.iter().filter(|v| v.abs() > 0.01).count();
+            }
+            n
+        };
+        game.player.lock().unwrap().call_root_method("playSound", vec!["punch1".into(), 100.into()]).unwrap();
+        let silent = loud(&mut game); // he starts at volume 0, until TDPT says how loud
+        game.player.lock().unwrap().audio_mut().set_volume(1.0);
+        game.player.lock().unwrap().call_root_method("playSound", vec!["punch1".into(), 100.into()]).unwrap();
+        let heard = loud(&mut game);
+        println!("sounds: {silent} loud samples at volume 0, {heard} at 1");
+        assert_eq!(silent, 0, "sound at volume 0");
+        assert!(heard > 1000, "no sound mixed");
     }
 
     // drawn twice as sharp (scale 2) on the same stage: the frame is twice the size, he's at twice his stage place,

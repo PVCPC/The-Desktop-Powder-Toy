@@ -205,7 +205,7 @@ namespace
 		bool buddyLooks = false;                 // he looks wet and frosted (Overlay.Fun.BuddyLooks)
 		// the Buddy tab (OverlayBuddy reads them from the prefs): his size and speech bubbles' (%), toys at once (0: no
 		// limit), standing on the active window, smoothing, speech
-		float buddySize = 100, buddySpeechSize = 100, buddyToys = 6;
+		float buddySize = 100, buddySpeechSize = 100, buddyToys = 6, buddyVolume = 50;
 		bool buddySmooth = true, buddySpeech = true;
 		int buddyWindows = 1; // 0 walks through windows, 1 stands on the active one, 2 all solid (as to sand)
 		std::vector<HWND> flashed; // windows that flashed their taskbar button (a new message) since the last tick
@@ -315,6 +315,7 @@ namespace
 		Check(L"Interactive Buddy", L"Turns him on or off. The game file is your own copy of Interactive Buddy v1.01 (a .swf file; it isn't included)", &fun.buddy, "Overlay.Fun.Buddy"),
 		Slide(L"Size", L"How big Buddy is, whatever the sim's pixel size (100% is the game's own size)", &fun.buddySize, 25, 300, "Overlay.Buddy.Size", 8),
 		{ L"Windows", L"Walk through: windows don't touch him. Active window: as in the desktop Interactive Buddy, he stands on the top edge of the window you're using (and its bottom edge from inside it) and rides along when you move it. Solid: every window and icon is solid to him like it is to sand (needs Open windows are walls)", nullptr, nullptr, 0, 0, "Overlay.Buddy.Windows", 0, 1 },
+		Slide(L"Volume", L"How loud the game's sounds are (far left: silent)", &fun.buddyVolume, 0, 100, "Overlay.Buddy.Volume", 8),
 		Check(L"Smooth motion", L"The game's 120 Hz smoothing of his movement", &fun.buddySmooth, "Overlay.Buddy.Smooth"),
 		{ L"Game" },
 		{ L"Menus", L"The game's own menus, as in the desktop app (also on right-clicking Buddy): load and save, skins and the skin store, items and weapons, modes and the mode store, the game's settings, help", nullptr, nullptr, 0, 0, "", 0, 2 },

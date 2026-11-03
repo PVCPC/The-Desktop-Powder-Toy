@@ -9,7 +9,8 @@ publish = false
 crate-type = ["staticlib"]
 
 [dependencies]
-ruffle_core = { path = "vendor/ruffle/core", features = ["default_font"] }
+ruffle_core = { path = "vendor/ruffle/core", features = ["default_font", "audio", "mp3"] }
+cpal = "0.16"
 ruffle_render_wgpu = { path = "vendor/ruffle/render/wgpu" }
 flate2 = "1"
 sha2 = "0.10"

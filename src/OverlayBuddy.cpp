@@ -340,6 +340,7 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my, void *layer
 	auto &prefs = GlobalPrefs::Ref();
 	tdpt_buddy_settings(buddy, prefs.Get("Overlay.Buddy.Size", 100.f), prefs.Get("Overlay.Buddy.Speech", true), prefs.Get("Overlay.Buddy.SpeechSize", 100.f),
 	                    int(prefs.Get("Overlay.Buddy.Toys", 6.f)), prefs.Get("Overlay.Buddy.Smooth", true));
+	tdpt_buddy_volume(buddy, prefs.Get("Overlay.Buddy.Volume", 50.f) / 100.f);
 	bool looks = GlobalPrefs::Ref().Get("Overlay.Fun.BuddyLooks", false);
 #ifdef _WIN32
 	// in his own window (not with the wet/frosty looks: those are drawn into the overlay's frame)
