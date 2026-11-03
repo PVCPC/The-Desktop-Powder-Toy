@@ -45,6 +45,9 @@ namespace
 	}
 	std::vector<float> air;       // and its air (velocity, pressure), for tdpt_buddy_air
 	int wet[8], frost[8];         // ticks each part still looks wet / frosted (Overlay.Fun.BuddyLooks)
+	double lastSpeed[8];          // each part's speed last tick (a splash: fast, then stopped by sand or water)
+	int hose = 0, hoseRest = 0;   // fireman: ticks left spraying, and before he looks for fire again
+	float hoseX, hoseY;           // the fire he is putting out
 	bool held = false;            // a press that went to him, until its release
 	double heldX, heldY;          // where TPT's window last saw the mouse while held (it has the mouse captured)
 
@@ -485,6 +488,77 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 			sim->parts[i].life = 4;
 			sim->parts[i].ctype = t;
 		}
+	auto &prefs = GlobalPrefs::Ref();
+	auto empty = [&](int x, int y) { return x >= 0 && y >= 0 && x < XRES && y < YRES && !sim->pmap[y][x] && !Mine(x, y); };
+	auto isPowder = [&](int i) { return (elements[sim->parts[i].type].Properties & TYPE_PART) != 0; };
+	auto isLiquid = [&](int i) { return (elements[sim->parts[i].type].Properties & TYPE_LIQUID) != 0; };
+	// Footprints: a foot walking through powder pushes a grain out of its way, onto the pile beside it; a wet foot
+	// leaves drops on dry ground
+	if (prefs.Get("Overlay.Fun.BuddyTracks", false) && parts.size() == 6)
+		for (size_t k = 4; k < 6; k++)
+		{
+			auto &p = parts[k];
+			if (std::abs(p[3]) < 0.5) continue;
+			int fx = int(p[0]), fy = int(p[1] + p[2]) + 1, side = p[3] > 0 ? -1 : 1; // pushed back, behind him
+			if (fx < 0 || fy < 0 || fx >= XRES || fy >= YRES) continue;
+			if (int q = sim->pmap[fy][fx]; q && isPowder(ID(q)) && sim->rng.chance(1, 3))
+			{
+				int to = fx + side * int(p[2] + 2), ty = fy;
+				while (ty > 0 && to >= 0 && to < XRES && sim->pmap[ty][to]) ty--; // on top of the pile there
+				if (empty(to, ty))
+					{
+						auto old = sim->parts[ID(q)];
+						sim->kill_part(ID(q));
+						if (int i = sim->create_part(-1, to, ty, old.type); i >= 0) sim->parts[i].temp = old.temp, sim->parts[i].ctype = old.ctype;
+					}
+			}
+			else if (wet[k] > 300 && sim->rng.chance(1, 12) && empty(fx, fy - 1) && fy + 1 < YRES && sim->pmap[fy + 1][fx] && !isLiquid(ID(sim->pmap[fy + 1][fx])))
+				sim->create_part(-1, fx, fy - 1, PT_WATR);
+		}
+	// Splash: a part that was flying (speed over 8) and is stopped by sand or water throws it up and out round it
+	bool splash = prefs.Get("Overlay.Fun.BuddySplash", false);
+	for (size_t k = 0; k < parts.size() && k < 8; k++)
+	{
+		auto &p = parts[k];
+		double speed = std::hypot(p[3], p[4]), was = lastSpeed[k];
+		lastSpeed[k] = std::isfinite(speed) ? speed : 0;
+		if (!splash || was < 8 || speed > was * 0.5 || !std::isfinite(p[0] + p[1])) continue;
+		for (int y = std::max(0, int(p[1] - p[2] - 4)); y <= std::min(YRES - 1, int(p[1] + p[2] + 4)); y++)
+			for (int x = std::max(0, int(p[0] - p[2] - 4)); x <= std::min(XRES - 1, int(p[0] + p[2] + 4)); x++)
+				if (int q = sim->pmap[y][x]; q && (isPowder(ID(q)) || isLiquid(ID(q))))
+				{
+					double dx = x + 0.5 - p[0], dy = y + 0.5 - p[1], d = std::max(1.0, std::hypot(dx, dy));
+					auto &t = sim->parts[ID(q)];
+					float f = float(was * (0.3 + 0.3 * sim->rng.uniform01()));
+					t.vx += float(dx / d) * f, t.vy += float(std::min(dy / d, -0.3)) * f; // out, and up
+				}
+	}
+	// Fireman: fire near him (and he isn't burning): he sprays water at it from his hand for 3 s, then rests 10 s
+	if (prefs.Get("Overlay.Fun.BuddyFireman", false) && parts.size() == 6)
+	{
+		auto &body = parts[0], &hand = parts[3];
+		bool burning = std::any_of(parts.begin(), parts.end(), [](auto &p) { return p[5] != 0; });
+		if (hoseRest > 0) hoseRest--;
+		else if (!hose && !burning && sim->currentTick % 10 == 0)
+		{
+			double best = 250 * 250;
+			for (int i = 0; i <= sim->parts.active; i++)
+				if (sim->parts[i].type == PT_FIRE || sim->parts[i].type == PT_PLSM)
+					if (double d = std::pow(sim->parts[i].x - body[0], 2) + std::pow(sim->parts[i].y - body[1], 2); d < best && d > 40 * 40)
+						best = d, hoseX = sim->parts[i].x, hoseY = sim->parts[i].y, hose = 90;
+		}
+		if (hose > 0 && --hose == 0) hoseRest = 300;
+		for (int j = 0; hose > 0 && j < 3; j++)
+		{
+			double dx = hoseX - hand[0], dy = hoseY - hand[1], d = std::max(1.0, std::hypot(dx, dy));
+			int x = int(hand[0] + dx / d * (hand[2] + 2)), y = int(hand[1] + dy / d * (hand[2] + 2));
+			if (!empty(x, y)) continue;
+			int i = sim->create_part(-1, x, y, PT_WATR);
+			if (i < 0) continue;
+			float v = 7, lob = float(std::min(4.0, d / 80)); // aimed a bit high: it falls on the way
+			sim->parts[i].vx = float(dx / d) * v + float(sim->rng.uniform01() - 0.5), sim->parts[i].vy = float(dy / d) * v - lob;
+		}
+	}
 	std::vector<OverlayWall> mine;
 	for (auto &p : parts)
 	{

@@ -148,15 +148,16 @@ He feels the sim:
 - [ ] He runs from fire and lava (he doesn't now: only the pets do): away from them, behind a window or icon.
 - [ ] A spinning gravity well makes him orbit it and get dizzy.
 He changes the sim:
-- [ ] Footprints: walking through powder leaves dents; wet feet leave drops on dry ground.
-- [ ] Splash: flung into sand or water, it sprays out around where he lands.
+- [x] Footprints: walking through powder leaves dents; wet feet leave drops on dry ground. (Overlay.Fun.BuddyTracks)
+- [x] Splash: flung into sand or water, it sprays out around where he lands. (Overlay.Fun.BuddySplash)
 - [ ] He picks up and throws particles: an arm scoops a handful (sand, water...), it rides with his hand, and his
       swing or a fling throws it as real particles.
 - [ ] He builds when bored: scoops sand into a little pile or castle.
 - [ ] He feeds his pets: drops plant or seed particles for them to eat.
 Games:
 - [ ] Catch: drop a ball of a material (sand, water, a bomb); he tries to catch it before it lands.
-- [ ] Fireman: when fire starts he grabs water and puts it out, happy if he saves a window.
+- [x] Fireman: when fire starts he grabs water and puts it out, happy if he saves a window. (Overlay.Fun.BuddyFireman:
+      sprays water from his hand 3 s at fire 40-250 px away, rests 10 s; no "happy" yet, needs the game's emotes)
 
 ## 4b. Elements he doesn't react to yet
 - [x] Clone (CLNE, PCLN, BCLN, ACLN...): touching him copies nothing; decide (it can't clone him, so: solid, as now?).
