@@ -142,6 +142,22 @@ Credits::Credits():
 	}
 
 
+	addHeader("The Desktop Powder Toy's window looks are drawn from these projects' images. Thank you!");
+
+	static const struct { const char *name, *what, *uri; } looks[] = {
+		{ "listumps/wine_themes", "Windows XP", "https://github.com/listumps/wine_themes" },
+		{ "B00merang Project", "Windows Vista to 10, and the Macs", "https://github.com/B00merang-Project" },
+		{ "moltensoftware/Symptom-7", "System 7", "https://github.com/moltensoftware/Symptom-7" },
+		{ "kayozxo/GNOME-macOS-Tahoe", "macOS 26", "https://github.com/kayozxo/GNOME-macOS-Tahoe" },
+		{ "PhilipPanda/TempleOS-Theme", "TempleOS", "https://github.com/PhilipPanda/TempleOS-Theme" },
+		{ "bartekl1/windows-ui-assets", "Windows icons and sounds", "https://github.com/bartekl1/windows-ui-assets" },
+	};
+	for (auto &look : looks)
+	{
+		auto components = AddCredit(ByteString(look.name).FromUtf8(), ByteString(look.what).FromUtf8(), Half, look.uri);
+		organizeComponents(components, scrollPanel->Size.X);
+	}
+
 	scrollPanel->InnerSize = ui::Point(scrollPanel->Size.X, nextY);
 
 	auto *closeButton = new ui::Button({ 0, Size.Y - 12 }, { Size.X, 12 }, "Close");

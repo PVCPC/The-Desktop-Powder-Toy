@@ -41,6 +41,12 @@
 #include "skin_seven_png.h"
 #include "skin_eight_png.h"
 #include "skin_ten_png.h"
+#include "skin_system6_png.h"
+#include "skin_mac9_png.h"
+#include "skin_aqua_png.h"
+#include "skin_lion_png.h"
+#include "skin_yosemite_png.h"
+#include "skin_macos_png.h"
 #include "OverlaySkins.h"
 #include "gui/dialogues/ErrorMessage.h"
 #include "client/Client.h"
@@ -1331,7 +1337,7 @@ namespace
 	struct Skin
 	{
 		std::span<const char> png;
-		const int (*parts)[4][5];
+		const int (*parts)[4][8];
 		bool Draw(Canvas &cv, SkinPart p, int f, int x, int y, int w, int h) const
 		{
 			static std::map<const char *, std::unique_ptr<PlaneAdapter<std::vector<pixel_rgba>>>> atlases;
@@ -1339,7 +1345,7 @@ namespace
 			if (!atlas) atlas = format::PixelsFromPNG(png);
 			auto &c = parts[p][f];
 			if (!c[2]) return false;
-			Slice(cv, atlas.get(), c[0], c[1], c[2], c[3], x, y, w, h, c[4], c[4], c[4], c[4]);
+			Slice(cv, atlas.get(), c[0], c[1], c[2], c[3], x, y, w, h, c[4], c[5], c[6], c[7]);
 			return true;
 		}
 	};
@@ -2102,14 +2108,14 @@ namespace
 	Skinned<Eight> eightTheme{ { skin_eight_png.AsCharSpan(), skin_eight_parts } };
 	Skinned<Ten> tenTheme{ { skin_ten_png.AsCharSpan(), skin_ten_parts } };
 	Eleven elevenTheme;
-	ClassicMac classicMacTheme;
-	ModernMac modernMacTheme;
+	Skinned<ClassicMac> classicMacTheme{ { skin_mac9_png.AsCharSpan(), skin_mac9_parts } };
+	Skinned<ModernMac> modernMacTheme{ { skin_macos_png.AsCharSpan(), skin_macos_parts } };
 	Temple templeTheme;
-	System6 system6Theme;
+	Skinned<System6> system6Theme{ { skin_system6_png.AsCharSpan(), skin_system6_parts } };
 	System7 system7Theme;
-	Aqua aquaTheme;
-	Lion lionTheme;
-	Yosemite yosemiteTheme;
+	Skinned<Aqua> aquaTheme{ { skin_aqua_png.AsCharSpan(), skin_aqua_parts } };
+	Skinned<Lion> lionTheme{ { skin_lion_png.AsCharSpan(), skin_lion_parts } };
+	Skinned<Yosemite> yosemiteTheme{ { skin_yosemite_png.AsCharSpan(), skin_yosemite_parts } };
 	Glass glassTheme;
 	Theme *const themes[] = { &threeTheme, &ninetyFiveTheme, &ninetyEightTheme, &xpTheme, &vistaTheme, &sevenTheme, &eightTheme, &tenTheme, &elevenTheme, &classicMacTheme, &modernMacTheme, &templeTheme,
 		&system6Theme, &system7Theme, &aquaTheme, &lionTheme, &yosemiteTheme, &glassTheme, &xpOliveTheme, &xpSilverTheme }; // new ones at the end: the pref is the index
