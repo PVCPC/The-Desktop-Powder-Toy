@@ -67,7 +67,7 @@ namespace
 		bool held = false, has = false;
 		double heldX = 0, heldY = 0;
 		std::vector<uint32_t> copy; // his last frame shown (fw2 wide), and where it has pixels (tdpt_buddy_boxes)
-		int fw2 = 0;
+		int fw2 = 0, k = 1;             // its width, and how many of its pixels to one of the overlay frame's
 		std::vector<RECT> boxes;
 	};
 	std::unique_ptr<Shown> shown;
@@ -135,6 +135,10 @@ namespace
 				tdpt_buddy_ledge(buddy, id, el, er, et < 0 ? NAN : et, eb < 0 ? NAN : eb);
 			else
 				tdpt_buddy_ledge(buddy, 0, 0, 0, NAN, NAN);
+			// drawn at the screen's own pixels (whole times the sim's), as sharp as in the desktop app: W x H of them
+			// for the overlay frame's w x h, his frame FW x FH
+			int k = std::max(1, ww / w), FW = fw * k, FH = fh * k, W = w * k, H = h * k;
+			tdpt_buddy_scale(buddy, k);
 			auto *f = tdpt_buddy_frame(buddy, mx, my, fw, fh);
 			if (f && f != seen && bits)
 			{
@@ -144,13 +148,13 @@ namespace
 				int32_t raw[64 * 4];
 				size_t n = tdpt_buddy_boxes(buddy, raw, 64);
 				std::vector<RECT> boxes;
-				if (n > 64) boxes = { RECT{ 0, 0, fw, fh } };
+				if (n > 64) boxes = { RECT{ 0, 0, FW, FH } };
 				for (size_t i = 0; i < n && n <= 64; i++)
 				{
-					RECT r{ std::clamp(raw[i * 4], 0, fw), std::clamp(raw[i * 4 + 1], 0, fh), std::clamp(raw[i * 4 + 2], 0, fw), std::clamp(raw[i * 4 + 3], 0, fh) };
+					RECT r{ std::clamp(raw[i * 4], 0, FW), std::clamp(raw[i * 4 + 1], 0, FH), std::clamp(raw[i * 4 + 2], 0, FW), std::clamp(raw[i * 4 + 3], 0, FH) };
 					if (!IsRectEmpty(&r)) boxes.push_back(r);
 				}
-				if (fw != hadW || fh != hadH) had = { RECT{ 0, 0, fw, fh } }, hadW = fw, hadH = fh; // all of it again
+				if (FW != hadW || FH != hadH) had = { RECT{ 0, 0, FW, FH } }, hadW = FW, hadH = FH; // all of it again
 				auto dirty = boxes;
 				dirty.insert(dirty.end(), had.begin(), had.end());
 				had = boxes;
@@ -172,20 +176,21 @@ namespace
 				{
 					// a copy for the overlay's click catching
 					std::lock_guard lock(s.m);
-					if (s.copy.size() != size_t(fw) * fh || s.fw2 != fw) s.copy.assign(size_t(fw) * fh, 0), s.fw2 = fw;
+					if (s.copy.size() != size_t(FW) * FH || s.fw2 != FW) s.copy.assign(size_t(FW) * FH, 0), s.fw2 = FW;
 					for (auto &r : dirty)
-						for (int y = r.top; y < r.bottom; y++) std::copy(f + size_t(y) * fw + r.left, f + size_t(y) * fw + r.right, s.copy.data() + size_t(y) * fw + r.left);
+						for (int y = r.top; y < r.bottom; y++) std::copy(f + size_t(y) * FW + r.left, f + size_t(y) * FW + r.right, s.copy.data() + size_t(y) * FW + r.left);
 					s.boxes = boxes;
+					s.k = k;
 					s.has = true;
 				}
 				// each to the screen (nearest pixel, as the overlay scales the sim)
 				for (auto &r : dirty)
 				{
-					RECT now{ LONG(r.left * ww / w), LONG(r.top * wh / h), LONG(std::min<int>(ww, (r.right * ww + w - 1) / w)), LONG(std::min<int>(wh, (r.bottom * wh + h - 1) / h)) };
+					RECT now{ LONG(r.left * ww / W), LONG(r.top * wh / H), LONG(std::min<int>(ww, (r.right * ww + W - 1) / W)), LONG(std::min<int>(wh, (r.bottom * wh + H - 1) / H)) };
 					for (int y = now.top; y < now.bottom; y++)
 					{
-						auto *src = f + size_t(std::min(y * h / wh, fh - 1)) * fw;
-						for (int x = now.left; x < now.right; x++) bits[size_t(y) * ww + x] = src[std::min(x * w / ww, fw - 1)];
+						auto *src = f + size_t(std::min(y * H / wh, FH - 1)) * FW;
+						for (int x = now.left; x < now.right; x++) bits[size_t(y) * ww + x] = src[std::min(x * W / ww, FW - 1)];
 					}
 					POINT src{};
 					SIZE size{ ww, wh };
@@ -352,10 +357,10 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my, void *layer
 		frame = nullptr;
 		drawn = s.has;
 		// clicks on him: the overlay takes them over his pixels (alpha 1, as good as invisible)
-		for (auto &r : s.boxes)
-			for (int y = r.top; y < r.bottom; y++)
-				for (int x = r.left; x < r.right; x++)
-					if (s.copy[size_t(y) * s.fw2 + x] >> 24 && !(argb[size_t(y) * w + x] >> 24)) argb[size_t(y) * w + x] = 0x01000000;
+		for (auto &r : s.boxes) // (his frame's pixels, s.k to one of ours)
+			for (int y = r.top / s.k; y < (r.bottom + s.k - 1) / s.k; y++)
+				for (int x = r.left / s.k; x < (r.right + s.k - 1) / s.k; x++)
+					if (s.copy[size_t(y * s.k) * s.fw2 + x * s.k] >> 24 && !(argb[size_t(y) * w + x] >> 24)) argb[size_t(y) * w + x] = 0x01000000;
 		// just above the overlay
 		HWND bwin = s.window, above = GetWindow(HWND(layer), GW_HWNDPREV);
 		if (bwin && above != bwin)
@@ -371,6 +376,7 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my, void *layer
 		tdpt_buddy_ledge(buddy, id, el, er, et < 0 ? NAN : et, eb < 0 ? NAN : eb);
 	else
 		tdpt_buddy_ledge(buddy, 0, 0, 0, NAN, NAN);
+	tdpt_buddy_scale(buddy, 1);
 	frame = held ? tdpt_buddy_frame(buddy, heldX, heldY, fw, fh) : tdpt_buddy_frame(buddy, mx, my, fw, fh);
 	drawn = frame;
 	if (!frame) return true;

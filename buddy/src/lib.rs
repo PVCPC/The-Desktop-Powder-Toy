@@ -84,6 +84,7 @@ struct Game {
     player: Arc<Mutex<Player>>,
     ground: Arc<Mutex<Ground>>,
     size: (u32, u32),
+    scale: u32, // screen pixels per stage pixel he's drawn at (sharp on a screen TDPT shows at a bigger pixel size)
     mouse: (f64, f64),
     ready: bool,
     readback: [Option<wgpu::Buffer>; 2], // the GPU copies the frame into one while we read last frame's from the other
@@ -110,7 +111,7 @@ fn open(path: &str, w: u32, h: u32) -> Result<Game, String> {
         .with_storage(Box::new(Saves("buddy".into())))
         .build();
     load_fonts(&mut player.lock().unwrap());
-    Ok(Game { player, ground: Default::default(), size: (w, h), mouse: (-1.0, -1.0), ready: false, readback: [None, None], pending: None, drawn: HashMap::new(), settings: SETTINGS, applied: [f64::NAN; 5] })
+    Ok(Game { player, ground: Default::default(), size: (w, h), scale: 1, mouse: (-1.0, -1.0), ready: false, readback: [None, None], pending: None, drawn: HashMap::new(), settings: SETTINGS, applied: [f64::NAN; 5] })
 }
 
 // The sim around him, so he stands on it, floats in it and burns in it: one byte per sim pixel over rect (x, y, w, h sim
@@ -641,17 +642,24 @@ fn load_fonts(player: &mut Player) {
     }
 }
 
+// The frame's size in pixels: the stage's, scale times
+fn pixels(size: (u32, u32), scale: u32) -> (u32, u32) {
+    (size.0 * scale.max(1), size.1 * scale.max(1))
+}
+
 fn frame(b: &mut Game, dt_ms: f64, mx: f64, my: f64, out: &mut [u32]) -> bool {
     let mut p = b.player.lock().unwrap();
     let view = p.viewport_dimensions();
-    if (view.width, view.height) != b.size {
-        p.set_viewport_dimensions(ViewportDimensions { width: b.size.0, height: b.size.1, scale_factor: 1.0 });
+    let (pw, ph) = pixels(b.size, b.scale);
+    let k = b.scale.max(1) as f64; // the stage stays b.size (no-scale mode: the viewport over the scale factor)
+    if (view.width, view.height, view.scale_factor) != (pw, ph, k) {
+        p.set_viewport_dimensions(ViewportDimensions { width: pw, height: ph, scale_factor: k });
         b.drawn.clear(); // the buffers are a new size: cleared whole
         (b.pending, b.readback) = (None, [None, None]); // and the copy on its way is the old size (its buffer still mapped)
     }
     if (mx, my) != b.mouse {
         b.mouse = (mx, my);
-        p.handle_event(PlayerEvent::MouseMove { x: mx, y: my });
+        p.handle_event(PlayerEvent::MouseMove { x: mx * k, y: my * k });
     }
     if b.ready && let Ok(mut g) = b.ground.lock() {
         if let Some((x, y, power)) = g.blast() {
@@ -661,9 +669,9 @@ fn frame(b: &mut Game, dt_ms: f64, mx: f64, my: f64, out: &mut [u32]) -> bool {
         }
         // the game's shock() was the mouse's zapper: it also lights toys near the mouse, so the mouse is at the spark for it
         if let Some((x, y)) = g.zap.take() {
-            p.handle_event(PlayerEvent::MouseMove { x, y });
+            p.handle_event(PlayerEvent::MouseMove { x: x * k, y: y * k });
             p.call_root_method("shock", vec![x.into(), y.into()]).ok();
-            p.handle_event(PlayerEvent::MouseMove { x: mx, y: my });
+            p.handle_event(PlayerEvent::MouseMove { x: mx * k, y: my * k });
         }
         if g.calm == 0 && let Some((x, y)) = g.bang.take() {
             OURS.store(true, Ordering::Relaxed);
@@ -728,7 +736,7 @@ fn frame(b: &mut Game, dt_ms: f64, mx: f64, my: f64, out: &mut [u32]) -> bool {
     p.call_root_method("__hostRestore", vec![]).ok();
     // only the part anything is drawn in comes back from the GPU (the whole 5120x1440 frame took 8-10 ms, so he
     // couldn't keep up at 120 Hz); 32 px more for glows and shadows
-    let areas = p.drawn_areas(32.0);
+    let areas: Vec<_> = p.drawn_areas(32.0).into_iter().map(|a| a.map(|v| v * k)).collect();
     let renderer = (p.renderer() as &dyn std::any::Any).downcast_ref::<WgpuRenderBackend<TextureTarget>>().unwrap();
     read_back(&mut b.readback, &mut b.pending, renderer, out, &areas, &mut b.drawn);
     true
@@ -912,6 +920,7 @@ const SETTINGS: [f64; 5] = [100.0, 1.0, 100.0, 6.0, 1.0];
 struct Shared {
     settings: [f64; 5],
     size: (u32, u32),
+    scale: u32,
     mouse: (f64, f64),
     clicks: Vec<PlayerEvent>,
     ready: Vec<u32>, // the newest finished frame, waiting for TDPT (when fresh)
@@ -946,18 +955,26 @@ fn run(mut game: Game, shared: Arc<Mutex<Shared>>) {
                 return;
             }
             game.size = s.size;
+            game.scale = s.scale;
             game.settings = s.settings;
             (s.mouse, std::mem::take(&mut s.clicks), std::mem::take(&mut s.commands))
         };
         let dt = last.elapsed().as_secs_f64() * 1e3;
         last = Instant::now();
-        work.resize(game.size.0 as usize * game.size.1 as usize, 0);
+        let (pw, ph) = pixels(game.size, game.scale);
+        work.resize(pw as usize * ph as usize, 0);
         let drawn = catch_unwind(AssertUnwindSafe(|| {
             let mut p = game.player.lock().unwrap();
             for c in commands {
                 p.call_root_method("__hostMenuCommand", vec![c.into()]).ok();
             }
+            let k = game.scale.max(1) as f64; // clicks come in stage pixels, the player wants the frame's
             for c in clicks {
+                let c = match c {
+                    PlayerEvent::MouseDown { x, y, button, index } => PlayerEvent::MouseDown { x: x * k, y: y * k, button, index },
+                    PlayerEvent::MouseUp { x, y, button } => PlayerEvent::MouseUp { x: x * k, y: y * k, button },
+                    c => c,
+                };
                 if let PlayerEvent::MouseDown { x, y, .. } = c {
                     p.handle_event(PlayerEvent::MouseMove { x, y }); // over what's pressed first
                 }
@@ -968,8 +985,8 @@ fn run(mut game: Game, shared: Arc<Mutex<Shared>>) {
         }));
         let mut s = shared.lock().unwrap();
         match drawn {
-            Ok(true) if game.size == s.size => {
-                let (w, h) = (game.size.0 as usize, game.size.1 as usize);
+            Ok(true) if (game.size, game.scale) == (s.size, s.scale) => {
+                let (w, h) = (pw as usize, ph as usize);
                 s.ready_boxes = game.drawn.get(&(work.as_ptr() as usize)).cloned().unwrap_or_else(|| vec![[0, 0, w, h]]);
                 std::mem::swap(&mut work, &mut s.ready);
                 s.fresh = true;
@@ -1026,7 +1043,7 @@ fn say(error: *mut c_char, len: usize, text: &str) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tdpt_buddy_open(path: *const c_char, w: u32, h: u32, error: *mut c_char, error_len: usize) -> *mut Buddy {
     let path = unsafe { CStr::from_ptr(path) }.to_string_lossy().into_owned();
-    let shared = Arc::new(Mutex::new(Shared { size: (w, h), mouse: (-1.0, -1.0), settings: SETTINGS, ..Default::default() }));
+    let shared = Arc::new(Mutex::new(Shared { size: (w, h), scale: 1, mouse: (-1.0, -1.0), settings: SETTINGS, ..Default::default() }));
     // the player can't change threads, so it starts on the game's, which reports back how that went
     let (tell, told) = std::sync::mpsc::channel();
     let thread = {
@@ -1070,7 +1087,20 @@ pub unsafe extern "C" fn tdpt_buddy_frame(b: *mut Buddy, mx: f64, my: f64, w: u3
         std::mem::swap(&mut s.ready, &mut b.front);
         std::mem::swap(&mut s.ready_boxes, &mut b.front_boxes);
     }
-    if b.front.len() == w as usize * h as usize { b.front.as_ptr() } else { std::ptr::null() }
+    let (pw, ph) = pixels(s.size, s.scale);
+    if b.front.len() == pw as usize * ph as usize { b.front.as_ptr() } else { std::ptr::null() }
+}
+
+/// Draws him scale times sharper (whole screen pixels per stage pixel, 1 or more): tdpt_buddy_frame's frames and
+/// tdpt_buddy_boxes are then scale times the stage's size; everything else stays in stage pixels.
+/// # Safety
+/// b is from tdpt_buddy_open.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tdpt_buddy_scale(b: *mut Buddy, scale: u32) {
+    let b = unsafe { &mut *b };
+    if let Ok(mut s) = b.shared.lock() {
+        s.scale = scale.clamp(1, 8);
+    }
 }
 
 /// Where the frame tdpt_buddy_frame last gave has pixels: up to n boxes (x0, y0, x1, y1 stage pixels) into out; it is
@@ -1834,6 +1864,35 @@ mod tests {
                 bufs.swap(1, 2);
             }
         }
+    }
+
+    // drawn twice as sharp (scale 2) on the same stage: the frame is twice the size, he's at twice his stage place,
+    // in finer pixels (more of them on his body), and the stage size and his game place are unchanged
+    #[test]
+    fn sharp_frames() {
+        let Some(path) = std::env::var_os("TDPT_BUDDY_SWF") else { return };
+        let mut game = super::open(path.to_str().unwrap(), 1280, 720).unwrap();
+        let mut out = vec![0u32; 1280 * 720];
+        while !super::frame(&mut game, 25.0, 0.0, 0.0, &mut out) {}
+        let n = |g: &super::Game, k: &str| match g.player.lock().unwrap().get_root_variable(k) { Value::Number(v) => v, o => panic!("{k} {o:?}") };
+        game.player.lock().unwrap().call_root_method("setBuddyXY", vec![700.into(), 400.into()]).unwrap();
+        for _ in 0..90 {
+            super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+        }
+        let (x, y) = (n(&game, "body.x"), n(&game, "body.y"));
+        let drawn = |out: &[u32], w: usize, x0: usize, y0: usize, r: usize| (y0 - r..(y0 + r).min(out.len() / w)).map(|y| out[y * w + x0 - r..y * w + x0 + r].iter().filter(|p| **p >> 24 != 0).count()).sum::<usize>();
+        let one = drawn(&out, 1280, x as usize, y as usize, 60);
+        game.scale = 2;
+        let mut big = vec![0u32; 2560 * 1440];
+        for _ in 0..3 {
+            super::frame(&mut game, 0.0, 0.0, 0.0, &mut big); // a frame late, as always
+        }
+        let (x2, y2) = (n(&game, "body.x"), n(&game, "body.y"));
+        let two = drawn(&big, 2560, (x2 * 2.0) as usize, (y2 * 2.0) as usize, 120);
+        let stage = game.player.lock().unwrap().get_root_variable("__host.stageWidth");
+        println!("sharp: {one} px at 1x, {two} at 2x, stage {stage:?}, body {x:.0},{y:.0} -> {x2:.0},{y2:.0}");
+        assert!(two as f64 > one as f64 * 3.5, "not drawn at twice the size: {one} -> {two}");
+        assert!((x2 - x).abs() < 30.0 && (y2 - y).abs() < 30.0, "moved in the game");
     }
 
     // the Buddy tab's size: 200% doubles his parts, back to 100% restores them

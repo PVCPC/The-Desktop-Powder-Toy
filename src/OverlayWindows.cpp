@@ -173,6 +173,7 @@ namespace
 	float uiScale = 1;
 	bool windowWalls = true;            // open windows are walls to particles (Overlay.WindowWalls)
 	bool iconWalls = true;              // and so are the desktop icons (Overlay.IconWalls)
+	bool areaFrame = false;             // a faint line around a play area smaller than the screen (Overlay.AreaFrame)
 	// The Fun tab's settings (Overlay.Fun.*), all off by default
 	struct
 	{
@@ -2781,6 +2782,10 @@ namespace
 			// The playable area, in cells of 4 pixels.
 			int top = Group(x, y, w, S(118), L"Play area");
 			auto a = sim->playArea;
+			Toggle(x + w - S(130), top, L"Show its edge", areaFrame, false, [] {
+				areaFrame = !areaFrame;
+				GlobalPrefs::Ref().Set("Overlay.AreaFrame", areaFrame);
+			}, L"A faint blue line around the play area when it's smaller than the screen (its edge can be dragged either way)");
 			Caption(x + S(12), top, L"Size: " + std::to_wstring(a.size.X * CELL) + L" \u00D7 " + std::to_wstring(a.size.Y * CELL) +
 			      L" pixels   (largest " + std::to_wstring(XRES) + L" \u00D7 " + std::to_wstring(YRES) + L")");
 			int step = 8; // cells
@@ -5278,6 +5283,7 @@ void OverlayWindows::Init(void *mainHwnd)
 	auto &prefs = GlobalPrefs::Ref();
 	windowWalls = prefs.Get("Overlay.WindowWalls", true);
 	iconWalls = prefs.Get("Overlay.IconWalls", true);
+	areaFrame = prefs.Get("Overlay.AreaFrame", false);
 	overlayFeel.destructible = prefs.Get("Overlay.Feel.Destructible", false);
 	overlayFeel.shardTint = prefs.Get("Overlay.Feel.ShardTint", true);
 	overlayFeel.shardParticles = prefs.Get("Overlay.Feel.ShardParticles", false);
@@ -5916,7 +5922,7 @@ void OverlayWindows::ApplySimMasks(uint32_t *argb, int w, const uint8_t *occupie
 	OverlayDrawMarks(sim, argb, w, occupied, 2, backdrop);
 	if (!full)
 	{
-		// A faint frame just outside the area, so you can see where it ends.
+		// A faint frame just outside the area, so you can see where it ends (Simulation tab: Show its edge).
 		auto br = area.BottomRight();
 		// Around it, a band you can't see but can grab to drag the edges (alpha 0 lets clicks through).
 		auto mark = [&](int x, int y, uint32_t c) {
@@ -5924,7 +5930,7 @@ void OverlayWindows::ApplySimMasks(uint32_t *argb, int w, const uint8_t *occupie
 		};
 		for (int d = 4; d >= 1; d--)
 		{
-			uint32_t c = d == 1 ? 0x785080C0 : 0x01000000;
+			uint32_t c = d == 1 && areaFrame ? 0x785080C0 : 0x01000000;
 			for (int x = area.pos.X - d; x <= br.X + d; x++) mark(x, area.pos.Y - d, c), mark(x, br.Y + d, c);
 			for (int y = area.pos.Y - d + 1; y < br.Y + d; y++) mark(area.pos.X - d, y, c), mark(br.X + d, y, c);
 		}

@@ -9,6 +9,8 @@ extern "C"
 	// his newest frame (w x h premultiplied 0xAARRGGBB, valid until the next call; null: none yet); he runs on his own
 	// thread, this only passes the mouse and the stage size
 	const uint32_t *tdpt_buddy_frame(Buddy *b, double mouseX, double mouseY, uint32_t w, uint32_t h);
+	// draw him scale times sharper (1-8): frames and boxes are then scale times the stage's size, all else in stage pixels
+	void tdpt_buddy_scale(Buddy *b, uint32_t scale);
 	// where that frame has pixels: up to n boxes (x0, y0, x1, y1) into out, clear elsewhere; returns how many there are
 	size_t tdpt_buddy_boxes(Buddy *b, int32_t *out, size_t n);
 	// a click there lands on him, his toys or the game's windows
