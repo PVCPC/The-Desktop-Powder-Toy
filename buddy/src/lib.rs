@@ -401,18 +401,6 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
                 }
             }
         }
-        // the window he stands on moved: he moves with it (all of him, speed kept)
-        let (cx, cy) = std::mem::take(&mut g.carry);
-        if !held && (cx != 0.0 || cy != 0.0) {
-            for part in PARTS {
-                for (f, d) in [("x", cx), ("y", cy), ("ox", cx), ("oy", cy), ("oox", cx), ("ooy", cy)] {
-                    let n = num(v, &format!("{part}.{f}"));
-                    if n.is_finite() {
-                        v.set(&format!("{part}.{f}"), Value::Number(n + d));
-                    }
-                }
-            }
-        }
         g.support = 0;
         g.last = (num(v, "body.x"), num(v, "body.y"));
         let mut bbox = [f64::MAX, f64::MAX, f64::MIN, f64::MIN];
@@ -475,6 +463,16 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
             // landing on the active window's top or bottom edge from above, as in the desktop app (not when put
             // somewhere: setBuddyXY, a portal)
             let mut landed = side;
+            // coming down onto a window's or icon's top (Windows: Solid): he stands on it
+            if !held && !side && yv >= 0.0 && oy.is_finite() && oy < y && g.window(x, y, r) && !g.window(x, oy, r) {
+                let mut ny = oy;
+                while ny + 1.0 <= y && !g.window(x, ny + 1.0, r) {
+                    ny += 1.0;
+                }
+                y = ny;
+                yv = if yv.abs() < 2.0 { 0.0 } else { -yv * 0.25 };
+                landed = true;
+            }
             if let Some(l) = g.ledge.filter(|_| !held && yv >= 0.0 && oy.is_finite() && x + r > 0.0) {
                 if let Some(k) = (0..2).find(|&k| x + r > l.left && x - r < l.right && oy + r <= l.rows[k] + 2.0 && y + r >= l.rows[k] && y - oy <= yv.abs() + 10.0) {
                     y = l.rows[k] - r;
@@ -673,6 +671,26 @@ fn frame(b: &mut Game, dt_ms: f64, mx: f64, my: f64, out: &mut [u32]) -> bool {
         }
         if std::mem::take(&mut g.eaten) {
             p.call_root_method("setBuddyXY", vec![(b.size.0 as f64 / 2.0).into(), 100.into()]).ok();
+        }
+    }
+    // the window he stands on moved: he moves with it at once, every frame, as in the desktop app (all of him, speed
+    // kept, and the smoothing's last two steps too, so he isn't drawn sweeping along after it)
+    let (cx, cy) = b.ground.lock().map(|mut g| std::mem::take(&mut g.carry)).unwrap_or_default();
+    if b.ready && (cx != 0.0 || cy != 0.0) && p.get_root_variable("fistDrag") != Value::Number(1.0) {
+        let mut shift = |name: String, d: f64| {
+            if let Value::Number(n) = p.get_root_variable(&name) {
+                p.set_root_variable(&name, Value::Number(n + d)).ok();
+            }
+        };
+        for (i, part) in PARTS.iter().enumerate() {
+            for (f, d) in [("x", cx), ("y", cy), ("ox", cx), ("oy", cy), ("oox", cx), ("ooy", cy), ("_x", cx), ("_y", cy)] {
+                shift(format!("{part}.{f}"), d);
+            }
+            // __hostParts starts with the six of PARTS; their rows' values start with _x, _y
+            for row in ["previous", "current"] {
+                shift(format!("__host.{row}.{i}.values.0"), cx);
+                shift(format!("__host.{row}.{i}.values.1"), cy);
+            }
         }
     }
     p.tick(FloatDuration::from_millis(dt_ms));
@@ -1287,6 +1305,12 @@ mod tests {
         assert!(by < 400.0, "body sank: {by}");
     }
 
+    #[test]
+
+    #[test]
+
+    #[test]
+
     // slopes: he slides down a 45 degree one; buried under 200 px of sand he digs up through it (not through metal)
     #[test]
     fn slides_and_digs_out() {
@@ -1667,6 +1691,19 @@ mod tests {
             super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
         }
         let rode = n(&game, "lLeg.y") + n(&game, "lLeg.rad");
+        // dragged sideways at 120 frames a second (three frames to each game step): he's drawn moving with it every
+        // frame, not in the game's 40 Hz steps
+        let slide = |game: &super::Game, dx: f64| game.ground.lock().unwrap().set_ledge(Some(super::Ledge { id: 7, left: 300.0 + dx, right: 900.0 + dx, rows: [340.0, 540.0] }));
+        let (mut steps, mut x0) = (vec![], n(&game, "__host.current.0.values.0"));
+        for i in 1..=30 {
+            slide(&game, 3.0 * i as f64);
+            super::frame(&mut game, 25.0 / 3.0, 0.0, 0.0, &mut out);
+            let x = n(&game, "__host.current.0.values.0");
+            steps.push(x - x0);
+            x0 = x;
+        }
+        println!("ledges: drawn steps while dragged {steps:.1?}");
+        assert!(steps.iter().all(|d| (d - 3.0).abs() < 1.5), "not drawn with the window each frame: {steps:?}");
         game.player.lock().unwrap().call_root_method("setBuddyXY", vec![600.into(), 480.into()]).unwrap();
         for _ in 0..90 {
             ledge(&game, -60.0);
@@ -1707,6 +1744,20 @@ mod tests {
         }
         println!("sides: rightmost {right:.1}");
         assert!(right < 702.0, "went into the window: {right}");
+        // and dropped onto one (Windows: Solid), he stands on its top
+        game.player.lock().unwrap().call_root_method("setBuddyXY", vec![600.into(), 200.into()]).unwrap();
+        for _ in 0..120 {
+            {
+                let mut g = game.ground.lock().unwrap();
+                let r = g.want;
+                g.cells = (0..r[2] * r[3]).map(|i| if (300..900).contains(&(r[0] + i % r[2])) && r[1] + i / r[2] >= 400 { super::WINDOW } else { 0 }).collect();
+                g.rect = r;
+            }
+            super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+        }
+        let feet = n(&game, "lLeg.y") + n(&game, "lLeg.rad");
+        println!("sides: feet on the window top at {feet:.1}");
+        assert!((feet - 400.0).abs() < 3.0, "not standing on the window: {feet}");
     }
 
     // only where things are drawn comes back, a frame late: his pixels are where he is, and none are left where he was

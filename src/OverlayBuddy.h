@@ -17,6 +17,12 @@ namespace OverlayBuddy
 	// A right-click at (x, y) frame pixels on him: the game's own menus (Items picks the Fist, which drags him). True
 	// when it was his.
 	bool Menu(int x, int y);
+	// The game's menus as a popup at the mouse (Windows): which = 0-5 one of File, Skins, Items, Modes, Settings, Help,
+	// -1 all of them; owner = the window it belongs to. False when he isn't running.
+	bool GameMenu(int which, void *owner);
+	// Copies the desktop Interactive Buddy app's save (money, skins, items, modes) over his here; false when there is
+	// none. He restarts with it.
+	bool ImportSave();
 	// His body parts as solids the sim feels (put in front of walls): sand rests on him, he shoves what he moves into
 	void Walls(std::vector<OverlayWall> &walls);
 	// Shuts him down, which writes the game's saves (TDPT's exit)

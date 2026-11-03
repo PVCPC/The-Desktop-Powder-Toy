@@ -205,13 +205,15 @@ namespace
 		// the Buddy tab (OverlayBuddy reads them from the prefs): his size and speech bubbles' (%), toys at once (0: no
 		// limit), standing on the active window, smoothing, speech
 		float buddySize = 100, buddySpeechSize = 100, buddyToys = 6;
-		bool buddyLedges = true, buddySmooth = true, buddySpeech = true;
+		bool buddySmooth = true, buddySpeech = true;
+		int buddyWindows = 1; // 0 walks through windows, 1 stands on the active one, 2 all solid (as to sand)
 		std::vector<HWND> flashed; // windows that flashed their taskbar button (a new message) since the last tick
 	} fun;
 	// The Fun tab's rows, by group, and the pref each is saved as. A row with no tip starts a group (name = heading);
 	// a row with neither b nor v is the weather kind. Slider units: 0 %, 1 count, 2 minutes, 3 seconds (10 s steps),
 	// 4 clock hour, 5 px, 6 seconds (0 off), 7 an hour, 8 a percentage, 9 count (0 no limit)
-	struct FunRow { const wchar_t *name, *tip = nullptr; bool *b = nullptr; float *v = nullptr; float lo = 0, hi = 0; const char *pref = ""; int unit = 0; };
+	// kind: 0 as above, 1 Buddy's windows choice, 2 Buddy's game menus, 3 importing his save
+	struct FunRow { const wchar_t *name, *tip = nullptr; bool *b = nullptr; float *v = nullptr; float lo = 0, hi = 0; const char *pref = ""; int unit = 0, kind = 0; };
 	FunRow Check(const wchar_t *name, const wchar_t *tip, bool *b, const char *pref) { return { name, tip, b, nullptr, 0, 0, pref }; }
 	FunRow Slide(const wchar_t *name, const wchar_t *tip, float *v, float lo, float hi, const char *pref, int unit = 0) { return { name, tip, nullptr, v, lo, hi, pref, unit }; }
 	FunRow funRows[] = {
@@ -311,8 +313,11 @@ namespace
 		{ L"Buddy" },
 		Check(L"Interactive Buddy", L"Turns him on or off. The game file is your own copy of Interactive Buddy v1.01 (a .swf file; it isn't included)", &fun.buddy, "Overlay.Fun.Buddy"),
 		Slide(L"Size", L"How big Buddy is, whatever the sim's pixel size (100% is the game's own size)", &fun.buddySize, 25, 300, "Overlay.Buddy.Size", 8),
-		Check(L"Stand on the active window", L"As in the desktop Interactive Buddy: he can stand on the top edge of the window you're using, and on its bottom edge from inside it, and rides along when you move it", &fun.buddyLedges, "Overlay.Buddy.Ledges"),
+		{ L"Windows", L"Walk through: windows don't touch him. Active window: as in the desktop Interactive Buddy, he stands on the top edge of the window you're using (and its bottom edge from inside it) and rides along when you move it. Solid: every window and icon is solid to him like it is to sand (needs Open windows are walls)", nullptr, nullptr, 0, 0, "Overlay.Buddy.Windows", 0, 1 },
 		Check(L"Smooth motion", L"The game's 120 Hz smoothing of his movement", &fun.buddySmooth, "Overlay.Buddy.Smooth"),
+		{ L"Game" },
+		{ L"Menus", L"The game's own menus, as in the desktop app (also on right-clicking Buddy): load and save, skins and the skin store, items and weapons, modes and the mode store, the game's settings, help", nullptr, nullptr, 0, 0, "", 0, 2 },
+		{ L"Save", L"Brings in your save from the desktop Interactive Buddy app (money, skins, items, modes). Buddy's save here is kept beside it as a .bak", nullptr, nullptr, 0, 0, "", 0, 3 },
 		{ L"Speech" },
 		Check(L"Speech bubbles", L"What Buddy says shows in a bubble over him", &fun.buddySpeech, "Overlay.Buddy.Speech"),
 		Slide(L"Speech bubble size", L"How big his speech bubbles are", &fun.buddySpeechSize, 25, 200, "Overlay.Buddy.SpeechSize", 8),
@@ -2988,6 +2993,34 @@ namespace
 					{
 						FunSliderRow(f, x, w, ry);
 					}
+					else if (f.kind == 1)
+					{
+						Caption(nx, ry, f.name);
+						const wchar_t *kinds[] = { L"Walk through", L"Active window", L"Solid" };
+						int kx = x + S(160);
+						for (int k = 0; k < 3; k++)
+							kx += Toggle(kx, ry, kinds[k], fun.buddyWindows == k, true, [k] {
+								fun.buddyWindows = k;
+								GlobalPrefs::Ref().Set("Overlay.Buddy.Windows", k);
+							}) + S(18);
+					}
+					else if (f.kind == 2)
+					{
+						Caption(nx, ry, f.name);
+						const wchar_t *menus[] = { L"File", L"Skins", L"Items", L"Modes", L"Settings", L"Help" };
+						int bw = (w - S(172)) / 6;
+						for (int k = 0; k < 6; k++)
+							PushButton(x + S(160) + k * bw, ry - S(3), bw - S(4), menus[k], [this, k] {
+								if (!OverlayBuddy::GameMenu(k, hwnd)) OverlayWindows::Notify("Turn Interactive Buddy on first");
+							}, L"");
+					}
+					else if (f.kind == 3)
+					{
+						Caption(nx, ry, f.name);
+						PushButton(x + S(160), ry - S(3), S(220), L"Import from the desktop app", [] {
+							OverlayWindows::Notify(OverlayBuddy::ImportSave() ? "Buddy has your desktop app's save now" : "No desktop Interactive Buddy save found");
+						}, L"");
+					}
 					else
 					{
 						Caption(nx, ry, f.name);
@@ -5226,6 +5259,7 @@ void OverlayWindows::Init(void *mainHwnd)
 	for (auto [v, name] : { std::pair{ &overlayFeel.grip, "Grip" }, { &overlayFeel.fling, "Fling" }, { &overlayFeel.push, "Push" }, { &overlayFeel.wind, "Wind" }, { &overlayFeel.scorch, "Scorch" }, { &overlayFeel.frost, "Frost" }, { &overlayFeel.acid, "Acid" }, { &overlayFeel.water, "Water" }, { &overlayFeel.acidEat, "AcidEat" }, { &overlayFeel.blast, "Blast" }, { &overlayFeel.holeOpacity, "HoleSolid" }, { &overlayFeel.shards, "Shards" }, { &overlayFeel.shardSize, "ShardSize" }, { &overlayFeel.blackHole, "BlackHole" }, { &overlayFeel.shake, "Shake" } })
 		*v = prefs.Get(ByteString("Overlay.Feel.") + name, *v);
 	fun.weatherKind = prefs.Get("Overlay.Fun.WeatherKind", 0);
+	fun.buddyWindows = prefs.Get("Overlay.Buddy.Windows", 1);
 	for (auto rows : { std::span<FunRow>(funRows), std::span<FunRow>(buddyRows) })
 	for (auto &f : rows)
 	{

@@ -19,6 +19,7 @@
 #include <windows.h>
 #endif
 #include <vector>
+#include <filesystem>
 #include <array>
 
 namespace
@@ -92,6 +93,9 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
 	auto *sim = GameController::Ref().GetModel()->GetSimulation();
 	auto &elements = SimulationData::CRef().elements;
 	int channel = -1; // of a portal in his reach
+	// windows (Buddy tab): 0 he walks through them, 1 he stands on the active one (the desktop app's way, below),
+	// 2 every window and icon is solid to him as to sand (not in overlay:window: they aren't where his stage is)
+	int windows = overlayWindowed ? 0 : GlobalPrefs::Ref().Get("Overlay.Buddy.Windows", 1);
 	for (int y = std::max(r[1], 0); y < std::min(r[1] + r[3], YRES); y++)
 		for (int x = std::max(r[0], 0); x < std::min(r[0] + r[2], XRES); x++)
 		{
@@ -100,7 +104,7 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
 			if (int e = TYP(sim->photons[y][x]); e == PT_ELEC) c |= 0x80;
 			else if (e == PT_NEUT || e == PT_PROT) c |= 0x100;
 			else if (e == PT_PHOT && !(c & 0x60)) c |= 0x20;
-			if (y < wb && sim->PixelWall(x, y) && !sim->HoleAt(x, y) && !Mine(x, y, 4)) c |= 0x400;
+			if (windows == 2 && y < wb && sim->PixelWall(x, y) && !sim->HoleAt(x, y) && !Mine(x, y, 4)) c |= 0x400;
 			if (sim->IsWallBlocking(x, y, PT_DUST)) c |= 1;
 			else if (p && (elements[TYP(p)].Properties & (TYPE_PART | TYPE_SOLID))) c |= (elements[TYP(p)].Properties & TYPE_PART) ? 0x801 : 1;
 			else if (p && (elements[TYP(p)].Properties & TYPE_LIQUID)) c |= uint16_t(2 + (std::clamp(elements[TYP(p)].Weight, 0, 100) + 2) / 4);
@@ -164,7 +168,7 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my)
 	                    int(prefs.Get("Overlay.Buddy.Toys", 6.f)), prefs.Get("Overlay.Buddy.Smooth", true));
 	uintptr_t id = 0;
 	int el, er, et, eb;
-	if (!overlayWindowed && prefs.Get("Overlay.Buddy.Ledges", true) && OverlayWindows::ActiveEdges(id, el, er, et, eb))
+	if (windows == 1 && OverlayWindows::ActiveEdges(id, el, er, et, eb))
 		tdpt_buddy_ledge(buddy, id, el, er, et < 0 ? NAN : et, eb < 0 ? NAN : eb);
 	else
 		tdpt_buddy_ledge(buddy, 0, 0, 0, NAN, NAN);
@@ -319,18 +323,35 @@ bool OverlayBuddy::Mouse(int x, int y, int what)
 
 bool OverlayBuddy::Menu(int x, int y)
 {
-#ifdef _WIN32
 	if (!buddy || !tdpt_buddy_hit(buddy, x, y)) return false;
+	SDL_SysWMinfo info;
+	SDL_VERSION(&info.version);
+#ifdef _WIN32
+	GameMenu(-1, SDL_GetMouseFocus() && SDL_GetWindowWMInfo(SDL_GetMouseFocus(), &info) ? info.info.win.window : nullptr);
+	return true;
+#else
+	return false; // ponytail: Windows only; the Mac shim has no submenus yet
+#endif
+}
+
+bool OverlayBuddy::GameMenu(int which, void *owner)
+{
+#ifdef _WIN32
+	if (!buddy) return false;
 	std::vector<char> text(tdpt_buddy_menus(buddy, nullptr, 0));
 	tdpt_buddy_menus(buddy, text.data(), text.size());
 	// the game's menus, as the right-click menu: lines of depth, flags, command, label (tdpt_buddy.h)
 	std::vector<HMENU> open{ CreatePopupMenu() };
 	std::vector<ByteString> commands;
+	int top = -1; // which of the game's menus (File, Skins, Items, Modes, Settings, Help) the lines are in
 	for (auto &line : ByteString(text.data()).PartitionBy('\n'))
 	{
 		auto f = line.PartitionBy('\t', true);
 		if (f.size() < 4) continue;
-		size_t depth = std::min(size_t(f[0].ToNumber<int>(true)), open.size() - 1);
+		int d = f[0].ToNumber<int>(true);
+		if (d == 0) top++;
+		if (which >= 0 && (top != which || d == 0)) continue; // one of the menus: its items, without its own heading
+		size_t depth = std::min(size_t(std::max(d - (which >= 0), 0)), open.size() - 1);
 		open.resize(depth + 1);
 		UINT flags = (f[1].Contains("g") ? MF_GRAYED : 0) | (f[1].Contains("c") ? MF_CHECKED : 0);
 		auto label = Platform::WinWiden(f[3]);
@@ -347,16 +368,31 @@ bool OverlayBuddy::Menu(int x, int y)
 			AppendMenuW(open.back(), MF_STRING | flags, commands.size(), label.c_str());
 		}
 	}
-	SDL_SysWMinfo info;
-	SDL_VERSION(&info.version);
-	HWND owner = SDL_GetMouseFocus() && SDL_GetWindowWMInfo(SDL_GetMouseFocus(), &info) ? info.info.win.window : nullptr;
 	POINT p;
 	GetCursorPos(&p);
-	int cmd = TrackPopupMenu(open.front(), TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, p.x, p.y, 0, owner, nullptr);
+	int cmd = TrackPopupMenu(open.front(), TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, p.x, p.y, 0, HWND(owner), nullptr);
 	DestroyMenu(open.front());
 	if (cmd > 0 && size_t(cmd) <= commands.size()) tdpt_buddy_command(buddy, commands[cmd - 1].c_str());
 	return true;
 #else
-	return false; // ponytail: Windows only; the Mac shim has no submenus yet
+	return false;
 #endif
+}
+
+bool OverlayBuddy::ImportSave()
+{
+	// the desktop Interactive Buddy's save (Interactive Buddy Native: %LOCALAPPDATA%\Interactive Buddy Native\saves),
+	// over his own here (kept as daBud.sol.bak); he is closed for it (writing his save first) and opens again
+	auto *local = getenv("LOCALAPPDATA");
+	if (!local) return false;
+	std::error_code ec;
+	std::filesystem::path from;
+	for (auto &e : std::filesystem::recursive_directory_iterator(std::filesystem::path(local) / "Interactive Buddy Native" / "saves", ec))
+		if (e.path().filename() == "daBud.sol") from = e.path();
+	if (from.empty()) return false;
+	Close();
+	std::filesystem::path to = std::filesystem::path("buddy") / "localhost_tdpt_buddy.swf_daBud.sol";
+	std::filesystem::create_directories("buddy", ec);
+	if (std::filesystem::exists(to)) std::filesystem::copy_file(to, to.string() + ".bak", std::filesystem::copy_options::overwrite_existing, ec);
+	return std::filesystem::copy_file(from, to, std::filesystem::copy_options::overwrite_existing, ec) && !ec;
 }
