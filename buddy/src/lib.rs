@@ -157,6 +157,8 @@ struct Ground {
     toys: bool,                   // his thrown things feel the sim (toys: command)
     toys_at: Vec<[i32; 4]>,       // the sim each one wants next frame (x, y, w, h), anywhere on his stage
     patches: Vec<Patch>,          // and what TDPT sent for them (tdpt_buddy_toy)
+    well: Option<[f64; 3]>,       // a TPT black hole pulling him the game's own way (x, y, its power; well: command)
+    frames: u32,                  // game frames run since frame() last looked
     hide: u8,                     // the game's own effects TDPT shows as the sim's instead, not drawn: 1 his hoses' water, 2 fire
     game_grav: f64,               // the game's grav this frame, before that
     ledge: Option<Ledge>,         // the active window's edges he can stand on (as in the desktop app)
@@ -203,7 +205,7 @@ const POSE: [(f64, f64); 6] = [(0.0, 0.0), (0.0, -39.4), (-22.1, -10.2), (22.1, 
 
 impl Default for Ground {
     fn default() -> Self {
-        Self { rect: [0; 4], cells: Vec::new(), want: [0; 4], last: (400.0, 300.0), air_rect: [0; 4], air: Vec::new(), cell: 4, before: ([0; 4], Vec::new()), calm: 0, zap: None, gravity: (0.0, 1.0), game_grav: 1.0, exit: None, jumped: 99, eaten: false, parts: Vec::new(), bang: None, booms: Vec::new(), shots: Vec::new(), bullets: Vec::new(), drops: Vec::new(), toys: false, toys_at: Vec::new(), patches: Vec::new(), hide: 0, ledge: None, carry: (0.0, 0.0), buried: 0, dig: false, support: 0 }
+        Self { rect: [0; 4], cells: Vec::new(), want: [0; 4], last: (400.0, 300.0), air_rect: [0; 4], air: Vec::new(), cell: 4, before: ([0; 4], Vec::new()), calm: 0, zap: None, gravity: (0.0, 1.0), game_grav: 1.0, exit: None, jumped: 99, eaten: false, parts: Vec::new(), bang: None, booms: Vec::new(), shots: Vec::new(), bullets: Vec::new(), drops: Vec::new(), toys: false, toys_at: Vec::new(), patches: Vec::new(), well: None, frames: 0, hide: 0, ledge: None, carry: (0.0, 0.0), buried: 0, dig: false, support: 0 }
     }
 }
 
@@ -726,6 +728,7 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
         // TPT's gravity where he is: the game's own (down, grav per frame) scaled by its downward part; the sideways
         // part is added in doBodyPhysics
         g.game_grav = num(v, "grav");
+        g.frames += 1;
         if g.gravity != (0.0, 1.0) && g.game_grav.is_finite() {
             v.set("grav", Value::Number(g.game_grav * g.gravity.1));
         }
@@ -885,6 +888,14 @@ fn frame(b: &mut Game, dt_ms: f64, mx: f64, my: f64, out: &mut [u32]) -> bool {
         p.set_window_mode("transparent");
         p.call_root_method("__hostMenuCommand", vec!["surface|desktop".into()]).ok();
         hook_ground(&mut p, &b.ground);
+    }
+    // a TPT black hole near him: the game's own gravity vortex pull (gravitateToPoint, as its Weak and Strong Gravity
+    // Vortex call it: power 50, or 20 and stat), once for each game frame that ran, after it (so his own vortex stays his)
+    let (well, n) = b.ground.lock().map(|mut g| (g.well, std::mem::take(&mut g.frames))).unwrap_or((None, 0));
+    if let Some([x, y, power]) = well {
+        for _ in 0..n.min(4) {
+            p.call_root_method("gravitateToPoint", vec![x.into(), y.into(), power.into(), (power <= 20.0).into()]).ok();
+        }
     }
     // the Buddy tab's settings, as the desktop app sets them (each only when it changed: a new toy limit clears his toys)
     let (s, a) = (b.settings, b.applied);
@@ -1143,6 +1154,11 @@ fn run(mut game: Game, shared: Arc<Mutex<Shared>>) {
         let drawn = catch_unwind(AssertUnwindSafe(|| {
             let mut p = game.player.lock().unwrap();
             for c in commands {
+                if let Some(w) = c.strip_prefix("well:") {
+                    let n: Vec<f64> = w.split(',').filter_map(|n| n.parse().ok()).collect();
+                    game.ground.lock().unwrap().well = (n.len() == 3).then(|| [n[0], n[1], n[2]]);
+                    continue;
+                }
                 if let Some(on) = c.strip_prefix("toys:") {
                     game.ground.lock().unwrap().toys = on == "1";
                     continue;
@@ -1574,6 +1590,29 @@ mod tests {
         assert!(parts > 0, "the hooks never ran");
         assert_eq!(plain.lines().count(), 160);
         assert!(plain == hooked, "the bridge changed the game's physics");
+    }
+
+    // a TPT black hole: the game's own vortex pull takes him toward it, and isn't sent back to the sim as his own vortex
+    #[test]
+    fn pulled_by_well() {
+        let Some(path) = std::env::var_os("TDPT_BUDDY_SWF") else { return };
+        let mut game = super::open(path.to_str().unwrap(), 1280, 720).unwrap();
+        let mut out = vec![0u32; 1280 * 720];
+        while !super::frame(&mut game, 25.0, 0.0, 0.0, &mut out) {}
+        let x = |game: &super::Game| match game.player.lock().unwrap().get_root_variable("body.x") { Value::Number(v) => v, o => panic!("{o:?}") };
+        for _ in 0..40 {
+            super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+        }
+        let x0 = x(&game);
+        game.ground.lock().unwrap().well = Some([x0 + 300.0, 300.0, 20.0]);
+        for _ in 0..40 {
+            super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+        }
+        let x1 = x(&game);
+        let g = game.ground.lock().unwrap();
+        println!("body.x {x0:.1} -> {x1:.1}");
+        assert!(x1 > x0 + 50.0, "not pulled: {x0} -> {x1}");
+        assert!(!g.shots.iter().any(|s| s[4] == 5.0), "sent back as his vortex");
     }
 
     #[test]

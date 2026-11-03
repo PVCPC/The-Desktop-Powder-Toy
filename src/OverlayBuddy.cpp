@@ -49,6 +49,7 @@ namespace
 	int zapped = 0;               // ticks he still glows from a shock (Overlay.Fun.BuddyGlow)
 	int fleeRest = 0;             // ticks before he runs from fire again (Overlay.Fun.BuddyFlee)
 	int hidden = -1;              // the game's own effects last told to hide (hide: command)
+	std::string well;             // the black hole last told to pull him (well: command, Overlay.Fun.BuddyWells)
 	int toys = -1;                // his toys last told to feel the sim or not (toys: command, Overlay.Fun.BuddyToys)
 	bool stunned = false;         // his stun gun was shocking him last tick (Overlay.Fun.BuddyWeapons)
 	double lastSpeed[8];          // each part's speed last tick (a splash: fast, then stopped by sand or water)
@@ -361,6 +362,22 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my, void *layer
 	int cx = std::clamp(r[0] + r[2] / 2, 0, XRES - 1), cy = std::clamp(r[1] + r[3] / 2, 0, YRES - 1);
 	if (r[2] > 0) sim->GetGravityField(cx, cy, 1.0f, 10.0f, gx, gy);
 	tdpt_buddy_gravity(buddy, gx, gy);
+	// TPT black holes (NBHL) within 400 px of him pull him and his toys the game's own way, as its gravity vortex at
+	// their middle: weak, strong from 100 of them (Overlay.Fun.BuddyWells)
+	{
+		std::string w = "well:";
+		if (GlobalPrefs::Ref().Get("Overlay.Fun.BuddyWells", false) && !parts.empty() && sim->currentTick % 5 == 0)
+		{
+			double sx = 0, sy = 0;
+			int n = 0;
+			for (int i = 0; i <= sim->parts.active; i++)
+				if (auto &q = sim->parts[i]; q.type == PT_NBHL && std::hypot(q.x - parts[0][0], q.y - parts[0][1]) < 400)
+					sx += q.x, sy += q.y, n++;
+			if (n) w += std::to_string(sx / n) + "," + std::to_string(sy / n) + "," + (n >= 100 ? "20" : "50");
+		}
+		else if (sim->currentTick % 5) w = well; // (looked for every 5 ticks)
+		if (w != well) tdpt_buddy_command(buddy, w.c_str()), well = w;
+	}
 	// the game's own explosions: a TPT blast there (pressure, power 1 about a bomb's, and a ball of fire)
 	double booms[16 * 3];
 	for (size_t i = 0, n = tdpt_buddy_booms(buddy, booms, 16); i < n; i++) Blast(sim, booms[i * 3], booms[i * 3 + 1], booms[i * 3 + 2]);

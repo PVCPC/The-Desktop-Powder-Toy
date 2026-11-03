@@ -160,8 +160,13 @@ He feels the sim:
       "act:runToPoint:X" (the game's addAction(action, 5)), 250 px away from most of it; every 2 s at most; not while he
       burns (the game's own panic). Not behind windows or icons: he runs along the floor.
       The game has its own running away (runFromGrenade, scared, runToPoint): trigger that from sim fire and lava.
-- [ ] A spinning gravity well makes him orbit it and get dizzy. The game has its own pull (gravitateToPoint,
+- [x] A spinning gravity well makes him orbit it and get dizzy. The game has its own pull (gravitateToPoint,
       gravitating): link sim gravity wells to it; no new dizzy effect.
+      Done 2026-11-03 (Fun "TPT black holes pull Buddy", well: command): NBHL within 400 px of him -> the game's own
+      gravitateToPoint(x, y, 50 | 20 + stat from 100 holes) at their middle, once per game frame after it (setBasicVars
+      counts frames), so gravitating is reset before his own vortex code and nothing echoes back to the sim. Weak Vortex
+      = (50, false), Strong = (20, true), Magical Orb = (1, true). Test pulled_by_well; live: he flies in and orbits
+      about 30 px round it.
 He changes the sim:
 - [x] Footprints: walking through powder leaves dents; wet feet leave drops on dry ground. (Overlay.Fun.BuddyTracks)
 - [x] Splash: flung into sand or water, it sprays out around where he lands. (Overlay.Fun.BuddySplash)
