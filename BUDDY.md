@@ -143,6 +143,8 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
 
 ## 4c. More interactivity (ideas agreed 2026-11-03; first: footprints, splash, fireman)
 Each one is a toggle with a description in the Fun tab (Buddy section), off by default, like the 4. extras.
+Rule (user, 2026-11-03): never re-make what the original game already does; check the game first (probe its
+variables in a cargo test, or render its frames). Only add links between the game and the sim.
 He feels the sim:
 - [x] Electricity lights him up: he glows while a spark runs through him, and passes it on to what he holds.
       Done (Overlay.Fun.BuddyGlow): SPRK, ELEC or LIGH touching him: 0.5 s blue-white flicker; carried metal powder
@@ -151,20 +153,22 @@ He feels the sim:
       Already in the game: a blast lays him flat ~7 s with its own stars round his head (starNum), then he gets up.
 - [ ] He gets dirty: sand, coal dust and soot stick to him as a tint (like wet and frost); he shakes it off later.
 - [ ] He runs from fire and lava (he doesn't now: only the pets do): away from them, behind a window or icon.
-- [ ] A spinning gravity well makes him orbit it and get dizzy.
+      The game has its own running away (runFromGrenade, scared, runToPoint): trigger that from sim fire and lava.
+- [ ] A spinning gravity well makes him orbit it and get dizzy. The game has its own pull (gravitateToPoint,
+      gravitating): link sim gravity wells to it; no new dizzy effect.
 He changes the sim:
 - [x] Footprints: walking through powder leaves dents; wet feet leave drops on dry ground. (Overlay.Fun.BuddyTracks)
 - [x] Splash: flung into sand or water, it sprays out around where he lands. (Overlay.Fun.BuddySplash)
 - [x] He picks up and throws particles: an arm scoops a handful (sand, water...), it rides with his hand, and his
       swing or a fling throws it as real particles.
       Done (Overlay.Fun.BuddyCarry): up to 40 from his right hand, thrown over 6 px a frame, else dropped after 8 s.
-- [ ] He builds when bored: scoops sand into a little pile or castle.
+- [~] He builds when bored: dropped, the game has its own idle and bored actions (idleAction, bored).
 - [ ] He feeds his pets: drops plant or seed particles for them to eat.
 Games:
 - [ ] His weapons hit the sim: bullets (pistol, machine gun in v1.02, and the rest) knock particles about and break
       what they hit; the flamethrower lights what burns (wood, plant, gunpowder, oil...); sand doesn't burn in TPT
       but melts to glass if hot enough.
-- [ ] Catch: drop a ball of a material (sand, water, a bomb); he tries to catch it before it lands.
+- [~] Catch: dropped, the game already has him catch balls (catch, caughtBalls).
 - [x] Fireman: when fire starts he grabs water and puts it out, happy if he saves a window. (Overlay.Fun.BuddyFireman:
       sprays water from his hand 3 s at fire 40-250 px away, rests 10 s; no "happy" yet, needs the game's emotes)
 
