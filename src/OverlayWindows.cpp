@@ -2654,6 +2654,16 @@ namespace
 			return y + size.cy + S(4);
 		}
 
+		// A group box whose heading folds it: a small triangle before the title, pointing right when folded
+		void FoldGroup(int x, int y, int w, int h, const std::wstring &title, bool folded)
+		{
+			Group(x, y, w, h, L"    " + title);
+			int k = S(4), cx = x + S(16), cy = y + text->Measure(title).cy / 2;
+			for (int i = 0; i <= k; i++)
+				for (int j = -(k - i); j <= k - i; j++)
+					cv.Blend(folded ? cx - k / 2 + i : cx + j, folded ? cy + j : cy - k / 2 + i, theme->heading, 255);
+		}
+
 		void Caption(int x, int y, const std::wstring &s, uint32_t rgb = 0x000000)
 		{
 			text->Draw(cv, x, y + (S(20) - text->Measure(s).cy) / 2, s, rgb);
@@ -2971,7 +2981,19 @@ namespace
 			for (size_t i = 0; i < n;)
 			{
 				const wchar_t *title = rows[i++].name;
+				// a click on a heading folds its rows away (remembered; all but the tab's first start folded)
+				ByteString pref = "Overlay.Folded.";
+				for (auto *t = title; *t; t++) pref.push_back(char(*t));
+				bool folded = GlobalPrefs::Ref().Get(pref, i > 1);
 				int top = y + text->Measure(title).cy + S(4), ry = top;
+				Add(RECT{ x, y, x + w, top }, [pref, folded] { GlobalPrefs::Ref().Set(pref, !folded); }, folded ? L"Show this section" : L"Hide this section");
+				if (folded)
+				{
+					while (i < n && rows[i].tip) i++;
+					FoldGroup(x, y, w, top - y + S(6), title, true);
+					y = top + S(12);
+					continue;
+				}
 				for (; i < n && rows[i].tip; i++)
 				{
 					auto &f = rows[i];
@@ -3037,7 +3059,7 @@ namespace
 					}
 					ry = Para(nx, ry + S(21), x + w - S(12), f.tip, note) + S(8);
 				}
-				Group(x, y, w, ry - y, title);
+				FoldGroup(x, y, w, ry - y, title, false);
 				y = ry + S(10);
 			}
 			Add(RECT{ x, y, x + 1, y + 1 }, nullptr); // lets the page scroll to the last description

@@ -48,10 +48,16 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
 - [ ] Clicks in overlay:window: dragging him, the Fist and right-click menus are untested there (window-relative
       mouse while TPT has it captured).
 - [ ] Buddy tab next to Fun (it sits after Welcome now).
+- [ ] Shown at 120 Hz: he makes 120 frames a second, but TDPT's overlay shows ~30 a second at 5120x1440 (sim 7 ms +
+      TPT drawing 13 ms + layered-window present 10 ms; his share ~1 ms). Fix: his own small click-through layered
+      window, sized to his drawn boxes and presented from his thread; the overlay keeps the click catching.
 - [ ] The game's zapper: shock() also lights its toys near the mouse, not only near the spark that touched him.
 - [x] Buddy tab (shown once his SWF is chosen in Fun): on/off + Choose SWF, size 25-300 % (the game's own
       __nativeSetBuddySize, so independent of TDPT's pixel size), active-window ledges, smoothing, speech bubbles and
       their size, toys at once (0 no limit), pets, wet/frosty. Prefs Overlay.Buddy.*, sent with tdpt_buddy_settings.
+      Windows: walk through / stand on the active window (moves with it every frame, as the app) / solid like sand.
+      Game: File/Skins/Items/Modes/Settings/Help buttons (the game's menus, buy stores inside), Import from the
+      desktop app (its daBud.sol, ours kept as .bak). Fun and Buddy tab sections fold (click the heading).
 - [x] One coordinate mapping: game stage <-> sim pixels (TDPT pixel size). The game camera never zooms (camz stays 1);
       it only shakes up to ~9 px for a moment on explosions, left as the game has it.
 
