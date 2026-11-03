@@ -165,10 +165,13 @@ He changes the sim:
 - [~] He builds when bored: dropped, the game has its own idle and bored actions (idleAction, bored).
 - [ ] He feeds his pets: drops plant or seed particles for them to eat.
 Games:
-- [ ] His weapons hit the sim: bullets (pistol, machine gun in v1.02, and the rest) knock particles about and break
+- [x] His weapons hit the sim: bullets (pistol, machine gun in v1.02, and the rest) knock particles about and break
       what they hit; the flamethrower lights what burns (wood, plant, gunpowder, oil...); sand doesn't burn in TPT
       but melts to glass if hot enough.
-- [~] Catch: dropped, the game already has him catch balls (catch, caughtBalls).
+      Done (Fun toggle "Buddy's weapons hit the sim"): tdpt_buddy_shots = each bullet's path per frame (from where it
+      was, or the gun) and each flame (particles.fireClip*/flame*). Gas is pushed along; powder/liquid: the bullet stops,
+      a spray back out and up; a solid: +2 pressure (glass breaks) and embers. Flames make TPT fire. Test: weapon_shots.
+      Not done: bullets stopped by sim walls in the game itself (they fly on through).- [~] Catch: dropped, the game already has him catch balls (catch, caughtBalls).
 - [x] Fireman: when fire starts he grabs water and puts it out, happy if he saves a window. (Overlay.Fun.BuddyFireman:
       sprays water from his hand 3 s at fire 40-250 px away, rests 10 s; no "happy" yet, needs the game's emotes)
 

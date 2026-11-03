@@ -569,6 +569,57 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 			sim->parts[i].vx = float(dx / d) * v + float(sim->rng.uniform01() - 0.5), sim->parts[i].vy = float(dy / d) * v - lob;
 		}
 	}
+	// His weapons (Overlay.Fun.BuddyWeapons): a bullet goes through gas, pushing it along; it stops in the first
+	// powder or liquid it hits, spraying a little of it back out and up (a dent in a pile, a splash), and at a solid: a puff of
+	// pressure there (glass breaks) and sparks off it. A flame from his flamethrower (or other fire of his) is TPT fire
+	// where it is, so it lights what burns
+	double shots[256 * 5];
+	size_t shot = tdpt_buddy_shots(buddy, shots, 256);
+	for (size_t s = 0; s < shot && prefs.Get("Overlay.Fun.BuddyWeapons", false); s++)
+	{
+		double *b = shots + s * 5;
+		if (b[4] == 2)
+		{
+			int x = int(b[0]) + sim->rng.between(-3, 3), y = int(b[1]) + sim->rng.between(-3, 3);
+			if (sim->rng.chance(1, 2) && empty(x, y)) sim->create_part(-1, x, y, PT_FIRE);
+			continue;
+		}
+		double dx = b[2] - b[0], dy = b[3] - b[1], d = std::hypot(dx, dy);
+		if (!(d > 0 && d < 2000)) continue;
+		dx /= d, dy /= d;
+		for (int t = 0, px = -1, py = -1; t <= int(d); t++)
+		{
+			int x = int(b[0] + dx * t), y = int(b[1] + dy * t), q;
+			if (x < 0 || y < 0 || x >= XRES || y >= YRES || !(q = sim->pmap[y][x]) || Mine(x, y))
+			{
+				px = x, py = y;
+				continue;
+			}
+			auto &p = sim->parts[ID(q)];
+			if (elements[p.type].Properties & TYPE_GAS)
+			{
+				p.vx += float(dx * 4), p.vy += float(dy * 4);
+				continue;
+			}
+			if (isPowder(ID(q)) || isLiquid(ID(q)))
+			{
+				for (int y2 = std::max(0, y - 3); y2 <= std::min(YRES - 1, y + 3); y2++)
+					for (int x2 = std::max(0, x - 3); x2 <= std::min(XRES - 1, x + 3); x2++)
+						if (int q2 = sim->pmap[y2][x2]; q2 && (isPowder(ID(q2)) || isLiquid(ID(q2))))
+						{
+							auto &g = sim->parts[ID(q2)];
+							float k = float(3 + 3 * sim->rng.uniform01());
+							g.vx += float(-dx * k + (sim->rng.uniform01() - 0.5) * 4), g.vy += float(-dy * k - 2 - sim->rng.uniform01() * 3);
+						}
+				break;
+			}
+			sim->pv[y / CELL][x / CELL] = std::min(256.0f, sim->pv[y / CELL][x / CELL] + 2);
+			for (int j = 0; j < 2 && px >= 0; j++)
+				if (int e = empty(px, py) ? sim->create_part(-1, px, py, PT_EMBR) : -1; e >= 0)
+					sim->parts[e].vx = float(-dx * 2 + sim->rng.uniform01() * 2 - 1), sim->parts[e].vy = float(-dy * 2 - sim->rng.uniform01()), sim->parts[e].life = 15;
+			break;
+		}
+	}
 	// Carrying: his hand in a powder or liquid that isn't hot scoops up a handful (up to 40) that rides on it as real
 	// particles; a fast swing or throw (hand over 6 px a frame) sends it off at the hand's speed, else he drops it after
 	// 8 s; he scoops again 4 s later

@@ -151,6 +151,8 @@ struct Ground {
     parts: Vec<[f64; 6]>,         // his parts after this frame: x, y, radius, xv, yv, 1 burning (for the sim to feel him)
     bang: Option<(f64, f64)>,     // a part touching something that blows up on him: the game's explode() there
     booms: Vec<[f64; 3]>,         // the game's explosions since TDPT last asked: x, y, power (1 = its bomb)
+    shots: Vec<[f64; 5]>,         // his weapons since TDPT last asked: a bullet's path this frame (x0, y0, x1, y1, 1) or a flame (x, y, x, y, 2)
+    bullets: Vec<(f64, f64)>,     // the game's bullets last frame: where each was
     game_grav: f64,               // the game's grav this frame, before that
     ledge: Option<Ledge>,         // the active window's edges he can stand on (as in the desktop app)
     carry: (f64, f64),            // how far that window moved while he stood on it, not yet applied
@@ -196,7 +198,7 @@ const POSE: [(f64, f64); 6] = [(0.0, 0.0), (0.0, -39.4), (-22.1, -10.2), (22.1, 
 
 impl Default for Ground {
     fn default() -> Self {
-        Self { rect: [0; 4], cells: Vec::new(), want: [0; 4], last: (400.0, 300.0), air_rect: [0; 4], air: Vec::new(), cell: 4, before: ([0; 4], Vec::new()), calm: 0, zap: None, gravity: (0.0, 1.0), game_grav: 1.0, exit: None, jumped: 99, eaten: false, parts: Vec::new(), bang: None, booms: Vec::new(), ledge: None, carry: (0.0, 0.0), buried: 0, dig: false, support: 0 }
+        Self { rect: [0; 4], cells: Vec::new(), want: [0; 4], last: (400.0, 300.0), air_rect: [0; 4], air: Vec::new(), cell: 4, before: ([0; 4], Vec::new()), calm: 0, zap: None, gravity: (0.0, 1.0), game_grav: 1.0, exit: None, jumped: 99, eaten: false, parts: Vec::new(), bang: None, booms: Vec::new(), shots: Vec::new(), bullets: Vec::new(), ledge: None, carry: (0.0, 0.0), buried: 0, dig: false, support: 0 }
     }
 }
 
@@ -577,6 +579,39 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
         }
         if bbox[0] <= bbox[2] {
             g.want = [bbox[0] as i32, bbox[1] as i32, (bbox[2] - bbox[0]) as i32 + 1, (bbox[3] - bbox[1]) as i32 + 1];
+        }
+    }))
+    .ok();
+    // his weapons for the sim: the game has moved its bullets (pistol, machine gun) and flames (flamethrower, fire) by now
+    let g = ground.clone();
+    p.hook_after_root_function("doObjectPhysics", Box::new(move |v| {
+        let Ok(mut g) = g.lock() else { return };
+        // a bullet's path: from where it was last frame (the same one: as far as its speed takes it), or from the gun (the
+        // mouse) when it's new, to where it is
+        let mut now = Vec::new();
+        let gun = (num(v, "_xmouse"), num(v, "_ymouse"));
+        for i in 0..num(v, "bullets.length").min(64.0) as usize {
+            let b = |v: &mut dyn RootVars, f| num(v, &format!("bullets.{i}.{f}"));
+            let (x, y, speed) = (b(v, "x"), b(v, "y"), b(v, "xv").hypot(b(v, "yv")));
+            let near = |&(px, py): &(f64, f64)| (x - px).hypot(y - py) < speed * 1.5 + 5.0;
+            if let Some(&(px, py)) = g.bullets.get(i).filter(|p| near(p)).or(Some(&gun).filter(|p| near(p)))
+                && g.shots.len() < 256
+            {
+                g.shots.push([px, py, x, y, 1.0]);
+            }
+            now.push((x, y));
+        }
+        g.bullets = now;
+        if let Value::Object(clips) = v.get("particles") {
+            for (name, clip) in clips {
+                let Value::Object(c) = clip else { continue };
+                if !(name.starts_with("fireClip") || name.starts_with("flame")) || g.shots.len() >= 256 {
+                    continue;
+                }
+                if let (Some(Value::Number(x)), Some(Value::Number(y))) = (c.get("x"), c.get("y")) {
+                    g.shots.push([*x, *y, *x, *y, 2.0]);
+                }
+            }
         }
     }))
     .ok();
@@ -1315,6 +1350,19 @@ pub unsafe extern "C" fn tdpt_buddy_booms(b: *mut Buddy, out: *mut f64, max: usi
     n
 }
 
+/// His weapons since the last call (up to max): x0, y0, x1, y1, kind each (1 a bullet's path, 2 a flame at x0, y0); how many
+/// # Safety
+/// b is from tdpt_buddy_open; out has room for 5 * max.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tdpt_buddy_shots(b: *mut Buddy, out: *mut f64, max: usize) -> usize {
+    let b = unsafe { &mut *b };
+    let Ok(mut g) = b.ground.lock() else { return 0 };
+    let n = g.shots.len().min(max);
+    unsafe { std::ptr::copy_nonoverlapping(g.shots.as_ptr() as *const f64, out, n * 5) };
+    g.shots.clear();
+    n
+}
+
 /// what: 1 left button down, 2 up, at (x, y) stage pixels
 /// # Safety
 /// b is from tdpt_buddy_open.
@@ -1786,6 +1834,63 @@ mod tests {
         game.player.lock().unwrap().call_root_method("explode", vec![300.into(), 400.into(), 1.into()]).unwrap();
         super::OURS.store(false, super::Ordering::Relaxed);
         assert!(game.ground.lock().unwrap().booms.is_empty());
+    }
+
+    // his weapons reach the sim: the pistol's bullets as their path each frame (flying from the gun, at the mouse, to him),
+    // the flamethrower's flames as points; the game's own all-items cheat (keys) to have them
+    #[test]
+    fn weapon_shots() {
+        use ruffle_core::events::{KeyDescriptor, KeyLocation, LogicalKey, NamedKey, PhysicalKey};
+        let Some(path) = std::env::var_os("TDPT_BUDDY_SWF") else { return };
+        let mut game = super::open(path.to_str().unwrap(), 1280, 720).unwrap();
+        let mut out = vec![0u32; 1280 * 720];
+        while !super::frame(&mut game, 25.0, 0.0, 0.0, &mut out) {}
+        for c in "srdldrul".chars() {
+            let (physical_key, logical_key) = match c {
+                's' => (PhysicalKey::Space, LogicalKey::Character(' ')),
+                'r' => (PhysicalKey::ArrowRight, LogicalKey::Named(NamedKey::ArrowRight)),
+                'd' => (PhysicalKey::ArrowDown, LogicalKey::Named(NamedKey::ArrowDown)),
+                'l' => (PhysicalKey::ArrowLeft, LogicalKey::Named(NamedKey::ArrowLeft)),
+                _ => (PhysicalKey::ArrowUp, LogicalKey::Named(NamedKey::ArrowUp)),
+            };
+            let key = KeyDescriptor { physical_key, logical_key, key_location: KeyLocation::Standard };
+            for event in [PlayerEvent::KeyDown { key }, PlayerEvent::KeyUp { key }] {
+                game.player.lock().unwrap().handle_event(event);
+                for _ in 0..3 {
+                    super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+                }
+            }
+        }
+        let menus = super::read_menus(&mut game.player.lock().unwrap());
+        let body = { let mut p = game.player.lock().unwrap(); (p.get_root_variable("body.x"), p.get_root_variable("body.y")) };
+        let (bx, by) = match body {
+            (Value::Number(x), Value::Number(y)) => (x, y),
+            other => panic!("{other:?}"),
+        };
+        let (mx, my) = (bx - 300.0, by - 150.0);
+        let mut fire = |game: &mut super::Game, item: &str| {
+            let Some(line) = menus.lines().find(|l| l.split('\t').nth(3) == Some(item)) else { return None };
+            let pick = line.split('\t').nth(2).unwrap().to_owned();
+            game.player.lock().unwrap().call_root_method("__hostMenuCommand", vec![pick.into()]).unwrap();
+            for _ in 0..10 {
+                super::frame(game, 25.0, mx, my, &mut out);
+            }
+            game.ground.lock().unwrap().shots.clear();
+            game.player.lock().unwrap().handle_event(PlayerEvent::MouseMove { x: mx, y: my });
+            game.player.lock().unwrap().handle_event(PlayerEvent::MouseDown { x: mx, y: my, button: MouseButton::Left, index: None });
+            for _ in 0..10 {
+                super::frame(game, 25.0, mx, my, &mut out);
+            }
+            game.player.lock().unwrap().handle_event(PlayerEvent::MouseUp { x: mx, y: my, button: MouseButton::Left });
+            Some(std::mem::take(&mut game.ground.lock().unwrap().shots))
+        };
+        let flames = fire(&mut game, "Flamethrower").expect("no Flamethrower");
+        assert!(flames.iter().filter(|s| s[4] == 2.0).count() > 10, "{flames:?}");
+        if let Some(bullets) = fire(&mut game, "Pistol") {
+            // v1.02: from the gun (the mouse), a frame's flight
+            let b = bullets.iter().find(|s| s[4] == 1.0).unwrap_or_else(|| panic!("{bullets:?}"));
+            assert!((b[0] - mx).hypot(b[1] - my) < 5.0 && (b[2] - b[0]).hypot(b[3] - b[1]) > 100.0, "{b:?}");
+        }
     }
 
     // a shorter stage (TDPT's play area ending at the taskbar) is a higher floor: he stands on its bottom

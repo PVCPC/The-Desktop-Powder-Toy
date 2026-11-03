@@ -45,5 +45,7 @@ extern "C"
 	size_t tdpt_buddy_parts(Buddy *b, double *out, size_t max);
 	// the game's explosions since the last call (up to max): x, y, power each (1 = its bomb); how many
 	size_t tdpt_buddy_booms(Buddy *b, double *out, size_t max);
+	// his weapons since the last call (up to max): x0, y0, x1, y1, kind each (1 a bullet's path, 2 a flame at x0, y0); how many
+	size_t tdpt_buddy_shots(Buddy *b, double *out, size_t max);
 	void tdpt_buddy_close(Buddy *b);
 }
