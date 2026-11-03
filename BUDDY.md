@@ -147,7 +147,8 @@ He feels the sim:
 - [x] Electricity lights him up: he glows while a spark runs through him, and passes it on to what he holds.
       Done (Overlay.Fun.BuddyGlow): SPRK, ELEC or LIGH touching him: 0.5 s blue-white flicker; carried metal powder
       already sparks (it touches his hand).
-- [ ] Big blasts daze him: knocked out a few seconds, stars over his head, then he gets up.
+- [x] Big blasts daze him: knocked out a few seconds, stars over his head, then he gets up.
+      Already in the game: a blast lays him flat ~7 s with its own stars round his head (starNum), then he gets up.
 - [ ] He gets dirty: sand, coal dust and soot stick to him as a tint (like wet and frost); he shakes it off later.
 - [ ] He runs from fire and lava (he doesn't now: only the pets do): away from them, behind a window or icon.
 - [ ] A spinning gravity well makes him orbit it and get dizzy.
