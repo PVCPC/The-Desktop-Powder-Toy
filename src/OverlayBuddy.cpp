@@ -272,44 +272,47 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my, void *layer
 	// 400 C+: sets him on fire, 0x60 -50 C or colder), 0x80 a spark or electron (shocks him), 0x100 caustic gas, radiation
 	// or virus (hurts), 0x200 DEST, BOMB or a singularity (blows up on him), 0x800 a powder (buried, he digs up through
 	// it), 0x1000 ice (closed in by it, he's held until it melts); light (PHOT) warms him
-	int32_t r[4];
-	tdpt_buddy_area(buddy, r);
-	r[2] = std::clamp(r[2], 0, XRES * 2), r[3] = std::clamp(r[3], 0, YRES * 2);
-	ground.assign(size_t(r[2]) * r[3], 0);
 	auto *sim = GameController::Ref().GetModel()->GetSimulation();
 	auto &elements = SimulationData::CRef().elements;
 	int channel = -1; // of a portal in his reach
 	// windows (Buddy tab): 0 he walks through them, 1 he stands on the active one (the desktop app's way, below),
 	// 2 every window and icon is solid to him as to sand (not in overlay:window: they aren't where his stage is)
 	int windows = overlayWindowed ? 0 : GlobalPrefs::Ref().Get("Overlay.Buddy.Windows", 1);
-	for (int y = std::max(r[1], 0); y < std::min(r[1] + r[3], YRES); y++)
-		for (int x = std::max(r[0], 0); x < std::min(r[0] + r[2], XRES); x++)
-		{
-			int p = sim->pmap[y][x];
-			auto &c = ground[size_t(y - r[1]) * r[2] + x - r[0]];
-			if (int e = TYP(sim->photons[y][x]); e == PT_ELEC) c |= 0x80;
-			else if (e == PT_NEUT || e == PT_PROT) c |= 0x100;
-			else if (e == PT_PHOT && !(c & 0x60)) c |= 0x20;
-			if (windows == 2 && y < wb && sim->PixelWall(x, y) && !sim->HoleAt(x, y) && !Mine(x, y, 4)) c |= 0x400;
-			if (sim->IsWallBlocking(x, y, PT_DUST)) c |= 1;
-			else if (p && (elements[TYP(p)].Properties & (TYPE_PART | TYPE_SOLID))) c |= (elements[TYP(p)].Properties & TYPE_PART) ? 0x801 : 1;
-			else if (p && (elements[TYP(p)].Properties & TYPE_LIQUID)) c |= uint16_t(2 + (std::clamp(elements[TYP(p)].Weight, 0, 100) + 2) / 4);
-			if (!p) continue;
-			if (TYP(p) == PT_ACID) c = (c & ~0x1F) | 31;
-			if (TYP(p) == PT_VOID || TYP(p) == PT_BHOL) c = (c & ~0x1F) | 30;
-			if (TYP(p) == PT_PRTI)
+	auto fill = [&](int32_t *r, std::vector<uint16_t> &out, int &chan) {
+		r[2] = std::clamp(r[2], 0, XRES * 2), r[3] = std::clamp(r[3], 0, YRES * 2);
+		out.assign(size_t(r[2]) * r[3], 0);
+		for (int y = std::max(r[1], 0); y < std::min(r[1] + r[3], YRES); y++)
+			for (int x = std::max(r[0], 0); x < std::min(r[0] + r[2], XRES); x++)
 			{
-				c = (c & ~0x1F) | 29;
-				channel = sim->parts[ID(p)].tmp;
+				int p = sim->pmap[y][x];
+				auto &c = out[size_t(y - r[1]) * r[2] + x - r[0]];
+				if (int e = TYP(sim->photons[y][x]); e == PT_ELEC) c |= 0x80;
+				else if (e == PT_NEUT || e == PT_PROT) c |= 0x100;
+				else if (e == PT_PHOT && !(c & 0x60)) c |= 0x20;
+				if (windows == 2 && y < wb && sim->PixelWall(x, y) && !sim->HoleAt(x, y) && !Mine(x, y, 4)) c |= 0x400;
+				if (sim->IsWallBlocking(x, y, PT_DUST)) c |= 1;
+				else if (p && (elements[TYP(p)].Properties & (TYPE_PART | TYPE_SOLID))) c |= (elements[TYP(p)].Properties & TYPE_PART) ? 0x801 : 1;
+				else if (p && (elements[TYP(p)].Properties & TYPE_LIQUID)) c |= uint16_t(2 + (std::clamp(elements[TYP(p)].Weight, 0, 100) + 2) / 4);
+				if (!p) continue;
+				if (TYP(p) == PT_ACID) c = (c & ~0x1F) | 31;
+				if (TYP(p) == PT_VOID || TYP(p) == PT_BHOL) c = (c & ~0x1F) | 30;
+				if (TYP(p) == PT_PRTI)
+				{
+					c = (c & ~0x1F) | 29;
+					chan = sim->parts[ID(p)].tmp;
+				}
+				int t = TYP(p);
+				if (t == PT_CAUS || t == PT_VIRS || t == PT_VRSS || t == PT_VRSG) c |= 0x100;
+				if (t == PT_DEST || t == PT_BOMB || t == PT_SING) c |= 0x200;
+				if (t == PT_ICEI) c |= 0x1000;
+				auto temp = sim->parts[ID(p)].temp - 273.15f;
+				if (int f = temp >= 400 ? 0x40 : temp >= 60 ? 0x20 : temp <= -50 ? 0x60 : 0) c = uint16_t((c & ~0x60) | f);
+				if (TYP(p) == PT_SPRK || TYP(p) == PT_LIGH) c |= 0x80; // (lightning too)
 			}
-			int t = TYP(p);
-			if (t == PT_CAUS || t == PT_VIRS || t == PT_VRSS || t == PT_VRSG) c |= 0x100;
-			if (t == PT_DEST || t == PT_BOMB || t == PT_SING) c |= 0x200;
-			if (t == PT_ICEI) c |= 0x1000;
-			auto temp = sim->parts[ID(p)].temp - 273.15f;
-			if (int f = temp >= 400 ? 0x40 : temp >= 60 ? 0x20 : temp <= -50 ? 0x60 : 0) c = uint16_t((c & ~0x60) | f);
-			if (TYP(p) == PT_SPRK || TYP(p) == PT_LIGH) c |= 0x80; // (lightning too)
-		}
+	};
+	int32_t r[4];
+	tdpt_buddy_area(buddy, r);
+	fill(r, ground, channel);
 	tdpt_buddy_ground(buddy, r, ground.data());
 	// where that portal comes out
 	int has = 0;
@@ -322,19 +325,36 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my, void *layer
 		}
 	tdpt_buddy_portal(buddy, has, ex, ey);
 	// the air over the same area, in sim cells
-	int32_t c[4] = { std::max(r[0], 0) / CELL, std::max(r[1], 0) / CELL, 0, 0 };
-	c[2] = std::max(0, std::min((r[0] + r[2]) / CELL + 1, XCELLS) - c[0]);
-	c[3] = std::max(0, std::min((r[1] + r[3]) / CELL + 1, YCELLS) - c[1]);
-	air.resize(size_t(c[2]) * c[3] * 3);
-	for (int y = 0; y < c[3]; y++)
-		for (int x = 0; x < c[2]; x++)
-		{
-			auto *a = &air[(size_t(y) * c[2] + x) * 3];
-			a[0] = sim->vx[c[1] + y][c[0] + x];
-			a[1] = sim->vy[c[1] + y][c[0] + x];
-			a[2] = sim->pv[c[1] + y][c[0] + x];
-		}
+	auto fillAir = [&](const int32_t *r, int32_t *c, std::vector<float> &out) {
+		c[0] = std::max(r[0], 0) / CELL, c[1] = std::max(r[1], 0) / CELL;
+		c[2] = std::max(0, std::min((r[0] + r[2]) / CELL + 1, XCELLS) - c[0]);
+		c[3] = std::max(0, std::min((r[1] + r[3]) / CELL + 1, YCELLS) - c[1]);
+		out.resize(size_t(c[2]) * c[3] * 3);
+		for (int y = 0; y < c[3]; y++)
+			for (int x = 0; x < c[2]; x++)
+			{
+				auto *a = &out[(size_t(y) * c[2] + x) * 3];
+				a[0] = sim->vx[c[1] + y][c[0] + x];
+				a[1] = sim->vy[c[1] + y][c[0] + x];
+				a[2] = sim->pv[c[1] + y][c[0] + x];
+			}
+	};
+	int32_t c[4];
+	fillAir(r, c, air);
 	tdpt_buddy_air(buddy, CELL, c, air.data());
+	// his toys' own patches of the sim, wherever they are (Overlay.Fun.BuddyToys)
+	if (GlobalPrefs::Ref().Get("Overlay.Fun.BuddyToys", false))
+	{
+		int32_t tr[64 * 4], tc[4];
+		std::vector<uint16_t> tg;
+		std::vector<float> ta;
+		for (int i = 0, n = tdpt_buddy_toys(buddy, tr, 64), ch; i < n; i++)
+		{
+			fill(tr + i * 4, tg, ch);
+			fillAir(tr + i * 4, tc, ta);
+			tdpt_buddy_toy(buddy, tr + i * 4, tg.data(), tc, ta.data());
+		}
+	}
 	// gravity where he is (the middle of that area), as a particle that falls like his game would (Newtonian
 	// gravity x10: his normal fall is about ten times a powder's)
 	float gx = 0, gy = 1;

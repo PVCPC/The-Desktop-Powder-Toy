@@ -155,7 +155,8 @@ struct Ground {
     bullets: Vec<(f64, f64)>,     // the game's bullets last frame: where each was
     drops: Vec<String>,           // his hoses' drops last frame (their clips' names)
     toys: bool,                   // his thrown things feel the sim (toys: command)
-    toys_at: Vec<(f64, f64, f64)>, // where they are (x, y, radius), so the ground TDPT sends covers them
+    toys_at: Vec<[i32; 4]>,       // the sim each one wants next frame (x, y, w, h), anywhere on his stage
+    patches: Vec<Patch>,          // and what TDPT sent for them (tdpt_buddy_toy)
     hide: u8,                     // the game's own effects TDPT shows as the sim's instead, not drawn: 1 his hoses' water, 2 fire
     game_grav: f64,               // the game's grav this frame, before that
     ledge: Option<Ledge>,         // the active window's edges he can stand on (as in the desktop app)
@@ -202,7 +203,25 @@ const POSE: [(f64, f64); 6] = [(0.0, 0.0), (0.0, -39.4), (-22.1, -10.2), (22.1, 
 
 impl Default for Ground {
     fn default() -> Self {
-        Self { rect: [0; 4], cells: Vec::new(), want: [0; 4], last: (400.0, 300.0), air_rect: [0; 4], air: Vec::new(), cell: 4, before: ([0; 4], Vec::new()), calm: 0, zap: None, gravity: (0.0, 1.0), game_grav: 1.0, exit: None, jumped: 99, eaten: false, parts: Vec::new(), bang: None, booms: Vec::new(), shots: Vec::new(), bullets: Vec::new(), drops: Vec::new(), toys: false, toys_at: Vec::new(), hide: 0, ledge: None, carry: (0.0, 0.0), buried: 0, dig: false, support: 0 }
+        Self { rect: [0; 4], cells: Vec::new(), want: [0; 4], last: (400.0, 300.0), air_rect: [0; 4], air: Vec::new(), cell: 4, before: ([0; 4], Vec::new()), calm: 0, zap: None, gravity: (0.0, 1.0), game_grav: 1.0, exit: None, jumped: 99, eaten: false, parts: Vec::new(), bang: None, booms: Vec::new(), shots: Vec::new(), bullets: Vec::new(), drops: Vec::new(), toys: false, toys_at: Vec::new(), patches: Vec::new(), hide: 0, ledge: None, carry: (0.0, 0.0), buried: 0, dig: false, support: 0 }
+    }
+}
+
+// A patch of the sim around one of his toys (as Ground's own ground and air, which it stands in for)
+#[derive(Default)]
+struct Patch {
+    rect: [i32; 4],
+    cells: Vec<u16>,
+    air_rect: [i32; 4],
+    air: Vec<[f32; 3]>,
+}
+
+impl Patch {
+    fn swap(&mut self, g: &mut Ground) {
+        std::mem::swap(&mut self.rect, &mut g.rect);
+        std::mem::swap(&mut self.cells, &mut g.cells);
+        std::mem::swap(&mut self.air_rect, &mut g.air_rect);
+        std::mem::swap(&mut self.air, &mut g.air);
     }
 }
 
@@ -581,13 +600,6 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
                 g.jumped = 0;
             }
         }
-        // and his toys near him (ponytail: within 800 px, so the ground stays small; one rect per toy if far ones matter)
-        let (bx, by) = g.last;
-        for &(x, y, r) in &g.toys_at {
-            if (x - bx).hypot(y - by) < 800.0 {
-                bbox = [bbox[0].min(x - r - 40.0), bbox[1].min(y - r - 40.0), bbox[2].max(x + r + 40.0), bbox[3].max(y + r + 40.0)];
-            }
-        }
         if bbox[0] <= bbox[2] {
             g.want = [bbox[0] as i32, bbox[1] as i32, (bbox[2] - bbox[0]) as i32 + 1, (bbox[3] - bbox[1]) as i32 + 1];
         }
@@ -616,6 +628,7 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
         // his toys (balls, infants, the orb, the radio: the game's circles) feel the sim as his parts do: they rest on it, float
         // in liquid (but the heavy bowling ball), its air blows them; one stopped fast by it splashes (x, y, radius, speed, 7)
         g.toys_at.clear();
+        let mut patches = std::mem::take(&mut g.patches);
         let grav = num(v, "grav");
         for i in 0..num(v, "objectList.length").min(64.0) as usize {
             let s = |f: &str| format!("objectList.{i}.{f}");
@@ -627,8 +640,12 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
             if [x, y, xv, yv, r].iter().any(|n| !n.is_finite()) || r <= 0.0 {
                 continue;
             }
-            g.toys_at.push((x, y, r));
             let speed = xv.hypot(yv);
+            let m = r + 40.0 + speed * 2.0; // what it can touch by the next frame
+            g.toys_at.push([(x - m) as i32, (y - m) as i32, (2.0 * m) as i32 + 1, (2.0 * m) as i32 + 1]);
+            // its own patch of the sim in place of his, for this toy (no patch yet: his)
+            let patch = patches.iter_mut().find(|p| { let [px, py, w, h] = p.rect; x >= px as f64 && y >= py as f64 && x < (px + w) as f64 && y < (py + h) as f64 });
+            let mut patch = patch.map(|p| { p.swap(&mut g); p });
             let wet = !(mass >= 0.6) && grav.is_finite() && g.float(x, y, &mut xv, &mut yv, r, grav);
             let (ax, ay) = g.wind(x, y);
             xv += 0.1 * ax;
@@ -639,10 +656,14 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
                     v.set(&s(&format!("targ.{f}")), Value::Number(n));
                 }
             }
+            if let Some(p) = patch.take() {
+                p.swap(&mut g);
+            }
             if speed > 8.0 && xv.hypot(yv) < speed * 0.5 && g.shots.len() < 256 {
                 g.shots.push([x, y, r, speed, 7.0]);
             }
         }
+        g.patches = patches;
         // his stun gun shocking him
         if v.get("beingShocked") == Value::Bool(true) && g.shots.len() < 256 {
             g.shots.push([num(v, "body.x"), num(v, "body.y"), 0.0, 0.0, 6.0]);
@@ -1367,6 +1388,33 @@ pub unsafe extern "C" fn tdpt_buddy_ground(b: *mut Buddy, rect: *const i32, cell
     }
 }
 
+/// His toys' patches of the sim (x, y, w, h each, sim pixels, up to max) for tdpt_buddy_toy this frame; how many
+/// # Safety
+/// b is from tdpt_buddy_open; rects has 4 * max.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tdpt_buddy_toys(b: *mut Buddy, rects: *mut i32, max: i32) -> i32 {
+    let b = unsafe { &mut *b };
+    let Ok(mut g) = b.ground.lock() else { return 0 };
+    g.patches.clear();
+    let n = g.toys_at.len().min(max.max(0) as usize);
+    unsafe { std::ptr::copy_nonoverlapping(g.toys_at.as_ptr() as *const i32, rects, n * 4) };
+    n as i32
+}
+
+/// One toy's patch: the sim over rect as in tdpt_buddy_ground, its air over air_rect as in tdpt_buddy_air
+/// # Safety
+/// b is from tdpt_buddy_open; rect and air_rect have 4; cells w * h; air 3 per air cell.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tdpt_buddy_toy(b: *mut Buddy, rect: *const i32, cells: *const u16, air_rect: *const i32, air: *const f32) {
+    let b = unsafe { &mut *b };
+    let (rect, air_rect): ([i32; 4], [i32; 4]) = unsafe { (std::ptr::read(rect as *const _), std::ptr::read(air_rect as *const _)) };
+    let n = |r: [i32; 4]| (r[2].max(0) as usize) * (r[3].max(0) as usize);
+    let p = Patch { rect, cells: unsafe { std::slice::from_raw_parts(cells, n(rect)) }.to_vec(), air_rect, air: unsafe { std::slice::from_raw_parts(air as *const [f32; 3], n(air_rect)) }.to_vec() };
+    if let Ok(mut g) = b.ground.lock() {
+        g.patches.push(p);
+    }
+}
+
 /// The sim's air over rect (x, y, w, h in cells of `cell` sim pixels): w * h of vx, vy, pressure
 /// # Safety
 /// b is from tdpt_buddy_open; rect has 4; v has 3 * w * h.
@@ -2038,16 +2086,16 @@ mod tests {
             let shots = std::mem::take(&mut game.ground.lock().unwrap().shots);
             assert!(shots.iter().any(|s| s[4] == 6.0), "not shocked: {shots:?}");
         }
-        // his toys on the sim: a ball dropped from the mouse lands on a block 100 px below it
+        // his toys on the sim: a ball dropped from the mouse lands on a block 100 px below it (its own patch of the sim,
+        // not his)
         if let Some(line) = menus.lines().find(|l| l.split('\t').nth(3) == Some("Bowling Balls")) {
             let pick = line.split('\t').nth(2).unwrap().to_owned();
             game.player.lock().unwrap().call_root_method("__hostMenuCommand", vec![pick.into()]).unwrap();
             game.ground.lock().unwrap().toys = true;
             let fill = |game: &super::Game| {
                 let mut g = game.ground.lock().unwrap();
-                let r = g.want;
-                g.cells = (0..r[2] * r[3]).map(|i| (r[1] + i / r[2] >= my as i32 + 100 && (r[0] + i % r[2] - mx as i32).abs() < 200) as u16).collect();
-                g.rect = r;
+                g.cells.clear();
+                g.patches = g.toys_at.iter().map(|&r| super::Patch { rect: r, cells: (0..r[2] * r[3]).map(|i| (r[1] + i / r[2] >= my as i32 + 100 && (r[0] + i % r[2] - mx as i32).abs() < 200) as u16).collect(), ..Default::default() }).collect();
             };
             for f in 0..120 {
                 fill(&game);

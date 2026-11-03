@@ -29,6 +29,9 @@ extern "C"
 	// 0x20 60 C or hotter, 0x40 400 C or hotter, 0x60 -50 C or colder; 0x80 a spark or electron; 0x100 hurts (caustic gas,
 	// radiation, virus); 0x200 blows up on him (DEST, BOMB, singularity); 0x400 a window or icon (its sides stop him)
 	void tdpt_buddy_ground(Buddy *b, const int32_t rect[4], const uint16_t *cells);
+	// his toys' own patches of the sim this frame (x, y, w, h each, up to max): how many; then each one's ground and air
+	int32_t tdpt_buddy_toys(Buddy *b, int32_t *rects, int32_t max);
+	void tdpt_buddy_toy(Buddy *b, const int32_t rect[4], const uint16_t *cells, const int32_t air_rect[4], const float *air);
 	// the sim's air over rect (x, y, w, h in cells of `cell` sim pixels): w * h of vx, vy, pressure
 	void tdpt_buddy_air(Buddy *b, int32_t cell, const int32_t rect[4], const float *v);
 	// TPT's gravity where he is, 1 = normal (straight down is 0, 1)
