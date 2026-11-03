@@ -44,8 +44,9 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
       a real mouse to try.
 - [x] Saves: the game's save (money, purchases) is a file in TPT's data folder, `buddy/`, written when he's turned
       off or TDPT closes.
-- [ ] Sound (none yet): the game's own sounds through TDPT's audio (Ruffle's audio backend), with a volume / mute
-      row in the Buddy tab, off when TDPT is muted.
+- [x] Sound: the game's own sounds through TDPT's audio (Ruffle's audio backend), with a volume / mute
+      row in the Buddy tab, off when TDPT is muted. Done: Buddy tab Volume (far left silent; TDPT has no mute of its
+      own), test sounds.
 - [x] Saves also every 2 minutes (checked: TDPT killed after 2 min 17 s, his save was there).
 - [ ] Clicks in overlay:window: dragging him, the Fist and right-click menus are untested there (window-relative
       mouse while TPT has it captured).
