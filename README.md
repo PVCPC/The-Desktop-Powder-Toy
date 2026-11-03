@@ -154,7 +154,7 @@ Libraries and other assets used
 * [Mallangche](https://github.com/JammPark/Mallangche)
 * [mbedtls](https://www.trustedfirmware.org/projects/mbed-tls/)
 * [SDL](https://libsdl.org/)
-* Windows XP Luna theme images (Blue, Olive Green, Silver) from [listumps/wine_themes](https://github.com/listumps/wine_themes)
+* Windows XP theme images (Luna Blue, Olive Green, Silver; Royale, Royale Noir; Zune) from [listumps/wine_themes](https://github.com/listumps/wine_themes)
 * Windows Vista, 7, 8, 10 and Mac control images from the [B00merang Project](https://github.com/B00merang-Project) (Windows-Vista, Windows-7, Windows-8.1, Windows-10, System-4, Mac-OS-9, OS-X-Leopard, OS-X-Mavericks, OS-X-Yosemite, macOS; GPL-3)
 * System 7 look from [moltensoftware/Symptom-7](https://github.com/moltensoftware/Symptom-7) (GPL-3)
 * macOS 26 look from [kayozxo/GNOME-macOS-Tahoe](https://github.com/kayozxo/GNOME-macOS-Tahoe) (MIT)

@@ -1,14 +1,16 @@
 # Builds luna.png: the Windows XP Luna theme's own images (from luna.msstyles, via github.com/listumps/wine_themes),
 # Blue, Olive Green (Homestead) and Silver (Metallic) side by side, each part at the same place in each colour's block
 # (blocks of columns no taller than 384 px: TDPT's PNG reader refuses anything bigger than the stock window).
-# Usage: luna.py <dir with the msstyles' bitmaps, as NAME_BMP.bmp> <out.png>; prints the table for OverlayWindows.cpp.
+# Usage: luna.py <dir with the msstyles' bitmaps, as NAME_BMP.bmp> <out.png> [colour prefixes]; prints the table for
+# OverlayWindows.cpp. xp2.png: the same parts of Royale.msstyles (ROYALE, DARKROYALE) and Zune.msstyles (DEFAULT, as
+# ZUNE), all bitmaps in one dir: luna.py <dir> xp2.png ROYALE DARKROYALE ZUNE.
 import struct, sys
 from PIL import Image
 
 PARTS = ['FRAMECAPTION', 'FRAMELEFT', 'FRAMERIGHT', 'FRAMEBOTTOM', 'CAPTIONBUTTON', 'CLOSEBUTTON', 'CLOSEGLYPH',
          'MINIMIZEGLYPH', 'MAXIMIZEGLYPH', 'RESTOREGLYPH', 'BUTTON', 'CHECKBOX13', 'RADIOBUTTON13', 'GROUPBOX', 'TABITEM',
          'TABPANEEDGE']
-COLOURS = ['BLUE', 'HOMESTEAD', 'METALLIC']
+COLOURS = sys.argv[3:] or ['BLUE', 'HOMESTEAD', 'METALLIC']
 
 
 def load(path):
@@ -26,6 +28,7 @@ def load(path):
 
 
 ims = {(c, p): load(f'{sys.argv[1]}/{c}_{p}_BMP.bmp') for c in COLOURS for p in PARTS}
+ims = {k: im.resize(ims[COLOURS[0], k[1]].size) if im.size != ims[COLOURS[0], k[1]].size else im for k, im in ims.items()}  # Zune's 4 px left edge
 places, x, y, colw, H = [], 0, 0, 0, 384
 for p in PARTS:
     w, h = ims[COLOURS[0], p].size

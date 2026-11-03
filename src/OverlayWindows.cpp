@@ -37,6 +37,7 @@
 #include "lua/CommandInterface.h"
 #include "Format.h"
 #include "luna_png.h"
+#include "xp2_png.h"
 #include "skin_vista_png.h"
 #include "skin_seven_png.h"
 #include "skin_eight_png.h"
@@ -1347,8 +1348,10 @@ namespace
 
 	void Luna(Canvas &cv, int col, LunaPart p, int f, int n, int x, int y, int w, int h, int l = 0, int r = 0, int t = 0, int b = 0)
 	{
-		static auto atlas = format::PixelsFromPNG(luna_png.AsCharSpan());
+		static auto atlas = format::PixelsFromPNG(luna_png.AsCharSpan()), atlas2 = format::PixelsFromPNG(xp2_png.AsCharSpan());
 		int sh = lunaParts[p][3] / n;
+		if (col >= 3) // xp2.png: Royale, Royale Noir, Zune
+			return Slice(cv, atlas2.get(), (col - 3) * lunaBlock + lunaParts[p][0], lunaParts[p][1] + f * sh, lunaParts[p][2], sh, x, y, w, h, l, r, t, b);
 		Slice(cv, atlas.get(), col * lunaBlock + lunaParts[p][0], lunaParts[p][1] + f * sh, lunaParts[p][2], sh, x, y, w, h, l, r, t, b);
 	}
 
@@ -1473,10 +1476,11 @@ namespace
 
 		XP(int col = 0) : col(col)
 		{
-			static const wchar_t *colours[] = { L"Blue", L"Olive Green", L"Silver" };
-			static const uint32_t inks[] = { 0xFFFFFF, 0xFFFFFF, 0x0E1010 }, shadows[] = { 0x0A1883, 0x41400A, 0xC7C2D1 }, headings[] = { 0x0046D5, 0x99540A, 0x0046D5 };
+			static const wchar_t *colours[] = { L"Blue", L"Olive Green", L"Silver", L"Royale", L"Royale Noir", L"Zune" };
+			static const uint32_t inks[] = { 0xFFFFFF, 0xFFFFFF, 0x0E1010, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF }, shadows[] = { 0x0A1883, 0x41400A, 0xC7C2D1, 0x0A1883, 0x000000, 0x000000 },
+				headings[] = { 0x0046D5, 0x99540A, 0x0046D5, 0x0046D5, 0x1C2A4A, 0xC8501C };
 			name = L"Windows XP", colour = colours[col], captionInk = inks[col], captionShadow = shadows[col];
-			page = 0xFCFCFE, heading = headings[col], navInk = 0x215DC6, navSelInk = 0xFFFFFF, edge = 0x919B9C, groupEdge = 0xD0D0BF, strip = col == 2 ? 0xE0DFE3 : 0xECE9D8;
+			page = 0xFCFCFE, heading = headings[col], navInk = 0x215DC6, navSelInk = 0xFFFFFF, edge = 0x919B9C, groupEdge = 0xD0D0BF, strip = col == 2 ? 0xE0DFE3 : col >= 3 ? 0xEBE9ED : 0xECE9D8;
 			tabOff[0] = 0xFEFEFE, tabOff[1] = 0xECEBE6, tabHot[0] = 0xFFFFFF, tabHot[1] = 0xF4F3EE, tabHotEdge = 0xE68B2C;
 			status[0] = status[1] = strip, status[2] = 0xACA899;
 			nav[0] = 0xD6DFF7, nav[1] = 0xC6D3F7, nav[2] = 0x7BA2E7;
@@ -2191,7 +2195,7 @@ namespace
 	Three threeTheme;
 	NinetyFive ninetyFiveTheme;
 	NinetyEight ninetyEightTheme;
-	XP xpTheme, xpOliveTheme{ 1 }, xpSilverTheme{ 2 };
+	XP xpTheme, xpOliveTheme{ 1 }, xpSilverTheme{ 2 }, xpRoyaleTheme{ 3 }, xpNoirTheme{ 4 }, xpZuneTheme{ 5 };
 	Skinned<Vista> vistaTheme{ { skin_vista_png.AsCharSpan(), skin_vista_parts } };
 	Skinned<Seven> sevenTheme{ { skin_seven_png.AsCharSpan(), skin_seven_parts } };
 	Skinned<Eight> eightTheme{ { skin_eight_png.AsCharSpan(), skin_eight_parts } };
@@ -2207,11 +2211,11 @@ namespace
 	Skinned<Yosemite> yosemiteTheme{ { skin_yosemite_png.AsCharSpan(), skin_yosemite_parts } };
 	Glass glassTheme;
 	Theme *const themes[] = { &threeTheme, &ninetyFiveTheme, &ninetyEightTheme, &xpTheme, &vistaTheme, &sevenTheme, &eightTheme, &tenTheme, &elevenTheme, &classicMacTheme, &modernMacTheme, &templeTheme,
-		&system6Theme, &system7Theme, &aquaTheme, &lionTheme, &yosemiteTheme, &glassTheme, &xpOliveTheme, &xpSilverTheme }; // new ones at the end: the pref is the index
+		&system6Theme, &system7Theme, &aquaTheme, &lionTheme, &yosemiteTheme, &glassTheme, &xpOliveTheme, &xpSilverTheme, &xpRoyaleTheme, &xpNoirTheme, &xpZuneTheme }; // new ones at the end: the pref is the index
 	const std::vector<int> windowsThemes = { 0, 1, 2, 3, 4, 5, 6, 7, 8 }, macThemes = { 12, 13, 9, 14, 15, 16, 10, 17 };
 	constexpr int templeIndex = 11;
-	// A generation's colour schemes, the first the one its picker shows (Windows XP: Blue, Olive Green, Silver)
-	const std::vector<std::vector<int>> themeColours = { { 3, 18, 19 } };
+	// A generation's colour schemes, the first the one its picker shows (Windows XP: Blue, Olive Green, Silver, Royale, Royale Noir, Zune)
+	const std::vector<std::vector<int>> themeColours = { { 3, 18, 19, 20, 21, 22 } };
 	int Generation(int i)
 	{
 		for (auto &c : themeColours)
@@ -3940,7 +3944,8 @@ namespace
 			const std::vector<int> *colours = nullptr;
 			for (auto &c : themeColours)
 				if (c[0] == gen) colours = &c;
-			top = Group(x, y, w, S(108) + (colours ? S(32) : 0), L"Look");
+			int colourRows = colours ? int(colours->size() + 2) / 3 : 0; // three to a row
+			top = Group(x, y, w, S(108) + colourRows * S(32), L"Look");
 			auto family = [&](int row, const wchar_t *label, const std::vector<int> &ids) {
 				int by = top + row * S(32), bx = x + S(200), bw = S(220);
 				bool in = std::count(ids.begin(), ids.end(), gen) > 0;
@@ -3955,12 +3960,16 @@ namespace
 			Toggle(x + S(12), top + 2 * S(32), L"TempleOS", current == templeIndex, true, [] { SetTheme(templeIndex); }, L"Windows and menus look like TempleOS");
 			if (colours)
 			{
-				int cy = top + 3 * S(32), cx = x + S(200);
-				Caption(x + S(12), cy, L"Colour");
-				for (int i : *colours)
+				Caption(x + S(12), top + 3 * S(32), L"Colour");
+				int cx = 0;
+				for (size_t k = 0; k < colours->size(); k++)
+				{
+					int i = (*colours)[k], cy = top + int(3 + k / 3) * S(32);
+					if (k % 3 == 0) cx = x + S(200);
 					cx += Toggle(cx, cy, themes[i]->colour, i == current, true, [i] { SetTheme(i); }, std::wstring(themes[i]->name) + L" in " + themes[i]->colour) + S(18);
+				}
 			}
-			y += S(116) + (colours ? S(32) : 0);
+			y += S(116) + colourRows * S(32);
 
 			auto &opts = Options();
 			top = Group(x, y, w, S(36) + 3 * S(24) + 2 * S(32), L"TPT settings");
