@@ -2422,7 +2422,7 @@ namespace
 			if (vsync.joinable()) vsync.join();
 		}
 		int opacity = 255;
-		// An app window: taskbar button, normal z-order, resizable, minimise/maximise. Otherwise a small on-top popup
+		// An app window: no taskbar button (the tray icon opens it), normal z-order, resizable, maximise. Otherwise a small on-top popup
 		// (notifications).
 		bool appWindow = false;
 		int grip = 0; // resize border width
@@ -2464,7 +2464,7 @@ namespace
 			}
 			cv.Resize(w, h);
 			// NOACTIVATE either way: the keyboard stays with TPT. ponytail: windows with text fields will need focus.
-			DWORD ex = WS_EX_LAYERED | WS_EX_NOACTIVATE | (appWindow ? WS_EX_APPWINDOW : owner ? 0 : WS_EX_TOOLWINDOW | WS_EX_TOPMOST);
+			DWORD ex = WS_EX_LAYERED | WS_EX_NOACTIVATE | (appWindow ? WS_EX_TOOLWINDOW : owner ? 0 : WS_EX_TOOLWINDOW | WS_EX_TOPMOST);
 			DWORD style = WS_POPUP | (appWindow ? WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU | WS_THICKFRAME : 0);
 			hwnd = CreateWindowExW(ex, L"TPTOverlayPanel", title.empty() ? Platform::WinWiden(name).c_str() : title.c_str(), style, x, y, w, h,
 			                       owner, nullptr, GetModuleHandleW(nullptr), nullptr);
@@ -4463,7 +4463,7 @@ namespace
 			theme->CaptionButton(cv, MinRect(), Hovered(MinRect()), CaptionMin);
 			theme->CaptionButton(cv, MaxRect(), Hovered(MaxRect()), CaptionMax);
 			theme->CaptionButton(cv, CloseRect(), Hovered(CloseRect()), CaptionClose);
-			Add(MinRect(), [this] { ShowWindow(hwnd, SW_MINIMIZE); }, L"Minimise to the taskbar");
+			Add(MinRect(), [] { OverlayWindows::TogglePalette(); }, L"Hide to the tray");
 			Add(MaxRect(), [this] { ShowWindow(hwnd, IsZoomed(hwnd) ? SW_RESTORE : SW_MAXIMIZE); }, IsZoomed(hwnd) ? L"Restore" : L"Maximise");
 			if (fixedTab >= 0) Add(CloseRect(), [this] { closing = true; }, L"Close (the tab is still in the main window)");
 			else Add(CloseRect(), [] { OverlayWindows::TogglePalette(); }, L"Close (the tray icon or Ctrl+Alt+E brings it back)");
