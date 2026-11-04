@@ -4821,7 +4821,12 @@ namespace
 	{
 		if (!force && scale == ui::Engine::Ref().windowFrameOps.scale && windowed == overlayWindowed) return;
 		SaveSceneTiles();
-		GlobalPrefs::Ref().Set("Scale", scale);
+		// A smaller play area keeps covering the same part of the screen at the new pixel size
+		auto &prefs = GlobalPrefs::Ref();
+		if (int old = ui::Engine::Ref().windowFrameOps.scale; old != scale && prefs.Get("Overlay.PlayArea.W", 0) > 0)
+			for (auto *k : { "Overlay.PlayArea.X", "Overlay.PlayArea.Y", "Overlay.PlayArea.W", "Overlay.PlayArea.H" })
+				prefs.Set(k, prefs.Get(k, 0) * old / scale);
+		prefs.Set("Scale", scale);
 #ifdef _WIN32
 		// The same command line, with overlay:on or overlay:window.
 		wchar_t exe[MAX_PATH];
