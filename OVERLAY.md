@@ -551,6 +551,16 @@ ask for permissions again after an update.
 
 Multicore physics on the M5 Pro, 485k sand and water: 24 -> 50 ticks/s. Build: `tools/package-mac.sh`.
 
+## UI fixes (user 2026-11-03)
+- [x] Gradient wallpaper painted over icon names and soft icon edges: it now leaves each icon's whole grid cell (name
+      included) to the real desktop, unless TDPT is behind the icons.
+- [x] Mouse wheel scrolls every tab, smoothly (a third of the way each frame).
+- [x] No taskbar button: the menu window opens from the tray icon only.
+- [ ] Sim pixel size 1x: user sees TPT and Buddy only in the top left. Not reproduced: a 1x test copy fills the whole
+      5120x1440 screen (sim 5120x1440, every drawn row to the taskbar). Needs the user's screenshot.
+- [ ] "Clicks go to" Auto stops working at some point. Needs when / what was done before it.
+- [ ] "All of TPT's Options..." opens TPT's own dialog, far too small: put those settings in a tab of their own.
+
 ## Ideas
 
 - **Menu inspiration: Kingsway** (2017), whose whole UI is a fake retro desktop. Every TPT panel would be its own

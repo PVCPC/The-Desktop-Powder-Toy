@@ -2748,6 +2748,24 @@ namespace
 		std::vector<Hit> hits;
 		int hover = -1;
 		int tab = 0, section = 0, scroll = 0;
+		// Smooth wheel scrolling: where scroll is gliding to (-1: still), and where the glide last put it (anything else
+		// moving scroll, a tab change say, stops the glide)
+		int scrollGoal = -1, scrollWas = 0;
+		void Wheel(int step, int maxScroll)
+		{
+			scrollGoal = std::clamp((scrollGoal >= 0 ? scrollGoal : scroll) - step, 0, std::max(0, maxScroll));
+			scrollWas = scroll;
+		}
+		void Glide()
+		{
+			if (scrollGoal < 0) return;
+			if (scroll != scrollWas) { scrollGoal = -1; return; }
+			int d = scrollGoal - scroll;
+			scroll += d / 3 ? d / 3 : d; // a third of the way each frame
+			scrollWas = scroll;
+			if (scroll == scrollGoal) scrollGoal = -1;
+			dirty = true;
+		}
 		int fixedTab = -1;    // a tab torn off into its own window: shows only that one
 		bool closing = false; // closed: Tick drops it (not from inside its own click)
 		int titleH, border, tabH, navW, statusH, tileW, tileH, gap;
@@ -4583,24 +4601,19 @@ namespace
 			if (msg == WM_MOUSEWHEEL && tab == welcomeTab)
 			{
 				auto c = Content();
-				int maxScroll = std::max(0, welcomeH - int(c.bottom - c.top));
-				scroll = std::clamp(scroll - GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA * S(51), 0, maxScroll);
-				dirty = true;
+				Wheel(GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA * S(51), welcomeH - int(c.bottom - c.top));
 			}
 			if (msg == WM_MOUSEWHEEL && ((tab >= 1 && tab <= 6) || tab == buddyTab))
 			{
 				auto c = Content();
-				scroll = std::clamp(scroll - GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA * S(40), 0, std::max(0, formH - int(c.bottom - c.top)));
-				dirty = true;
+				Wheel(GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA * S(40), formH - int(c.bottom - c.top));
 			}
 			if (msg == WM_MOUSEWHEEL && tab == 0)
 			{
 				auto tools = Tools();
 				auto area = ToolArea();
 				int rows = (int(tools.size()) + Columns() - 1) / Columns();
-				int maxScroll = std::max(0, rows * (tileH + gap) - int(area.bottom - area.top));
-				scroll = std::clamp(scroll - GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA * (tileH + gap), 0, maxScroll);
-				dirty = true;
+				Wheel(GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA * (tileH + gap), rows * (tileH + gap) - int(area.bottom - area.top));
 			}
 		}
 
@@ -4608,6 +4621,7 @@ namespace
 		void Tick()
 		{
 			TickLocals();
+			Glide();
 			auto &gc = GameController::Ref();
 			auto *model = gc.GetModel();
 			auto *sim = model->GetSimulation();
@@ -6461,6 +6475,7 @@ struct DeskIcon
 	std::shared_ptr<const std::vector<uint8_t>> shape; // (r.right - r.left) squared, 1 = solid; null = the whole square
 	uintptr_t id; // the same item from pass to pass (a hash of its item ID)
 	bool bin = false; // the Recycle Bin
+	RECT box{};       // the whole item, its name under the picture included (empty: r)
 };
 // Null (a plain square for now) when not cached yet and this pass's budget of new pictures is spent: a desktop can
 // hold hundreds of icons, and fetching them all at once takes seconds.
@@ -6561,6 +6576,7 @@ static std::vector<DeskIcon> ReadDesktopIcons(IFolderView2 *&view, HWND &list)
 				}();
 				bool bin = binItem && ILIsEqual(binItem, PCIDLIST_ABSOLUTE(item)); // a desktop item's ID is also its full one
 				icons.push_back({ { x, y, x + size, y + size }, IconShape(item, size, budget), id, bin });
+				icons.back().box = { x + size / 2 - spacing.x / 2, y - 8, x + size / 2 + spacing.x / 2, y - 8 + spacing.y }; // its grid cell
 			}
 			CoTaskMemFree(item);
 		}
@@ -6625,6 +6641,7 @@ struct DeskIcon
 	std::shared_ptr<const std::vector<uint8_t>> shape; // (r.right - r.left) squared, 1 = solid; null = the whole box
 	uintptr_t id;
 	bool bin = false; // the Trash
+	RECT box{};       // the whole item, its name under the picture included (empty: r)
 };
 
 static std::vector<DeskIcon> DesktopIcons()
@@ -7837,11 +7854,15 @@ static void TickWindowWalls()
 	auto icons = doIcons ? DesktopIcons() : std::vector<DeskIcon>{};
 	static std::map<uintptr_t, RECT> iconRects; // where each icon was on the last tick
 	std::map<uintptr_t, RECT> iconsNow;
+	overlayFeel.iconBoxes.clear();
 	if (doIcons)
 		for (auto &icon : icons)
 		{
 			auto &r = icon.r;
 			auto px = [](long v, int n, int nw) { return int(std::lround(double(v) * n / nw)); };
+			// (the Mac's: no cell, so the picture's width again either side and half its height below for the name)
+			RECT b = icon.box.right > icon.box.left ? icon.box : RECT{ r.left - (r.right - r.left) / 2, r.top, r.right + (r.right - r.left) / 2, r.bottom + (r.bottom - r.top) / 2 };
+			overlayFeel.iconBoxes.push_back({ px(b.left - sr.left, WINDOWW, sw), px(b.top - sr.top, WINDOWH, sh), px(b.right - sr.left, WINDOWW, sw), px(b.bottom - sr.top, WINDOWH, sh) });
 			OverlayWall w{ std::max(0, px(r.left - sr.left, WINDOWW, sw)), std::max(0, px(r.top - sr.top, WINDOWH, sh)),
 			               std::min(XRES, px(r.right - sr.left, WINDOWW, sw)), std::min(YRES, px(r.bottom - sr.top, WINDOWH, sh)), 0, 0, {} };
 			// each sim pixel takes the icon pixel under its centre (the whole square while its picture isn't in yet)

@@ -1,4 +1,5 @@
 #include "OverlayWalls.h"
+#include "Overlay.h"
 #include "simulation/Simulation.h"
 #include "SimulationConfig.h"
 #include "simulation/ElementClasses.h"
@@ -634,10 +635,16 @@ void OverlayDrawMarks(const Simulation *sim, uint32_t *argb, int stride, const u
 {
 	// Gradient wallpaper: where the desktop shows (no window or icon), under everything drawn there. Only drawn by the
 	// overlay, the real wallpaper is never changed.
+	// Over the icons (not behind them) it leaves each icon's whole box, its name included, to the real desktop.
+	bool overIcons = OverlayGetLayer() != OverlayLayer::BehindIcons;
 	if (overlayFeel.gradient && overlayWallpaperSeen)
 		OverlayParallel((YRES + 31) / 32, [&](int k) {
+			std::vector<std::pair<int, int>> spans;
 			for (int y = k * 32; y < std::min(YRES, k * 32 + 32); y++)
 			{
+				spans.clear();
+				for (auto &b : overlayFeel.iconBoxes)
+					if (overIcons && y >= b[1] && y < b[3]) spans.push_back({ b[0], b[2] });
 				auto mix = [&](int sh) {
 					int a = (overlayFeel.gradientTop >> sh) & 0xFF, b = (overlayFeel.gradientBottom >> sh) & 0xFF;
 					return uint32_t(a + (b - a) * y / std::max(1, YRES - 1));
@@ -646,6 +653,7 @@ void OverlayDrawMarks(const Simulation *sim, uint32_t *argb, int stride, const u
 				for (int x = 0; x < XRES; x++)
 				{
 					if (occupied[size_t(y) * XRES + x] & wallBit) continue;
+					if (std::any_of(spans.begin(), spans.end(), [x](auto s) { return x >= s.first && x < s.second; })) continue;
 					auto &p = argb[size_t(y) * stride + x];
 					uint32_t f = 255 - (p >> 24);
 					auto under = [&](uint32_t s, int sh) { return std::min(255u, ((p >> sh) & 0xFF) + s * f / 255) << sh; };
