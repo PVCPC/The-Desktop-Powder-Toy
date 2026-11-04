@@ -19,6 +19,7 @@
 #include <windows.h>
 #include <dwmapi.h>
 #include <thread>
+#include <future>
 #include <mutex>
 #include <atomic>
 #include <memory>
@@ -30,6 +31,7 @@
 namespace
 {
 	Buddy *buddy = nullptr;
+	std::future<std::pair<Buddy *, std::string>> opening; // the game loading (seconds): TPT carries on meanwhile
 	ByteString failed;            // the file that last failed to open: not retried until another is chosen
 	const uint32_t *frame = nullptr; // his newest frame, fw x fh premultiplied (null: nothing shown), drawn into the overlay's
 	bool drawn = false;              // he has a frame up (in the overlay's or in his own window)
@@ -257,12 +259,19 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my, void *layer
 	}
 	if (!buddy && path != failed)
 	{
-		char error[256] = "";
-		buddy = tdpt_buddy_open(path.c_str(), XRES, YRES, error, sizeof(error));
+		if (!opening.valid())
+			opening = std::async(std::launch::async, [path] {
+				char error[256] = "";
+				auto *b = tdpt_buddy_open(path.c_str(), XRES, YRES, error, sizeof(error));
+				return std::pair{ b, std::string(error) };
+			});
+		if (opening.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return false;
+		auto [b, error] = opening.get();
+		buddy = b;
 		if (!buddy)
 		{
 			failed = path;
-			OverlayWindows::Notify(error);
+			OverlayWindows::Notify(error.c_str());
 		}
 	}
 	if (!buddy) return false;

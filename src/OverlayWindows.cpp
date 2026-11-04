@@ -4828,12 +4828,7 @@ namespace
 	{
 		if (!force && scale == ui::Engine::Ref().windowFrameOps.scale && windowed == overlayWindowed) return;
 		SaveSceneTiles();
-		// A smaller play area keeps covering the same part of the screen at the new pixel size
-		auto &prefs = GlobalPrefs::Ref();
-		if (int old = ui::Engine::Ref().windowFrameOps.scale; old != scale && prefs.Get("Overlay.PlayArea.W", 0) > 0)
-			for (auto *k : { "Overlay.PlayArea.X", "Overlay.PlayArea.Y", "Overlay.PlayArea.W", "Overlay.PlayArea.H" })
-				prefs.Set(k, prefs.Get(k, 0) * old / scale);
-		prefs.Set("Scale", scale);
+		GlobalPrefs::Ref().Set("Scale", scale);
 #ifdef _WIN32
 		// The same command line, with overlay:on or overlay:window.
 		wchar_t exe[MAX_PATH];
@@ -5977,7 +5972,12 @@ void OverlayWindows::Tick()
 	{
 		auto &prefs = GlobalPrefs::Ref();
 		int w = prefs.Get("Overlay.PlayArea.W", 0), h = prefs.Get("Overlay.PlayArea.H", 0); // 0: the whole sim, whatever its size
-		if (!overlayWindowed) SetPlayArea(prefs.Get("Overlay.PlayArea.X", 0), prefs.Get("Overlay.PlayArea.Y", 0), w > 0 ? w : CELLS.X, h > 0 ? h : CELLS.Y);
+		// Saved at another pixel size: it covers the same part of the screen at this one. Saved before the size was
+		// kept with it: unknown, so the whole sim.
+		int was = prefs.Get("Overlay.PlayArea.Scale", 0), now = ui::Engine::Ref().windowFrameOps.scale;
+		auto at = [&](const char *k) { return was ? prefs.Get(k, 0) * was / now : 0; };
+		if (!was) w = h = 0;
+		if (!overlayWindowed) SetPlayArea(at("Overlay.PlayArea.X"), at("Overlay.PlayArea.Y"), w > 0 ? w * was / now : CELLS.X, h > 0 ? h * was / now : CELLS.Y);
 		areaRestored = true;
 		if (GlobalPrefs::Ref().Get("Overlay.PendingScene", false))
 		{
@@ -8207,6 +8207,7 @@ void OverlayWindows::SetPlayArea(int x, int y, int w, int h)
 	bool full = area == CELLS.OriginRect();
 	prefs.Set("Overlay.PlayArea.W", full ? 0 : area.size.X);
 	prefs.Set("Overlay.PlayArea.H", full ? 0 : area.size.Y);
+	prefs.Set("Overlay.PlayArea.Scale", ui::Engine::Ref().windowFrameOps.scale);
 }
 
 
