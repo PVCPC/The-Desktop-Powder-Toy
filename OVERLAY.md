@@ -551,6 +551,22 @@ ask for permissions again after an update.
 
 Multicore physics on the M5 Pro, 485k sand and water: 24 -> 50 ticks/s. Build: `tools/package-mac.sh`.
 
+## User list 2026-11-04 (screenshots: Buddy huge at the largest size slider, tiny at the smallest; solid bars on the taskbar)
+- [ ] 1. Menus don't scroll at a high fps (the glide runs off the menu's Tick: check its rate, redraw each step).
+- [ ] 2. Buddy's buy menus: no pictures, can't click, move or close them.
+- [ ] 3. Buddy size slider: at its ends he looks broken; is the taskbar his floor? (check his floor at every size)
+- [ ] 4. The fist item should push sand around.
+- [ ] 5. Hitting Buddy with the fist near windows shakes the windows a lot.
+- [ ] 6. Slider under "typing sparks" for how often they come.
+- [ ] 7. Buddy still jumps and flies about as soon as sand touches his feet.
+- [ ] 8. How to switch between TPT controls and Buddy's (pours sand while using grenades / molotovs): needs a clear switch.
+- [ ] 10. TPT's menu window on top by default (a toggle).
+- [ ] 11. Blood and gore mode: does it interact with the sim? (answer; add if not)
+- [ ] 12. Grenade on a sand pile with every Fun extra on: big lag spike; didn't push, light or land on the sand.
+- [ ] 13. Fire hose water particles not as fast as the game's water.
+- [ ] 14. Fire and water particles fewer than the game's effects suggest; is TPT smoke meant to look black?
+- [ ] 15. Water and effects on the taskbar: nicer than the solid bars.
+
 ## UI fixes (user 2026-11-03)
 - [x] Gradient wallpaper painted over icon names and soft icon edges: it now leaves each icon's whole grid cell (name
       included) to the real desktop, unless TDPT is behind the icons.
