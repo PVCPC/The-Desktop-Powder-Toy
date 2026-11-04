@@ -9,6 +9,10 @@
 # include <dispatch/dispatch.h>
 #endif
 
+// Multicore drawing (Overlay.FastDraw, the Simulation tab): the overlay's per-pixel passes and TPT's fire glow on all
+// cores, skipping what's empty. The same pixels and sim either way: off is one core, as before.
+inline bool overlayFastDraw = true;
+
 // f(i) for i in [0, n), on all cores
 template<class F>
 void OverlayParallel(int n, F f)

@@ -1360,11 +1360,30 @@ void Renderer::render_fire()
 {
 	if(!(renderMode & FIREMODE))
 		return;
+	// Multicore drawing: only the box round the cells with any fire. Past it the glow adds nothing, and the fade below
+	// leaves zero: a cell there gets only what it reads from cells already faded, at most 127 one cell out, 27 two, 2
+	// three and nothing four out (so 4 spare cells each side give the same as the whole sim).
+	int fx0 = 0, fy0 = 0, fx1 = XCELLS - 1, fy1 = YCELLS - 1;
+	if (overlayFastDraw)
+	{
+		std::vector<int> lo(YCELLS), hi(YCELLS);
+		OverlayParallel(YCELLS, [&](int j) {
+			lo[j] = XCELLS, hi[j] = -1;
+			for (int i = 0; i < XCELLS; i++)
+				if (fire_r[j][i] || fire_g[j][i] || fire_b[j][i]) lo[j] = std::min(lo[j], i), hi[j] = i;
+		});
+		fx0 = XCELLS, fy0 = YCELLS, fx1 = fy1 = -1;
+		for (int j = 0; j < YCELLS; j++)
+			if (hi[j] >= 0) fx0 = std::min(fx0, lo[j]), fx1 = std::max(fx1, hi[j]), fy0 = std::min(fy0, j), fy1 = j;
+		if (fy1 < 0) return; // no fire anywhere
+	}
 	// Each cell's glow is added (capped at 255) over the 12x12 pixels round it, which gives the same pixels in any
 	// order, so it is drawn a row of cells at a time on all cores: a row gets the glow of the cells above, on and below it
-	OverlayParallel(YCELLS, [&](int row) {
-		for (int j = std::max(0, row - 1); j <= std::min(YCELLS - 1, row + 1); j++)
-			for (int i = 0; i < XCELLS; i++)
+	int gy0 = std::max(0, fy0 - 1), gy1 = std::min(YCELLS - 1, fy1 + 1);
+	OverlayParallel(gy1 - gy0 + 1, [&, gy0](int row) {
+		row += gy0;
+		for (int j = std::max(fy0, row - 1); j <= std::min(fy1, row + 1); j++)
+			for (int i = fx0; i <= fx1; i++)
 			{
 				int r = fire_r[j][i], g = fire_g[j][i], b = fire_b[j][i];
 				if (!(r || g || b))
@@ -1381,8 +1400,8 @@ void Renderer::render_fire()
 	});
 	// then the fire fades and spreads, in order (each cell reads the neighbours already done)
 	int i,j,x,y,r,g,b;
-	for (j=0; j<YCELLS; j++)
-		for (i=0; i<XCELLS; i++)
+	for (j=std::max(0, fy0 - 4); j<=std::min(YCELLS - 1, fy1 + 4); j++)
+		for (i=std::max(0, fx0 - 4); i<=std::min(XCELLS - 1, fx1 + 4); i++)
 		{
 			r = fire_r[j][i];
 			g = fire_g[j][i];

@@ -890,6 +890,7 @@ void ApplyOverlay(SDL_Window *window)
 	OverlayLoadKeys();
 	OverlayWindows::Init(hwnd);
 	overlayAutoPass = prefs.Get("Overlay.AutoPassThrough", true);
+	overlayFastDraw = prefs.Get("Overlay.FastDraw", true);
 	SetInput(prefs.Get("Overlay.Input", OverlayInput::Count, OverlayInput::Auto), false);
 	layer = prefs.Get("Overlay.Layer", OverlayLayer::Count, OverlayLayer::OnTop);
 	if (layer != OverlayLayer::OnTop) ApplyLayer();
@@ -900,6 +901,7 @@ void ApplyOverlay(SDL_Window *window)
 	OverlayLoadKeys();
 	OverlayWindows::Init(window);
 	overlayAutoPass = prefs.Get("Overlay.AutoPassThrough", true);
+	overlayFastDraw = prefs.Get("Overlay.FastDraw", true);
 	input = prefs.Get("Overlay.Input", OverlayInput::Count, OverlayInput::Auto);
 	layer = prefs.Get("Overlay.Layer", OverlayLayer::Count, OverlayLayer::OnTop);
 	if (Shown() != OverlayLayer::OnTop) ApplyLayer();

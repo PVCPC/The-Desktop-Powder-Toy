@@ -562,6 +562,9 @@ Multicore physics on the M5 Pro, 485k sand and water: 24 -> 50 ticks/s. Build: `
       the menu never bring it to the front. A menu click now counts too, until another app comes to the front.
 - [ ] 1x is slow (~30 fps, user 2026-11-03): per frame at 5120x1440 sim 7 ms, TPT draw 13.6 ms, overlay present
       14 ms, all per pixel, not per particle (2x: 1.9 / 2.5 / 4.3).
+      Multicore drawing toggle (Simulation tab, on): window/icon wall map by rows on all cores, fire glow only round
+      the fire (checked: 330 frames of lava and fire, 0 cells differ). 1x empty: draw 12.3 -> 7 ms, present 10 -> 7.7.
+      Left: sim 6 ms with nothing in it, the rest of TPT's draw, the 30 MB upload.
 - [ ] "All of TPT's Options..." opens TPT's own dialog, far too small: put those settings in a tab of their own.
 
 ## Ideas

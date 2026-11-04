@@ -2,6 +2,7 @@
 // software with per-pixel alpha. The look is a Theme (Windows Vista, 7, 8, 10, Classic Mac, macOS).
 #include "OverlayWindows.h"
 #include "OverlayWalls.h"
+#include "common/Parallel.h"
 #include "OverlayBuddy.h"
 #ifdef _WIN32
 #undef _WIN32_WINNT
@@ -3174,6 +3175,11 @@ namespace
 				sim->parallelUpdate = !sim->parallelUpdate;
 				GlobalPrefs::Ref().Set("Simulation.Multicore", sim->parallelUpdate);
 			}, L"Most elements update on all CPU cores: several times faster in big scenes. Off: one core, TPT's exact order");
+			Toggle(x + w / 2, top + S(36), L"Multicore drawing", overlayFastDraw, false, [] {
+				overlayFastDraw = !overlayFastDraw;
+				GlobalPrefs::Ref().Set("Overlay.FastDraw", overlayFastDraw);
+			}, L"Makes each frame on all CPU cores and skips the empty parts of the screen: the window and icon walls, and TPT's fire glow. "
+			   L"The same picture and the same sim, just faster, most of all at 1\u00D7 pixel size with little in it. Off: one core, as before");
 			y += S(96);
 
 			top = Group(x, y, w, S(52), L"Edges");

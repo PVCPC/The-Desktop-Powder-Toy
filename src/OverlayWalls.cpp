@@ -122,24 +122,29 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 		return x >= w.x0 && x < w.x1 && y >= w.y0 && y < w.y1 && (!w.solid || w.solid(x, y)) &&
 		       !(holes[k] && (*holes[k])[size_t(y - w.y0) * (w.x1 - w.x0) + (x - w.x0)]);
 	};
-	owner.assign(size_t(XRES) * YRES, 0);
+	owner.resize(size_t(XRES) * YRES);
+	mask.resize(owner.size());
 	ownerIds.clear();
 	for (auto &w : walls) ownerIds.push_back(w.id);
-	for (size_t k = walls.size(); k-- > 0;)
-	{
-		auto &w = walls[k];
-		for (int y = w.y0; y < w.y1; y++)
+	// a row at a time (on all cores with multicore drawing), the walls back to front
+	auto ownerRow = [&](int y) {
+		auto *row = &owner[size_t(y) * XRES];
+		std::fill(row, row + XRES, uint16_t(0));
+		for (size_t k = walls.size(); k-- > 0;)
 		{
-			auto *row = &owner[size_t(y) * XRES];
+			auto &w = walls[k];
+			if (y < w.y0 || y >= w.y1) continue;
 			if (!w.solid && !holes[k])
 				std::fill(row + w.x0, row + w.x1, uint16_t(k + 1));
 			else
 				for (int x = w.x0; x < w.x1; x++)
 					if (solidAt(k, x, y)) row[x] = uint16_t(k + 1);
 		}
-	}
-	mask.resize(owner.size());
-	for (size_t i = 0; i < owner.size(); i++) mask[i] = owner[i] != 0;
+		auto *m = &mask[size_t(y) * XRES];
+		for (int x = 0; x < XRES; x++) m[x] = row[x] != 0;
+	};
+	if (overlayFastDraw) OverlayParallel(YRES, ownerRow);
+	else for (int y = 0; y < YRES; y++) ownerRow(y);
 	enum { Blasted = 100, Eaten = 200 }; // what made the hole: its rim shows it
 	auto eat = [&](int x, int y, uint8_t how) { // a wall pixel: the window or icon showing there loses it, the one behind shows
 		size_t p = size_t(y) * XRES + x, k = owner[p] - 1;
