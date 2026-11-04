@@ -4587,7 +4587,7 @@ namespace
 				scroll = std::clamp(scroll - GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA * S(51), 0, maxScroll);
 				dirty = true;
 			}
-			if (msg == WM_MOUSEWHEEL && tab >= 1 && tab <= 6)
+			if (msg == WM_MOUSEWHEEL && ((tab >= 1 && tab <= 6) || tab == buddyTab))
 			{
 				auto c = Content();
 				scroll = std::clamp(scroll - GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA * S(40), 0, std::max(0, formH - int(c.bottom - c.top)));
