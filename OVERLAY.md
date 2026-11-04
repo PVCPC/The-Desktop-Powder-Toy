@@ -558,7 +558,10 @@ Multicore physics on the M5 Pro, 485k sand and water: 24 -> 50 ticks/s. Build: `
 - [x] No taskbar button: the menu window opens from the tray icon only.
 - [x] Sim pixel size 1x showed TPT and Buddy only in the top left: the saved play area (in cells) was 2x's, so at 1x
       it covered a quarter. A size change now scales the saved area with it.
-- [ ] "Clicks go to" Auto stops working at some point. Needs when / what was done before it.
+- [x] "Clicks go to" Auto stopped catching clicks: it caught them only while TPT was the app in front, and clicks on
+      the menu never bring it to the front. A menu click now counts too, until another app comes to the front.
+- [ ] 1x is slow (~30 fps, user 2026-11-03): per frame at 5120x1440 sim 7 ms, TPT draw 13.6 ms, overlay present
+      14 ms, all per pixel, not per particle (2x: 1.9 / 2.5 / 4.3).
 - [ ] "All of TPT's Options..." opens TPT's own dialog, far too small: put those settings in a tab of their own.
 
 ## Ideas

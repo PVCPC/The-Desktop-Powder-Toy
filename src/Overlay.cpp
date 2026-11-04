@@ -90,6 +90,7 @@ bool overlayMode = false;
 bool overlayWindowed = false;
 bool overlayIdle = false;
 bool overlayAutoPass = true;
+bool overlayMenuUsed = false;
 
 #ifdef _WIN32
 namespace
@@ -1024,7 +1025,10 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 	// Auto: empty space catches clicks while TPT is the app in front, and passes them once another app is.
 	DWORD fg = 0;
 	GetWindowThreadProcessId(GetForegroundWindow(), &fg);
-	bool catchEmpty = input == OverlayInput::Locked || (input == OverlayInput::Auto && fg == GetCurrentProcessId());
+	// The menus never come to the front (they leave TPT the keyboard), so a click on one counts too, until another app does.
+	static DWORD fgWas = 0;
+	if (fg != fgWas) overlayMenuUsed = overlayMenuUsed && fg == GetCurrentProcessId(), fgWas = fg;
+	bool catchEmpty = input == OverlayInput::Locked || (input == OverlayInput::Auto && (fg == GetCurrentProcessId() || overlayMenuUsed));
 	uint32_t empty = catchEmpty ? 0x01000000 : 0;
 	argb.resize(size_t(w) * h);
 	float fade = 1; // TPT's menus

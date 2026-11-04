@@ -2612,6 +2612,7 @@ namespace
 					return 0;
 				}
 				case WM_MOUSEACTIVATE:
+					overlayMenuUsed = true; // Auto clicks: TPT is in use (Overlay.cpp)
 					if (self->appWindow)
 					{
 						// Come to the front like any window, without taking the keyboard from TPT.
