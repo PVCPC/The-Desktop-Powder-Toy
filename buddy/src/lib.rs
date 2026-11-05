@@ -148,9 +148,17 @@ impl Saves {
     }
 }
 
+// The game writes a first, short save of its own as it starts (cash, items, scripts, its face), and the rest (its
+// physics and other settings) only later. One left from then (TDPT killed, crashed or quit by a script's os.exit within
+// two minutes) holds him still where he starts on every run after: read as no save, he starts as new (it held nothing more)
+fn complete_save(data: &[u8]) -> bool {
+    let has = |key: &[u8]| data.windows(key.len()).any(|w| w == key);
+    !has(b"initialized") || has(b"realPhysics") || has(b"playingTime")
+}
+
 impl ruffle_core::backend::storage::StorageBackend for Saves {
     fn get(&self, name: &str) -> Option<Vec<u8>> {
-        std::fs::read(self.file(name)).ok()
+        std::fs::read(self.file(name)).ok().filter(|d| complete_save(d))
     }
     fn put(&mut self, name: &str, value: &[u8]) -> bool {
         // tests read the save but never write it: what one test does to him (his mood, his skin) stays out of the next run

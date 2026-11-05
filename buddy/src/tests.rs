@@ -79,6 +79,14 @@ fn saves_round_trip() {
 }
 
 #[test]
+fn early_save_ignored() {
+    // the game's own first save (no physics settings yet) is read as none; a whole one, or another file, as it is
+    assert!(!super::complete_save(b"\x00daBud\x00cash\x00initialized\x01\x00scripts"));
+    assert!(super::complete_save(b"\x00daBud\x00initialized\x01\x00realPhysics\x01\x00playingTime"));
+    assert!(super::complete_save(b"something else"));
+}
+
+#[test]
 fn ground_push_out() {
     // a floor from y = 100 down
     let g = super::Ground { rect: [0, 0, 200, 200], cells: (0..200 * 200).map(|i| (i / 200 >= 100) as u16).collect(), ..Default::default() };
