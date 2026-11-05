@@ -225,7 +225,7 @@ namespace
 		bool buddy = false;                      // Interactive Buddy (OverlayBuddy; his file: Overlay.Fun.BuddySwf)
 		bool buddyPets = false;                  // the pets notice him (OverlayBuddy reads Overlay.Fun.BuddyPets)
 		bool buddyLooks = false;                 // he looks wet and frosted (Overlay.Fun.BuddyLooks)
-		bool buddyTracks = false, buddySplash = false, buddyFireman = false, buddyCarry = false, buddyGlow = false, buddyWeapons = false, buddyFlee = false, buddyDirt = false, buddyDance = false, buddyFeed = false, buddyWater = false, buddyWaterOnly = false, buddyFireOnly = false, buddyGravity = false, buddyToysSim = false, buddyFist = false, buddyClicks = false, buddyWells = false; // footprints, splashes, he puts out fires, carries sand, his guns, runs from fire, dirt, radio, feeding, hoses (Overlay.Fun.Buddy*)
+		bool buddyTracks = false, buddySplash = false, buddyFireman = false, buddyCarry = false, buddyGlow = false, buddyWeapons = false, buddyFlee = false, buddyDirt = false, buddyDance = false, buddyFeed = false, buddyWater = false, buddyWaterOnly = false, buddyFireOnly = false, buddyGravity = false, buddyToysSim = false, buddyFist = false, buddyBlood = false, buddyClicks = false, buddyWells = false; // footprints, splashes, he puts out fires, carries sand, his guns, runs from fire, dirt, radio, feeding, hoses (Overlay.Fun.Buddy*)
 		// the Buddy tab (OverlayBuddy reads them from the prefs): his size and speech bubbles' (%), toys at once (0: no
 		// limit), standing on the active window, smoothing, speech
 		float buddySize = 100, buddySpeechSize = 100, buddyToys = 6, buddyVolume = 50;
@@ -362,8 +362,9 @@ namespace
 		Check(L"Only TPT fire from his items", L"With the one above: the game's own flames are hidden, so his flamethrower, fireballs and molotovs make only TPT fire", &fun.buddyFireOnly, "Overlay.Fun.BuddyFireOnly"),
 		Check(L"Buddy's gravity items pull the sim", L"His weak and strong gravity vortexes and the gravity shifter also pull sand, water and gas toward them, not just Buddy", &fun.buddyGravity, "Overlay.Fun.BuddyGravity"),
 		Check(L"TPT black holes pull Buddy", L"Black holes (NBHL) near him pull him and his toys in the way the game's own Gravity Vortex does: a few weakly, 100 or more strongly", &fun.buddyWells, "Overlay.Fun.BuddyWells"),
-		Check(L"Buddy's toys feel the sim", L"Balls, infants, the magical orb and the radio rest on sand, float in water (the bowling ball sinks), get blown by explosions and splash what they land in hard", &fun.buddyToysSim, "Overlay.Fun.BuddyToys"),
+		Check(L"Buddy's toys feel the sim", L"Balls, grenades, infants, the magical orb and the radio rest on sand, float in water (the bowling ball sinks), get blown by explosions and splash what they land in hard", &fun.buddyToysSim, "Overlay.Fun.BuddyToys"),
 		Check(L"Buddy's fist shoves sand", L"With the game's Fist picked (Items, Hand), moving it through sand, snow or water shoves them along the way it moves, harder the faster", &fun.buddyFist, "Overlay.Fun.BuddyFist"),
+		Check(L"Buddy's gore is TPT blood", L"In the game's gore mode (Modes), his gore spills TPT blood (BLOD) where it flies: it stains sand, clouds water and feeds plants", &fun.buddyBlood, "Overlay.Fun.BuddyBlood"),
 		Check(L"Buddy runs from fire and lava", L"Fire, lava or plasma close to Buddy and he runs away from it, the way he runs in his own game. (With Fireman on he still sprays water at fires further away)", &fun.buddyFlee, "Overlay.Fun.BuddyFlee"),
 		Check(L"Buddy gets dirty", L"Coal, dust, gunpowder, clay, oil, broken metal and smoke leave dark smudges on Buddy, more the longer he's in them. Water washes them off; otherwise they wear off in about a minute", &fun.buddyDirt, "Overlay.Fun.BuddyDirt"),
 		Check(L"Pets dance to Buddy's radio", L"When Buddy dances to his radio, the desktop pets dance along with him", &fun.buddyDance, "Overlay.Fun.BuddyDance"),

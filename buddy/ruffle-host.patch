@@ -25,10 +25,10 @@ index d76c1cba..5f568843 100644
  pub use ruffle_render::backend::ViewportDimensions;
  pub use swf;
 diff --git a/core/src/player.rs b/core/src/player.rs
-index c3756621..ba2c5d04 100644
+index c3756621..6576c83f 100644
 --- a/core/src/player.rs
 +++ b/core/src/player.rs
-@@ -2520,6 +2520,122 @@ impl Player {
+@@ -2520,6 +2520,123 @@ impl Player {
          });
      }
  
@@ -119,7 +119,7 @@ index c3756621..ba2c5d04 100644
 +        })
 +    }
 +
-+    /// Runs `hook` right after every call of the root ActionScript function `name` (up to 4 hooks per thread), inside
++    /// Runs `hook` right after every call of the root ActionScript function `name` (up to 5 hooks per thread), inside
 +    /// the game's own frame: a native wrapper calls the original, then the hook, which reads and writes root variables.
 +    pub fn hook_after_root_function(&mut self, name: &str, hook: Box<dyn FnMut(&mut dyn RootVars)>) -> Result<(), String> {
 +        let slot = HOST_HOOKS.with(|h| h.borrow().len());
@@ -128,6 +128,7 @@ index c3756621..ba2c5d04 100644
 +            1 => host_hooked::<1>,
 +            2 => host_hooked::<2>,
 +            3 => host_hooked::<3>,
++            4 => host_hooked::<4>,
 +            _ => return Err("Too many host hooks".into()),
 +        };
 +        self.update(|context| {
@@ -151,7 +152,7 @@ index c3756621..ba2c5d04 100644
      pub fn call_internal_interface(
          &mut self,
          name: &str,
-@@ -2624,8 +2740,59 @@ impl Player {
+@@ -2624,8 +2741,64 @@ impl Player {
      }
  }
  
@@ -194,6 +195,11 @@ index c3756621..ba2c5d04 100644
 +    let saved = AvmString::new_utf8(activation.gc(), format!("__hostOriginal{N}"));
 +    let Value::Object(original) = root.get(saved, activation)? else { return Ok(Value::Undefined) };
 +    let result = original.call(saved, activation, this.into(), args)?;
++    // its arguments, for the hook: __hostArg0, __hostArg1...
++    for (k, arg) in args.iter().enumerate() {
++        let key = AvmString::new_utf8(activation.gc(), format!("__hostArg{k}"));
++        root.set(key, *arg, activation)?;
++    }
 +    HOST_HOOKS.with(|hooks| {
 +        if let Ok(mut hooks) = hooks.try_borrow_mut() {
 +            if let Some(hook) = hooks.get_mut(N) {

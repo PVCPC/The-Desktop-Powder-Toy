@@ -747,6 +747,17 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
         }
     }))
     .ok();
+    // a piece of the game's gore (gore mode: gore(x, y, xv, yv, size)) as TPT blood
+    let g = ground.clone();
+    p.hook_after_root_function("gore", Box::new(move |v| {
+        // (not waiting: TPT's own blasts call the game's explode, and so its gore, with the ground held; that gore is lost)
+        let Ok(mut g) = g.try_lock() else { return };
+        let (x, y, xv, yv) = (num(v, "__hostArg0"), num(v, "__hostArg1"), num(v, "__hostArg2"), num(v, "__hostArg3"));
+        if (x + y + xv + yv).is_finite() && g.shots.len() < 256 {
+            g.shots.push([x, y, xv, yv, 9.0]);
+        }
+    }))
+    .ok();
     // the game's own explosions (bombs, grenades, scripts) go to TPT as a blast; not the ones TPT itself set off
     let g = ground.clone();
     p.hook_after_root_function("explode", Box::new(move |v| {
@@ -1566,7 +1577,7 @@ pub unsafe extern "C" fn tdpt_buddy_booms(b: *mut Buddy, out: *mut f64, max: usi
 /// dances at x0, y0, 4 a new drop from his hose at x0, y0 with speed x1, y1 a frame, 5 his gravity pulls to x0, y0, x1
 /// hard: 1 weak vortex, 2 gravity shifter, 3 strong vortex, 6 his stun gun is shocking him, 7 a toy of his
 /// stopped fast by the sim at x0, y0, radius x1, speed y1 before, 8 the Fist at x0, y0 moving x1, y1 since the frame
-/// before); how many
+/// before, 9 a piece of gore at x0, y0 flying x1, y1 a frame); how many
 /// # Safety
 /// b is from tdpt_buddy_open; out has room for 5 * max.
 #[unsafe(no_mangle)]
@@ -2107,6 +2118,19 @@ mod tests {
         game.player.lock().unwrap().call_root_method("explode", vec![300.into(), 400.into(), 1.into()]).unwrap();
         super::OURS.store(false, super::Ordering::Relaxed);
         assert!(game.ground.lock().unwrap().booms.is_empty());
+    }
+
+    // a piece of gore reaches TPT (as blood): where it starts and how fast
+    #[test]
+    fn game_gore() {
+        let Some(path) = std::env::var_os("TDPT_BUDDY_SWF") else { return };
+        let mut game = super::open(path.to_str().unwrap(), 1280, 720).unwrap();
+        let mut out = vec![0u32; 1280 * 720];
+        while !super::frame(&mut game, 25.0, 0.0, 0.0, &mut out) {}
+        game.ground.lock().unwrap().shots.clear();
+        game.player.lock().unwrap().call_root_method("gore", vec![300.into(), 400.into(), 2.into(), (-3).into(), 1.into()]).unwrap();
+        let shots = std::mem::take(&mut game.ground.lock().unwrap().shots);
+        assert!(shots.contains(&[300.0, 400.0, 2.0, -3.0, 9.0]), "{shots:?}");
     }
 
     // his weapons reach the sim: the pistol's bullets as their path each frame (flying from the gun, at the mouse, to him),

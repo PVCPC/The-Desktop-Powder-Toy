@@ -235,16 +235,28 @@ namespace
 	void Blast(Simulation *sim, double bx, double by, double power)
 	{
 		sim->petBuddy.scare = sim->currentTick + 120;
-		int R = std::max(2, int(4 * power)); // cells
+		// (a grenade is 0.7: about 26 px of pressure, 15 px of fire, and what moves within 45 px thrown out)
+		int R = 2 + int(6 * power); // cells
 		for (int y = int(by) / CELL - R; y <= int(by) / CELL + R; y++)
 			for (int x = int(bx) / CELL - R; x <= int(bx) / CELL + R; x++)
 				if (double d = std::hypot(x - bx / CELL, y - by / CELL); x >= 0 && y >= 0 && x < XCELLS && y < YCELLS && d < R)
-					sim->pv[y][x] = std::min(256.0f, sim->pv[y][x] + float(40 * power * (1 - d / R)));
-		int F = int(8 * power); // pixels
+					sim->pv[y][x] = std::min(256.0f, sim->pv[y][x] + float(60 * power * (1 - d / R)));
+		int F = 4 + int(16 * power); // pixels
 		for (int y = int(by) - F; y <= int(by) + F; y++)
 			for (int x = int(bx) - F; x <= int(bx) + F; x++)
-				if (x >= 0 && y >= 0 && x < XRES && y < YRES && std::hypot(x - bx, y - by) < F && sim->rng.chance(1, 3))
+				if (x >= 0 && y >= 0 && x < XRES && y < YRES && std::hypot(x - bx, y - by) < F && sim->rng.chance(1, 2) && !sim->pmap[y][x])
 					sim->create_part(-1, x, y, PT_FIRE);
+		// powders and liquids thrown out from it, harder closer (air alone hardly moves a sand pile)
+		int T = 3 * F;
+		for (int y = std::max(0, int(by) - T); y <= std::min(YRES - 1, int(by) + T); y++)
+			for (int x = std::max(0, int(bx) - T); x <= std::min(XRES - 1, int(bx) + T); x++)
+				if (int q = sim->pmap[y][x]; q && SimulationData::CRef().elements[TYP(q)].Properties & (TYPE_PART | TYPE_LIQUID))
+					if (double dx = x + 0.5 - bx, dy = y + 0.5 - by, d = std::hypot(dx, dy); d < T && d > 0)
+					{
+						auto &t = sim->parts[ID(q)];
+						double v = 12 * power * (1 - d / T) + 1;
+						t.vx += float(dx / d * v), t.vy += float(dy / d * v - 0.5 * v);
+					}
 	}
 }
 
@@ -688,6 +700,15 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 						t.vx = float(std::clamp(b[2] * 0.5, -10.0, 10.0) + sim->rng.uniform01() - 0.5);
 						t.vy = float(std::clamp(b[3] * 0.5, -10.0, 10.0) - sim->rng.uniform01());
 					}
+	// his gore (Overlay.Fun.BuddyBlood): each piece spills a few drops of TPT blood flying as it does (his frames to TPT's
+	// ticks: 0.6 the speed, as his hoses)
+	for (size_t s = 0; s < shot && prefs.Get("Overlay.Fun.BuddyBlood", false); s++)
+		if (double *b = shots + s * 5; b[4] == 9)
+			for (int k = 0; k < 3; k++)
+				if (int x = int(b[0]) + sim->rng.between(-2, 2), y = int(b[1]) + sim->rng.between(-2, 2); empty(x, y))
+					if (int i = sim->create_part(-1, x, y, PT_BLOD); i >= 0)
+						sim->parts[i].vx = float(std::clamp(b[2] * 0.6, -15.0, 15.0) + sim->rng.uniform01() - 0.5),
+						sim->parts[i].vy = float(std::clamp(b[3] * 0.6, -15.0, 15.0) + sim->rng.uniform01() - 0.5);
 	stunned = false;
 	for (size_t s = 0; s < shot && weapons; s++)
 	{
