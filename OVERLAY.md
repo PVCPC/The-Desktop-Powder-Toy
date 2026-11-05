@@ -523,7 +523,9 @@ On/off things are Fun toggles; things with an amount are More fun sliders.
 ## macOS (0.8.6, native arm64)
 
 The Mac runs the same UI source as Windows: the side window and its tabs, every theme, hosted dialogs, toasts, the tray
-menu. `OverlayWindows.cpp` is one file for both; `OverlayMacCompat.h` and `OverlayMacWin32.h/.mm` give it the Win32 it is
+menu. `OverlayWindows.cpp` is one file for both (2026-11-05: split by topic into `OverlayWindows*.inl`, which it
+includes in place - Settings, Canvas, Themes, Panel, Side (the tabs), Toast, Hosts, Tray inside its anonymous
+namespace; Fun, Walls, Dialogs after it; put back together they are the old file byte for byte); `OverlayMacCompat.h` and `OverlayMacWin32.h/.mm` give it the Win32 it is
 written against on AppKit (top-level windows with a message procedure, GDI text through CoreText, popup menus, monitors,
 the tray as a status item), and `OverlayMac.mm` holds the Mac's own overlay. Only what really differs is behind `#ifdef`.
 A check when touching it: `unifdef -D_WIN32 -U__APPLE__` old vs new shows exactly what changed for Windows.

@@ -11,6 +11,9 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
 (and old positions `ox oy`), `doBodyPhysics`, `setBasicVars` (`onGround`), `explode(x, y, power)`, `setVel`,
 `setBuddyXY`, `cam` / `camx camy camz` (the game's camera), `fistDrag` (being dragged), `emotion`, `cash`, `item`.
 
+Code (buddy/src): lib.rs patching, Ruffle, frames, menus, the game thread; ground.rs the sim around him and the
+hooks into his game; ffi.rs the C interface (tdpt_buddy.h); tests.rs; sound.rs.
+
 ## 0. Decisions first
 - [x] **Where Ruffle runs.** Interactive Buddy Native builds Ruffle for 32-bit Windows so its maths matches Adobe's
       player exactly; TDPT is 64-bit, so the two can't be linked into one program as they are. Options:
