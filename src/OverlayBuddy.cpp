@@ -37,6 +37,7 @@ namespace
 	bool drawn = false;              // he has a frame up (in the overlay's or in his own window)
 	int fw = XRES, fh = YRES;     // his stage: TDPT's play area (from the top left), so his floor is the sand's floor
 	int wb = YRES;                // the taskbar's top (sim pixels): he stands on it, as in the desktop app
+	int floorY = YRES;            // his floor, solid in his ground: his feet's bottom at any size
 	std::vector<uint16_t> ground; // the sim around him, for tdpt_buddy_ground
 	std::vector<std::array<double, 6>> parts; // his body: x, y, radius, xv, yv, 1 burning (tdpt_buddy_parts)
 	bool Mine(int x, int y, double margin = 1) // in or near one of his own parts (his walls are not ground to himself)
@@ -312,7 +313,7 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my, void *layer
 				else if (e == PT_NEUT || e == PT_PROT) c |= 0x100;
 				else if (e == PT_PHOT && !(c & 0x60)) c |= 0x20;
 				if (windows == 2 && y < wb && sim->PixelWall(x, y) && !sim->HoleAt(x, y) && !Mine(x, y, 4)) c |= 0x400;
-				if (sim->IsWallBlocking(x, y, PT_DUST)) c |= 1;
+				if (sim->IsWallBlocking(x, y, PT_DUST) || y >= floorY) c |= 1;
 				else if (p && (elements[TYP(p)].Properties & (TYPE_PART | TYPE_SOLID))) c |= (elements[TYP(p)].Properties & TYPE_PART) ? 0x801 : 1;
 				else if (p && (elements[TYP(p)].Properties & TYPE_LIQUID)) c |= uint16_t(2 + (std::clamp(elements[TYP(p)].Weight, 0, 100) + 2) / 4);
 				if (!p) continue;
@@ -408,6 +409,11 @@ bool OverlayBuddy::Draw(uint32_t *argb, int w, double mx, double my, void *layer
 	// (overlay:window: the window's own bottom, no taskbar or other windows: they aren't where his stage is)
 	wb = overlayWindowed ? YRES : OverlayWindows::WorkBottom(parts.size() ? int(parts[0][0]) : XRES / 2);
 	fh = std::min(fh, wb + 10);
+	// The game's floor holds his legs' middles 18 px up, so at another size his feet float (small) or sink into the
+	// taskbar (big). His floor is in his ground instead, where 100%'s feet are, and the stage goes on 30 px lower, so
+	// the game's floor is below it (as far as the screen allows)
+	floorY = fh - 8;
+	fh = std::min(YRES, fh + 30);
 	auto &prefs = GlobalPrefs::Ref();
 	tdpt_buddy_settings(buddy, prefs.Get("Overlay.Buddy.Size", 100.f), prefs.Get("Overlay.Buddy.Speech", true), prefs.Get("Overlay.Buddy.SpeechSize", 100.f),
 	                    int(prefs.Get("Overlay.Buddy.Toys", 6.f)), prefs.Get("Overlay.Buddy.Smooth", true));
@@ -656,7 +662,7 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 	// he dances (to his radio): the pets dance with him
 	for (size_t s = 0; s < shot && prefs.Get("Overlay.Fun.BuddyDance", false); s++)
 		if (shots[s * 5 + 4] == 3) sim->petDance = sim->currentTick + 30;
-	// his hoses (Overlay.Fun.BuddyWater): each new drop is a little TPT water flying on as the drop does (his frames to
+	// his hoses (Overlay.Fun.BuddyWater): each new drop is six TPT water flying on as the drop does (his frames to
 	// TPT's ticks: 0.6 the speed); BuddyWaterOnly hides the game's own drops, so only TPT's are seen (BuddyFireOnly: his flames)
 	bool water = prefs.Get("Overlay.Fun.BuddyWater", false);
 	bool weapons = prefs.Get("Overlay.Fun.BuddyWeapons", false);
@@ -677,11 +683,18 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 		tdpt_buddy_command(buddy, ("hide:" + std::to_string(hide)).c_str()), hidden = hide;
 	for (size_t s = 0; s < shot && water; s++)
 		if (double *b = shots + s * 5; b[4] == 4)
-			for (int k = 0; k < 3; k++)
+		{
+			// the jet drags the air along (as a real one does): TPT water slows 5% a tick in still air, the game's drops don't.
+			// The air at the nozzle goes at least as fast as the jet (set, not added: added a tick, it piled up and stalled it)
+			if (int cx = int(b[0]) / CELL, cy = int(b[1]) / CELL; cx >= 0 && cy >= 0 && cx < XCELLS && cy < YCELLS)
+				for (auto [a, j] : { std::pair{ &sim->vx[cy][cx], float(std::clamp(b[2] * 0.6, -10.0, 10.0)) }, std::pair{ &sim->vy[cy][cx], float(std::clamp(b[3] * 0.6, -10.0, 10.0)) } })
+					if (j > 0 ? *a < j : *a > j) *a = j;
+			for (int k = 0; k < 6; k++)
 				if (int x = int(b[0]) + sim->rng.between(-2, 2), y = int(b[1]) + sim->rng.between(-2, 2); empty(x, y))
 					if (int i = sim->create_part(-1, x, y, PT_WATR); i >= 0)
 						sim->parts[i].vx = float(std::clamp(b[2] * 0.6, -25.0, 25.0) + sim->rng.uniform01() - 0.5),
 						sim->parts[i].vy = float(std::clamp(b[3] * 0.6, -25.0, 25.0) + sim->rng.uniform01() - 0.5);
+		}
 	// his toys (Overlay.Fun.BuddyToys): the game moves them against the sim; one stopped fast splashes it (as he does)
 	if (int on = prefs.Get("Overlay.Fun.BuddyToys", false); on != toys)
 		tdpt_buddy_command(buddy, on ? "toys:1" : "toys:0"), toys = on;
@@ -717,8 +730,10 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 		if (b[4] >= 3) continue;
 		if (b[4] == 2)
 		{
-			int x = int(b[0]) + sim->rng.between(-3, 3), y = int(b[1]) + sim->rng.between(-3, 3);
-			if (sim->rng.chance(1, 2) && empty(x, y)) sim->create_part(-1, x, y, PT_FIRE);
+			// (the game's flames are about 10 px across)
+			for (int k = 0; k < 3; k++)
+				if (int x = int(b[0]) + sim->rng.between(-5, 5), y = int(b[1]) + sim->rng.between(-5, 5); sim->rng.chance(1, 2) && empty(x, y))
+					sim->create_part(-1, x, y, PT_FIRE);
 			continue;
 		}
 		double dx = b[2] - b[0], dy = b[3] - b[1], d = std::hypot(dx, dy);

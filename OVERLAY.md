@@ -554,7 +554,7 @@ Multicore physics on the M5 Pro, 485k sand and water: 24 -> 50 ticks/s. Build: `
 ## User list 2026-11-04 (screenshots: Buddy huge at the largest size slider, tiny at the smallest; solid bars on the taskbar)
 - [x] 1. Menus don't scroll at a high fps (the glide runs off the menu's Tick: check its rate, redraw each step). Done: a glide step counts as busy, so the menu redraws every frame while it moves.
 - [x] 2. Buddy's buy menus: no pictures, can't click, move or close them. Done: the game's windows open in the middle of the stage (not its top-left corner, under TDPT's menu), and a drag is fed to the game in small steps (one big jump a frame left the title bar and dropped the drag). Test: store_window.
-- [ ] 3. Buddy size slider: at its ends he looks broken; is the taskbar his floor? (check his floor at every size)
+- [x] 3. Buddy size slider: at its ends he looks broken; is the taskbar his floor? (check his floor at every size) Done: the game's floor holds his legs' middles 18 px up, so feet floated small and sank big. His floor is now solid in his ground where 100%'s feet are (taskbar top + 2), and his stage goes 30 px lower so the game's floor is under it: feet at the same line from 50% to 300% (headless). Normal-window mode can't lower the stage past the window: small sizes still float a few px there.
 - [x] 4. The fist item should push sand around. Done: Fun "Buddy's fist shoves sand" (shot kind 8: the Fist moving).
 - [x] 5. Hitting Buddy with the fist near windows shakes the windows a lot. Done: his air push is capped at 12 px a frame.
 - [x] 6. Slider under "typing sparks" for how often they come. Done: Fun "Typing spark chance".
@@ -563,8 +563,8 @@ Multicore physics on the M5 Pro, 485k sand and water: 24 -> 50 ticks/s. Build: `
 - [x] 10. TPT's menu window on top by default (a toggle). Done: Size "Stay on top" (on by default): the menu windows, and TDPT's own window as a Normal window.
 - [x] 11. Blood and gore mode: does it interact with the sim? (answer; add if not) Done: it did not. New element BLOD (liquids): thick, stains powders and solids, soaks into powders and sponges, clouds water red and thins into it, feeds plants, boils to steam, freezes to ice that melts back. Fun "Buddy's gore is TPT blood": each piece of the game's gore (its gore() call; Ruffle hooks now see the arguments) spills 3 BLOD drops flying with it.
 - [x] 12. Grenade on a sand pile with every Fun extra on: big lag spike; didn't push, light or land on the sand. Done: the grenade does reach TPT (the game's explode, power 0.7), but the blast was 8 px; now about 26 px of pressure, 15 px of fire, and powders/liquids within 45 px thrown out. Landing: grenades are toys (objectList circles), so with "Buddy's toys feel the sim" on they rest on sand and blow up there (checked headless). Lag spike: not reproduced; open if it comes back.
-- [ ] 13. Fire hose water particles not as fast as the game's water.
-- [ ] 14. Fire and water particles fewer than the game's effects suggest; is TPT smoke meant to look black? Smoke: no, it is a glow added onto black; glows (no solid, liquid or powder under them) are now see-through as dark as they are.
+- [x] 13. Fire hose water particles not as fast as the game's water. Done: TPT water slows 5% a tick in still air; the jet now sets the air at the nozzle to its own speed (water reaches ~1.5x as far, about the game's drops), 6 drops each (was 3).
+- [x] 14. Fire and water particles fewer than the game's effects suggest; is TPT smoke meant to look black? Smoke: no, it is a glow added onto black; glows (no solid, liquid or powder under them) are now see-through as dark as they are. Fire: each of his flames lights up to 3 TPT fire within 5 px (was 1 in 3 px).
 - [x] 15. Water and effects on the taskbar: nicer than the solid bars. Done: drips are rare short rivulets with a bead at the end, not a 10 px streak on every touch.
 
 ## UI fixes (user 2026-11-03)
