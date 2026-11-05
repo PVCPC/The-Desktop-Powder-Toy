@@ -23,6 +23,13 @@
 #include <mutex>
 #include <atomic>
 #include <memory>
+#else
+#include "common/platform/Platform.h"
+#include "OverlayMacWin32.h" // the game's menus as NSMenus
+#include <SDL.h>
+#include <future>
+#include <mutex>
+#include <memory>
 #endif
 #include <vector>
 #include <filesystem>
@@ -1028,19 +1035,18 @@ bool OverlayBuddy::Mouse(int x, int y, int what)
 bool OverlayBuddy::Menu(int x, int y)
 {
 	if (!buddy || !tdpt_buddy_hit(buddy, x, y)) return false;
+#ifdef _WIN32
 	SDL_SysWMinfo info;
 	SDL_VERSION(&info.version);
-#ifdef _WIN32
 	GameMenu(-1, SDL_GetMouseFocus() && SDL_GetWindowWMInfo(SDL_GetMouseFocus(), &info) ? info.info.win.window : nullptr);
-	return true;
 #else
-	return false; // ponytail: Windows only; the Mac shim has no submenus yet
+	GameMenu(-1, nullptr);
 #endif
+	return true;
 }
 
 bool OverlayBuddy::GameMenu(int which, void *owner)
 {
-#ifdef _WIN32
 	if (!buddy) return false;
 	std::vector<char> text(tdpt_buddy_menus(buddy, nullptr, 0));
 	tdpt_buddy_menus(buddy, text.data(), text.size());
@@ -1078,9 +1084,6 @@ bool OverlayBuddy::GameMenu(int which, void *owner)
 	DestroyMenu(open.front());
 	if (cmd > 0 && size_t(cmd) <= commands.size()) tdpt_buddy_command(buddy, commands[cmd - 1].c_str());
 	return true;
-#else
-	return false;
-#endif
 }
 
 bool OverlayBuddy::ImportSave()

@@ -36,6 +36,7 @@ namespace
 		HWND owner = nullptr;
 		RECT rect{};
 		RECT restore{};
+		std::wstring cls;
 		bool shown = false, zoomed = false, iconic = false, tracking = false;
 		int wheel = 0;
 	};
@@ -193,12 +194,12 @@ HWND CreateWindowExW(DWORD ex, LPCWSTR cls, LPCWSTR title, DWORD style, int x, i
 	windows[hwnd] = true;
 	auto it = classes.find(cls);
 	m->proc = it == classes.end() ? DefWindowProcW : it->second;
-	m->ex = ex, m->style = style, m->owner = owner;
+	m->ex = ex, m->style = style, m->owner = owner, m->cls = cls ? cls : L"";
 	m->rect = { x, y, x + w, y + h };
 	if (!(ex & WS_EX_LAYERED)) return hwnd; // the tray's and menus' invisible windows just take messages
 	// Titled with the title bar drawn away, not borderless: only a titled window brings its app forward when clicked from
 	// another app. The UI draws its own frame over all of it.
-	bool appWindow = ex & WS_EX_APPWINDOW;
+	bool appWindow = (ex & WS_EX_APPWINDOW) || (style & WS_THICKFRAME); // (resizable: the menu and torn-off tabs)
 	NSWindowStyleMask mask = appWindow || owner ? NSWindowStyleMaskTitled | NSWindowStyleMaskFullSizeContentView : NSWindowStyleMaskBorderless;
 	m->win = [[TDPTWindow alloc] initWithContentRect:ToFrame(m->rect) styleMask:mask backing:NSBackingStoreBuffered defer:NO];
 	if (mask != NSWindowStyleMaskBorderless)
@@ -285,7 +286,26 @@ bool DragAcceptFiles(HWND h, WBOOL)
 LONG_PTR GetWindowLongPtrW(HWND h, int what)
 {
 	auto *m = W(h);
-	return !m ? 0 : what == GWLP_USERDATA ? m->user : LONG_PTR(m->ex);
+	return !m ? 0 : what == GWLP_USERDATA ? m->user : what == GWL_STYLE ? LONG_PTR(m->style) : LONG_PTR(m->ex);
+}
+
+int GetClassNameW(HWND h, wchar_t *out, int n)
+{
+	auto *m = W(h);
+	if (!m || n <= 0) return 0;
+	int len = int(std::min(m->cls.size(), size_t(n - 1)));
+	std::copy_n(m->cls.data(), len, out);
+	out[len] = 0;
+	return len;
+}
+
+bool EnumThreadWindows(DWORD, WNDENUMPROC proc, LPARAM param)
+{
+	std::vector<HWND> all;
+	for (auto &[h, _] : windows) all.push_back(h);
+	for (auto h : all)
+		if (W(h) && !proc(h, param)) break;
+	return true;
 }
 
 LONG_PTR SetWindowLongPtrW(HWND h, int what, LONG_PTR v)
@@ -362,6 +382,7 @@ bool SetWindowPos(HWND h, HWND after, long x, long y, long w, long h2, int flags
 	{
 		[m->win setFrame:ToFrame(r) display:NO];
 		if (after == HWND_TOPMOST) m->win.level = NSStatusWindowLevel;
+		if (after == HWND_NOTOPMOST) m->win.level = NSNormalWindowLevel;
 		if (!(flags & SWP_NOZORDER) && m->shown) [m->win orderFrontRegardless];
 		if ((flags & SWP_SHOWWINDOW) && !m->shown) ShowWindow(h, SW_SHOWNOACTIVATE);
 	}
@@ -739,6 +760,15 @@ bool AppendMenuW(HMENU menu, UINT flags, uintptr_t id, LPCWSTR text)
 	item.tag = NSInteger(id);
 	item.enabled = !(flags & MF_GRAYED);
 	item.state = (flags & MF_CHECKED) ? NSControlStateValueOn : NSControlStateValueOff;
+	if (flags & MF_POPUP) // id is the submenu: it now belongs to this one, as on Windows (DestroyMenu takes both)
+	{
+		NSMenu *sub = (NSMenu *)id;
+		item.submenu = sub;
+		item.action = nil;
+		item.tag = 0;
+		sub.title = item.title;
+		[sub release];
+	}
 	[m addItem:item];
 	return true;
 }
@@ -754,14 +784,46 @@ int TrackPopupMenu(HMENU menu, UINT, int x, int y, int, HWND, const RECT *)
 {
 	NSMenu *m = (NSMenu *)menu;
 	TDPTPicker *target = [[[TDPTPicker alloc] init] autorelease];
-	for (NSMenuItem *item in m.itemArray)
-		if (!item.isSeparatorItem) item.target = target;
+	std::function<void(NSMenu *)> aim = [&](NSMenu *menu) {
+		for (NSMenuItem *item in menu.itemArray)
+			if (item.submenu) aim(item.submenu);
+			else if (!item.isSeparatorItem) item.target = target;
+	};
+	aim(m);
 	double s = Px();
 	[m popUpMenuPositioningItem:nil atLocation:NSMakePoint(x / s, PrimaryHeight() - y / s) inView:nil];
 	return target.picked;
 }
 
 // ----------------------------------------------------------------------------------------------------------- shell
+
+bool GetOpenFileNameW(OPENFILENAMEW *of)
+{
+	NSMutableArray<NSString *> *types = [NSMutableArray array];
+	for (auto *f = of->lpstrFilter; f && *f; f += wcslen(f) + 1)
+	{
+		f += wcslen(f) + 1; // the pattern after each name
+		if (!*f) break;
+		for (NSString *p in [NS(f) componentsSeparatedByString:@";"])
+			if ([p hasPrefix:@"*."] && p.length > 2) [types addObject:[p substringFromIndex:2]];
+	}
+	NSOpenPanel *panel = [NSOpenPanel openPanel];
+	panel.canChooseFiles = YES;
+	panel.canChooseDirectories = NO;
+	panel.allowsMultipleSelection = NO;
+	if (of->lpstrTitle) panel.message = NS(of->lpstrTitle);
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+	if (types.count) panel.allowedFileTypes = types;
+#pragma clang diagnostic pop
+	panel.level = NSStatusWindowLevel + 1; // over the overlay's own windows
+	[NSApp activateIgnoringOtherApps:YES];
+	if ([panel runModal] != NSModalResponseOK || !panel.URL) return false;
+	auto path = Wide(panel.URL.path);
+	if (path.size() + 1 > of->nMaxFile) return false;
+	wcscpy(of->lpstrFile, path.c_str());
+	return true;
+}
 
 int MessageBoxW(HWND, LPCWSTR text, LPCWSTR title, UINT flags)
 {

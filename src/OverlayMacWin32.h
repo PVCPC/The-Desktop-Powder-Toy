@@ -30,6 +30,7 @@ using HGDIOBJ = void *;
 using HICON = void *;
 using HCURSOR = void *;
 using HMENU = void *;
+using UINT_PTR = uintptr_t;
 using HINSTANCE = void *;
 using HMODULE = void *;
 using HDROP = void *;
@@ -65,9 +66,9 @@ enum : DWORD
 	WS_EX_TOPMOST = 8, WS_EX_TRANSPARENT = 0x20, WS_EX_TOOLWINDOW = 0x80, WS_EX_APPWINDOW = 0x40000, WS_EX_LAYERED = 0x80000, WS_EX_NOACTIVATE = 0x8000000,
 };
 enum { HTTRANSPARENT = -1, HTCLIENT = 1, HTCAPTION = 2, HTLEFT = 10, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT };
-enum { GWL_EXSTYLE = -20, GWLP_USERDATA = -21, SIZE_MINIMIZED = 1, MA_NOACTIVATE = 3, ICON_SMALL = 0, ICON_BIG = 1, MK_LBUTTON = 1, WHEEL_DELTA = 120, TME_LEAVE = 2 };
+enum { GWL_STYLE = -16, GWL_EXSTYLE = -20, GWLP_USERDATA = -21, SIZE_MINIMIZED = 1, MA_NOACTIVATE = 3, ICON_SMALL = 0, ICON_BIG = 1, MK_LBUTTON = 1, WHEEL_DELTA = 120, TME_LEAVE = 2 };
 enum { SW_HIDE = 0, SW_SHOWNORMAL = 1, SW_MAXIMIZE = 3, SW_SHOWNOACTIVATE = 4, SW_MINIMIZE = 6, SW_RESTORE = 9, SWP_NOMOVE = 2, SWP_FRAMECHANGED = 0x20, SWP_SHOWWINDOW = 0x40 };
-enum { MF_STRING = 0, MF_GRAYED = 1, MF_CHECKED = 8, MF_DEFAULT = 0x1000, MF_SEPARATOR = 0x800, MF_BYCOMMAND = 0 };
+enum { MF_STRING = 0, MF_GRAYED = 1, MF_CHECKED = 8, MF_POPUP = 0x10, MF_DEFAULT = 0x1000, MF_SEPARATOR = 0x800, MF_BYCOMMAND = 0 };
 enum { TPM_LEFTALIGN = 0, TPM_TOPALIGN = 0, TPM_RIGHTBUTTON = 2, TPM_NONOTIFY = 0x80, TPM_RETURNCMD = 0x100 };
 enum { MONITOR_DEFAULTTONULL = 0, MONITOR_DEFAULTTONEAREST = 2 };
 enum { VK_BACK = 8, VK_RETURN = 13, VK_SHIFT = 16, VK_MENU = 18, VK_ESCAPE = 27, VK_LEFT = 37, VK_UP, VK_RIGHT, VK_DOWN, VK_DELETE = 46, VK_LWIN = 91, VK_RWIN, VK_F1 = 112, VK_F24 = 135 };
@@ -78,6 +79,7 @@ enum { SM_CXVIRTUALSCREEN = 78, SM_CYVIRTUALSCREEN = 79, SM_XVIRTUALSCREEN = 76,
 enum { DWMWA_TRANSITIONS_FORCEDISABLED = 3, MB_YESNO = 4, MB_ICONWARNING = 0x30, MB_DEFBUTTON2 = 0x100, IDYES = 6 };
 #define HWND_TOP nullptr
 #define HWND_TOPMOST HWND(intptr_t(-1))
+#define HWND_NOTOPMOST HWND(intptr_t(-2))
 #define IDC_ARROW nullptr
 #define IDI_APPLICATION nullptr
 #define RGB(r, g, b) (COLORREF((r) | ((g) << 8) | ((b) << 16)))
@@ -101,6 +103,10 @@ LRESULT DefWindowProcW(HWND, UINT, WPARAM, LPARAM);
 LRESULT SendMessageW(HWND, UINT, WPARAM, LPARAM);
 LONG_PTR GetWindowLongPtrW(HWND, int);
 LONG_PTR SetWindowLongPtrW(HWND, int, LONG_PTR);
+int GetClassNameW(HWND, wchar_t *, int);
+using WNDENUMPROC = WBOOL (*)(HWND, LPARAM);
+bool EnumThreadWindows(DWORD, WNDENUMPROC, LPARAM); // our own windows (there is one UI thread)
+inline DWORD GetCurrentThreadId() { return 0; }
 bool ShowWindow(HWND, int);
 bool IsWindowVisible(HWND);
 bool IsIconic(HWND);
@@ -182,6 +188,10 @@ bool Shell_NotifyIconW(DWORD, NOTIFYICONDATAW *);
 enum { CC_RGBINIT = 1, CC_FULLOPEN = 2, CC_ANYCOLOR = 0x100 };
 struct CHOOSECOLORW { DWORD lStructSize; HWND hwndOwner; COLORREF rgbResult, *lpCustColors; DWORD Flags; };
 bool ChooseColorW(CHOOSECOLORW *);
+// the open-file dialog: an NSOpenPanel for the filter's extensions ("Name\0*.a;*.b\0" pairs)
+enum { OFN_NOCHANGEDIR = 8, OFN_FILEMUSTEXIST = 0x1000 };
+struct OPENFILENAMEW { DWORD lStructSize; HWND hwndOwner; const wchar_t *lpstrFilter; wchar_t *lpstrFile; DWORD nMaxFile; const wchar_t *lpstrTitle; DWORD Flags; };
+bool GetOpenFileNameW(OPENFILENAMEW *);
 // what Windows has as a native control or registry key, and the app-level glue
 namespace OverlayMac
 {

@@ -8,6 +8,8 @@ build=build-mac-release
 name="The Desktop Powder Toy"
 out=dist-mac
 export MACOSX_DEPLOYMENT_TARGET=11.0 CC=clang CXX=clang++
+# Interactive Buddy's Flash player (Ruffle, built by cargo) needs Java once, to compile its ActionScript library
+[[ -d /opt/homebrew/opt/openjdk/bin ]] && export PATH="/opt/homebrew/opt/openjdk/bin:$PATH"
 flags="['-ffunction-sections','-fdata-sections','-mmacosx-version-min=11.0']"
 links="['-Wl,-dead_strip','-mmacosx-version-min=11.0']"
 [[ -d $build ]] || meson setup "$build" -Dbuildtype=debugoptimized -Dlto=true -Dstatic=prebuilt -Db_staticpic=false -Dstrip=false \
@@ -16,12 +18,14 @@ links="['-Wl,-dead_strip','-mmacosx-version-min=11.0']"
 ninja -C "$build"
 rm -rf "$out"
 app="$out/The-Desktop-Powder-Toy/$name.app"
-mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$app/Contents/Frameworks"
 cp "$build/resources/Info.plist" "$app/Contents/Info.plist"
 plutil -replace CFBundleShortVersionString -string "$version" "$app/Contents/Info.plist"
 plutil -replace CFBundleVersion -string "$version" "$app/Contents/Info.plist"
 cp "$build/powder" "$app/Contents/MacOS/powder"
 strip -x "$app/Contents/MacOS/powder"
+cp "$build/libtdpt_buddy.dylib" "$app/Contents/Frameworks/" # Interactive Buddy (buddy/build.py)
+strip -x "$app/Contents/Frameworks/libtdpt_buddy.dylib"
 for icon in exe cps; do
 	set=$(mktemp -d)/icon_$icon.iconset
 	mkdir "$set"
@@ -41,11 +45,13 @@ if [[ -f $keychain ]]; then
 	# shellcheck disable=SC2086
 	security list-keychains -d user -s $saved "$keychain"
 	status=0
-	codesign --force --sign "$identity" --timestamp=none "$app" || status=$?
+	codesign --force --sign "$identity" --timestamp=none "$app/Contents/Frameworks/libtdpt_buddy.dylib" || status=$?
+	[[ $status == 0 ]] && { codesign --force --sign "$identity" --timestamp=none "$app" || status=$?; }
 	# shellcheck disable=SC2086
 	security list-keychains -d user -s $saved
 	[[ $status == 0 ]]
 else
+	codesign --force --sign - --timestamp=none "$app/Contents/Frameworks/libtdpt_buddy.dylib"
 	codesign --force --sign - --timestamp=none "$app"
 fi
 cp LICENSE "$out/The-Desktop-Powder-Toy/LICENSE.txt"
@@ -58,7 +64,10 @@ which only happens once: click Done, open System Settings > Privacy & Security, 
 
 The simulation covers your screen above the Dock: sand piles on your windows, and everything you haven't drawn on
 stays see-through and clickable. TPT's own menus are along the right and bottom edges and fade when unused. The
-hourglass in the menu bar has the settings, including every Fun switch; Ctrl+Option+E opens them too.
+app's icon in the menu bar has the settings, including every Fun switch; Ctrl+Option+E opens them too.
+
+Interactive Buddy: Fun tab > Interactive Buddy > Choose SWF..., and pick your own copy of the game (v1.01 or v1.02,
+a .swf file; none is included).
 
 Based on The Powder Toy (https://powdertoy.co.uk), GPL 3.0: see LICENSE.txt.
 EOF

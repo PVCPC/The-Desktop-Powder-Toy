@@ -168,6 +168,23 @@ static std::vector<ByteString> RunningApps();
 #include "simulation/SaveRenderer.h"
 #include "lua/CommandInterface.h"
 #include "Format.h"
+#include "luna_png.h"
+#include "xp2_png.h"
+#include "skin_vista_png.h"
+#include "skin_seven_png.h"
+#include "skin_eight_png.h"
+#include "skin_ten_png.h"
+#include "skin_system6_png.h"
+#include "skin_system7_png.h"
+#include "templeos_font_ttf.h"
+#include "skin_mac9_png.h"
+#include "skin_aqua_png.h"
+#include "skin_lion_png.h"
+#include "skin_yosemite_png.h"
+#include "skin_macos_png.h"
+#include "skin_tendark_png.h"
+#include "skin_macosdark_png.h"
+#include "OverlaySkins.h"
 #include "Config.h"
 #include "gui/interface/Window.h"
 #include "gui/interface/Button.h"
@@ -338,7 +355,13 @@ int OverlayWindows::WorkBottom(int x)
 	if (!GetMonitorInfoW(MonitorFromPoint({ int(sr.left + x * sw / WINDOWW), int(sr.bottom - 1) }, MONITOR_DEFAULTTONEAREST), &mi)) return YRES;
 	return std::clamp(int((mi.rcWork.bottom - sr.top) * WINDOWH / sh), 1, YRES);
 #else
-	return YRES; // ponytail: the Mac's Dock isn't asked yet
+	// the Dock's top where it is (or the floor where it starts, without Accessibility); past its ends, the screen's bottom
+	RECT sr, dock;
+	if (!GetWindowRect(macOverlay, &sr) || sr.right <= sr.left || sr.bottom <= sr.top || !GetWindowRect(macDock, &dock)) return YRES;
+	long px = sr.left + long(x) * (sr.right - sr.left) / WINDOWW;
+	double l, t, r, b;
+	if (OverlayMac::DockFrame(l, t, r, b) && (px < l * MacScale() || px > r * MacScale())) return YRES;
+	return std::clamp(int((dock.top - sr.top) * WINDOWH / (sr.bottom - sr.top)), 1, YRES);
 #endif
 }
 
@@ -372,7 +395,33 @@ bool OverlayWindows::ActiveEdges(uintptr_t &id, int &left, int &right, int &top,
 	bottom = b.y < mi.rcWork.bottom - 1 && b.y > mi.rcWork.top ? sy(b.y) : -1;
 	return right > left;
 #else
-	return false; // ponytail: the Mac's active window isn't asked yet
+	// the front app's front window, or the last one that wasn't ours (points; a Mac window has no frame outside its content)
+	static uint32_t last;
+	static OverlayMac::Rect lastRect;
+	int front = OverlayMac::FrontPid();
+	auto all = OverlayMac::OtherWindows();
+	bool found = false;
+	if (front != getpid())
+		for (auto &w : all)
+			if (w.pid == front)
+			{
+				last = w.id;
+				break;
+			}
+	for (auto &w : all)
+		if (w.id == last) lastRect = w, found = true;
+	auto me = OverlayMac::Window();
+	if (!found || !last || me.r <= me.l || me.b <= me.t) return false;
+	auto &w = lastRect;
+	auto sx = [&](double x) { return int((x - me.l) * WINDOWW / (me.r - me.l)); };
+	auto sy = [&](double y) { return int((y - me.t) * WINDOWH / (me.b - me.t)); };
+	RECT dock;
+	double floorPt = GetWindowRect(macDock, &dock) ? dock.top / MacScale() : me.b;
+	id = last;
+	left = sx(w.l), right = sx(w.r);
+	top = w.t - me.t >= 90 / MacScale() + 30 ? sy(w.t) : -1; // (the menu bar's 30 points, then the 90 pixels Windows leaves)
+	bottom = w.b < floorPt - 1 && w.b > me.t ? sy(w.b) : -1;
+	return right > left;
 #endif
 }
 

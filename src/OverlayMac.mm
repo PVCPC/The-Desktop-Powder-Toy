@@ -453,7 +453,7 @@ bool OverlayMac::CatchesMouse()
 OverlayMac::Rect OverlayMac::Window()
 {
 	if (!window) return {};
-	static std::mutex lock; // the drawing thread asks too
+	static auto &lock = *new std::mutex; // the drawing thread asks too (never destroyed: it may still ask during exit)
 	static CGRect at = CGRectZero;
 	{
 		std::lock_guard guard(lock);
@@ -585,6 +585,8 @@ void OverlayMac::EarlySetup()
 {
 	// no window restoration: there's nothing to restore, and after a crash macOS would hold up the next start asking about it
 	[NSUserDefaults.standardUserDefaults registerDefaults:@{ @"ApplePersistenceIgnoreState": @YES }];
+	// an exit that skips Main's end (a script's os.exit): the drawing and Accessibility threads stop before what they use goes
+	atexit([] { OverlayMac::Shutdown(); });
 }
 
 void OverlayMac::Shutdown()

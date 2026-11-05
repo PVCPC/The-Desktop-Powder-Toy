@@ -529,16 +529,26 @@ foreach sta_info : [
 endforeach
 
 if get_option('build_powder')
-	# Interactive Buddy (src/OverlayBuddy.cpp): Ruffle as a Rust static library, built with cargo (buddy/build.py)
+	# Interactive Buddy (src/OverlayBuddy.cpp): Ruffle as a Rust library (static; the Mac: a dylib), built with cargo (buddy/build.py)
+	buddy_out = host_platform == 'windows' ? 'tdpt_buddy.lib' : 'libtdpt_buddy.a'
+	if host_platform == 'darwin'
+		buddy_out = 'libtdpt_buddy.dylib'
+	endif
 	buddy_lib = custom_target(
 		'tdpt_buddy',
-		output: host_platform == 'windows' ? 'tdpt_buddy.lib' : 'libtdpt_buddy.a',
+		output: buddy_out,
 		command: [ python3_prog, files('buddy/build.py'), '@OUTPUT@', meson.current_build_dir() / 'buddy-target' ],
 		build_always_stale: true,
 	)
+	buddy_link_args = [] # (propsys etc: cpal, his sounds)
+	if host_platform == 'windows'
+		buddy_link_args = [ 'opengl32.lib', 'ntdll.lib', 'userenv.lib', 'ws2_32.lib', 'dbghelp.lib', 'propsys.lib', 'ole32.lib', 'oleaut32.lib', 'winmm.lib' ]
+	elif host_platform == 'darwin'
+		buddy_link_args = [ '-Wl,-rpath,@executable_path/../Frameworks' ] # (the app's; the build folder's is @loader_path/)
+	endif
 	powder_deps += declare_dependency(
 		link_with: buddy_lib,
-		link_args: host_platform == 'windows' ? [ 'opengl32.lib', 'ntdll.lib', 'userenv.lib', 'ws2_32.lib', 'dbghelp.lib', 'propsys.lib', 'ole32.lib', 'oleaut32.lib', 'winmm.lib' ] : [], # (propsys etc: cpal, his sounds)
+		link_args: buddy_link_args,
 	)
 	powder_deps += project_deps + [
 		threads_dep,

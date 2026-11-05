@@ -287,10 +287,14 @@ Games:
       User, 2026-11-03: don't delete it. buddy/examples/zz_dump.rs stays (untracked, never committed).
 
 ## 6. Mac
-- [ ] Build buddy/ (Rust, Ruffle arm64) in the Mac build on the mini, and check the download size.
-- [ ] Choose SWF: the Mac file picker.
-- [ ] Right-click menus with submenus (the game's Items menu) on the Mac.
-- [ ] Fonts for the game's text (the Windows build finds them from the system).
-- [ ] OverlayWindows::WorkBottom (the Dock / bottom of the screen) and ActiveEdges (the front window's edges) on
-      the Mac; both are stubs now, so he has no taskbar floor and no window ledges there.
+- [x] Build buddy/ (Rust, Ruffle arm64) in the Mac build. 2026-11-05: Ruffle's build needs Java (`brew install openjdk`;
+      tools/package-mac.sh puts it on PATH). On the Mac buddy/ is a dylib (Contents/Frameworks/libtdpt_buddy.dylib), not a
+      static library: linked into powder, Rust's personality routine is a fourth (C++, LuaJIT, SDL's Objective-C), more
+      than a Mac program's compact unwind holds; `-no_compact_unwind` links but then C++ exceptions abort (tried).
+- [x] Choose SWF: the shared code; GetOpenFileNameW is an NSOpenPanel on the Mac (OverlayMacWin32.mm).
+- [x] Right-click menus with submenus: the shared GameMenu; MF_POPUP items are NSMenu submenus on the Mac.
+- [x] Fonts for the game's text: lib.rs already reads them from /System/Library/Fonts/Supplemental (all 13 there).
+- [x] WorkBottom: the Dock's top over the Dock (the floor where it starts without Accessibility), the screen's bottom past
+      its ends. ActiveEdges: the front app's front window, or the last one that wasn't TDPT's (CGWindowList).
+- [x] Ctrl+Option+B (Buddy clicks) on the Mac; the see-through glows on the Mac too.
 - [ ] All the tests and a TDPT run on the mini, as on Windows.

@@ -821,7 +821,7 @@ void OverlayLoadKeys()
 	auto &prefs = GlobalPrefs::Ref();
 	OverlayMac::SetHotkeys({ prefs.Get("Overlay.Keys.CycleInput", ByteString("Ctrl+Alt+O")), prefs.Get("Overlay.Keys.PassThrough", ByteString("Ctrl+Alt+P")),
 	                         prefs.Get("Overlay.Keys.Locked", ByteString("Ctrl+Alt+L")), prefs.Get("Overlay.Keys.Palette", ByteString("Ctrl+Alt+E")),
-	                         prefs.Get("Overlay.Keys.Clear", ByteString("Ctrl+Alt+C")) });
+	                         prefs.Get("Overlay.Keys.Clear", ByteString("Ctrl+Alt+C")), prefs.Get("Overlay.Keys.BuddyClicks", ByteString("Ctrl+Alt+B")) });
 #endif
 }
 
@@ -964,6 +964,7 @@ void OverlayTickUI()
 		if (key == 2) OverlaySetInput(input == OverlayInput::Locked ? OverlayInput::Auto : OverlayInput::Locked);
 		if (key == 3) OverlayWindows::TogglePalette();
 		if (key == 4) OverlayWindows::ClearSim();
+		if (key == 5) OverlayWindows::ToggleBuddyClicks();
 	}
 	OverlayWindows::Tick();
 #endif
@@ -1185,12 +1186,18 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 	bool catchEmpty = input == OverlayInput::Locked || input == OverlayInput::Auto;
 	uint32_t empty = catchEmpty ? 0x01000000 : 0;
 	argb.resize(size_t(w) * h);
+	// glows (fire, smoke, plasma) as see-through as they are dark, as on Windows
+	bool glows = w == WINDOWW && frameOccupied.size() >= size_t(XRES) * YRES;
 	OverlayBands(h, [&](int y0, int y1) {
 		for (int i = y0 * w; i < y1 * w; i++)
 		{
 			auto c = vid[i] & 0xFFFFFF;
 			argb[i] = c ? c | 0xFF000000 : empty;
 		}
+		for (int y = y0; glows && y < std::min(y1, YRES); y++)
+			for (int x = 0; x < XRES; x++)
+				if (auto c = vid[size_t(y) * w + x] & 0xFFFFFF; c && (frameOccupied[size_t(y) * XRES + x] & (OnParticle | Gas)) != OnParticle)
+					argb[size_t(y) * w + x] = c | std::max({ c >> 16, (c >> 8) & 0xFF, c & 0xFF, 2u }) << 24;
 	});
 	float fade = 1; // TPT's menus
 	bool buddyOn = false;

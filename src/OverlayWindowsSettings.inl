@@ -192,7 +192,6 @@
 	// Interactive Buddy's file: the game's .swf, from the user (turns him on)
 	void ChooseBuddySwf()
 	{
-#ifdef _WIN32
 		wchar_t file[MAX_PATH] = L"";
 		OPENFILENAMEW of{};
 		of.lStructSize = sizeof(of);
@@ -205,7 +204,6 @@
 		GlobalPrefs::Ref().Set("Overlay.Fun.BuddySwf", Platform::WinNarrow(file));
 		fun.buddy = true;
 		GlobalPrefs::Ref().Set("Overlay.Fun.Buddy", true);
-#endif
 	}
 
 	// paper planes in flight or landed (sim pixels; landed: ticks since), and when the rainbow goes (GetTickCount64)
