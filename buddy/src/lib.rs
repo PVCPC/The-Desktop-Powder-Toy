@@ -793,6 +793,12 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
     .ok();
     let g = ground.clone();
     p.hook_after_root_function("setBasicVars", Box::new(move |v| {
+        // the game's Dynamic Camera zooms out (to ~0.95) on a blast: the sim round him can't zoom with it, so he'd be
+        // drawn tens of pixels off it; its zoom stays 1 (its shake, a few pixels, stays as the game has it). (After
+        // cameraStuff, before doGraphics; the player has room for 5 hooks, all taken)
+        if num(v, "camz") != 1.0 {
+            v.set("camz", Value::Number(1.0));
+        }
         let Ok(mut g) = g.lock() else { return };
         // TPT's gravity where he is: the game's own (down, grav per frame) scaled by its downward part; the sideways
         // part is added in doBodyPhysics
@@ -2800,6 +2806,23 @@ mod tests {
                 run(&mut game, 1);
             }
             assert!(!game.ground.lock().unwrap().booms.is_empty(), "the grenade didn't go off");
+        }
+    }
+    // the game's Dynamic Camera doesn't zoom (the sim round him can't), even after a blast
+    #[test]
+    fn dynamic_camera() {
+        let Some(path) = std::env::var_os("TDPT_BUDDY_SWF") else { return };
+        let mut game = super::open(path.to_str().unwrap(), 1280, 720).unwrap();
+        let mut out = vec![0u32; 1280 * 720];
+        while !super::frame(&mut game, 25.0, 0.0, 0.0, &mut out) {}
+        let menus = super::read_menus(&mut game.player.lock().unwrap());
+        let Some(line) = menus.lines().find(|l| l.split('\t').nth(3) == Some("Dynamic Camera")) else { return };
+        let c = line.split('\t').nth(2).unwrap().to_owned();
+        game.player.lock().unwrap().call_root_method("__hostMenuCommand", vec![c.clone().into()]).unwrap();
+        game.player.lock().unwrap().call_root_method("explode", vec![600.into(), 650.into(), 1.into()]).unwrap();
+        for _ in 0..40 {
+            super::frame(&mut game, 25.0, 400.0, 300.0, &mut out);
+            assert_eq!(game.player.lock().unwrap().get_root_variable("camz"), Value::Number(1.0));
         }
     }
 }
