@@ -494,9 +494,10 @@ void Air::update_air(void)
 				opv[y][x] = dp;
 			}
 		});
-		vx.data = ovx.data;
-		vy.data = ovy.data;
-		pv.data = opv.data;
+		// swapped, not copied: the pass above writes every cell of the o maps before anything reads them
+		std::swap(vx.data, ovx.data);
+		std::swap(vy.data, ovy.data);
+		std::swap(pv.data, opv.data);
 	}
 }
 

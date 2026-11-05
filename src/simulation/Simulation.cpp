@@ -3960,15 +3960,22 @@ void Simulation::ApplyPlayArea()
 		return;
 	}
 	bool solid = edgeMode != EDGE_VOID;
-	for (auto c : CELLS.OriginRect())
-	{
-		if (!playArea.Contains(c))
+	auto outsideRow = [&](int y) {
+		for (int x = 0; x < XCELLS; x++)
 		{
-			bmap[c.Y][c.X] = solid ? WL_WALL : 0;
-			emap[c.Y][c.X] = 0;
-			pv[c.Y][c.X] = vx[c.Y][c.X] = vy[c.Y][c.X] = 0;
+			if (!playArea.Contains(Vec2(x, y)))
+			{
+				bmap[y][x] = solid ? WL_WALL : 0;
+				emap[y][x] = 0;
+				pv[y][x] = vx[y][x] = vy[y][x] = 0;
+			}
 		}
-	}
+	};
+	if (overlayFastDraw) // each cell on its own: the same maps either way
+		OverlayParallel(YCELLS, outsideRow);
+	else
+		for (int y = 0; y < YCELLS; y++)
+			outsideRow(y);
 	for (int i = 0; i <= parts.active; i++)
 	{
 		if (parts[i].type && !playArea.Contains(Vec2(int(parts[i].x + 0.5f), int(parts[i].y + 0.5f)) / CELL))
@@ -4027,8 +4034,7 @@ void Simulation::BeforeSim(bool willUpdate)
 	if (willUpdate)
 	{
 		// decrease wall conduction, make walls block air and ambient heat
-		for (int y = 0; y < YCELLS; y++)
-		{
+		auto wallRow = [&](int y) {
 			for (int x = 0; x < XCELLS; x++)
 			{
 				if (emap[y][x])
@@ -4036,7 +4042,12 @@ void Simulation::BeforeSim(bool willUpdate)
 				air->bmap_blockair[y][x] = (bmap[y][x]==WL_WALL || bmap[y][x]==WL_WALLELEC || bmap[y][x]==WL_BLOCKAIR || (bmap[y][x]==WL_EWALL && !emap[y][x]));
 				air->bmap_blockairh[y][x] = (air->bmap_blockair[y][x] || bmap[y][x]==WL_GRAV) ? 0x8 : 0;
 			}
-		}
+		};
+		if (overlayFastDraw) // each cell on its own: the same maps either way
+			OverlayParallel(YCELLS, wallRow);
+		else
+			for (int y = 0; y < YCELLS; y++)
+				wallRow(y);
 
 		// check for stacking and create BHOL if found
 		if (force_stacking_check || rng.chance(1, 10))

@@ -582,7 +582,10 @@ Multicore physics on the M5 Pro, 485k sand and water: 24 -> 50 ticks/s. Build: `
       14 ms, all per pixel, not per particle (2x: 1.9 / 2.5 / 4.3).
       Multicore drawing toggle (Simulation tab, on): window/icon wall map by rows on all cores, fire glow only round
       the fire (checked: 330 frames of lava and fire, 0 cells differ). 1x empty: draw 12.3 -> 7 ms, present 10 -> 7.7.
-      Left: sim 6 ms with nothing in it, the rest of TPT's draw, the 30 MB upload.
+      Empty sim 6.6 -> 4.1 ms (2026-11-05, windowed 1x): wall/air map and the outside-the-view walls by rows on all cores
+      (under Multicore drawing), air maps swapped not copied. Left: air 2 ms (already on all cores), the three
+      particle maps' clear 1.2 ms (memory speed: on all cores it got slower), gravity 0.3; the rest of TPT's draw,
+      the 30 MB upload.
 - [x] "All of TPT's Options..." opens TPT's own dialog, far too small: put those settings in a tab of their own.
       Done: a TPT tab (between Saves and Overlay) with every option of TPT's window but its window size ones (the
       overlay sizes it) and the air/heat/gravity ones the Simulation tab already has; Saves' "Options..." opens it.
