@@ -598,7 +598,7 @@ Multicore physics on the M5 Pro, 485k sand and water: 24 -> 50 ticks/s. Build: `
 
 ## Ideas
 
-- **Menu inspiration: Kingsway** (2017), whose whole UI is a fake retro desktop. Every TPT panel would be its own
+- **Dropped (user 2026-11-05): menu inspiration: Kingsway** (2017), whose whole UI is a fake retro desktop. Every TPT panel would be its own
   draggable window: element palette, tools, render modes, settings, save browser, stamps. Windows can stack and
   close, a start-button style launcher and taskbar reopen them, and items can be dragged between windows (e.g. an
   element from the palette onto a quick-bar window). Combine with the Vista theme first, then other OS themes.

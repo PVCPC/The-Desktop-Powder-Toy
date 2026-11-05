@@ -63,22 +63,23 @@ Also: github.com/bartekl1/windows-ui-assets (icons, cursors, sounds and wallpape
 buttons). Index of B00merang's themes: b00merang-project.github.io/windows and /macos.
 
 ## To do (in order)
-1. Private PVCPC copies of every repo above.
-2. Swap each look to its source's images, oldest Windows first: 3.1, 95, 98, Vista, 7, 8, 10, then 11 (from the PC),
+1. [ ] Private PVCPC copies of every repo above (2026-11-05: needs the user's OK to create the repos).
+2. [x] Swap each look to its source's images, oldest Windows first: 3.1, 95, 98, Vista, 7, 8, 10, then 11 (from the PC),
    then the Macs: System 1-6, System 7, Mac OS 8-9, 10.0-10.6, 10.7-10.9, 10.10-10.15, 11-15, 26. Then TempleOS's
    real font.
-3. Extra colours and variants as Colour rows: XP Royale, Royale Noir, Zune, Embedded; 10 Dark; macOS Dark; possibly
+3. [x] Extra colours and variants as Colour rows: XP Royale, Royale Noir, Zune, Embedded; 10 Dark; macOS Dark; possibly
    B00merang's Windows 1.0, 2.0, Longhorn and Catalina as their own looks.
-4. Welcome page in each look's parts: key boxes as the look's push buttons, the tip box as its tooltip, and headings,
+4. [x] Welcome page in each look's parts: key boxes as the look's push buttons, the tip box as its tooltip, and headings,
    underlines and links in its colours.
-5. Welcome screen per family, in our own words (no copied Microsoft or Apple text):
+5. [x] Welcome screen per family, in our own words (no copied Microsoft or Apple text):
    - Classic Windows (3.1, 95, 98): a grey dialog with a side banner, a topic list and a "Did you know" tip.
    - Welcome Center (XP, Vista): a header and a grid of task tiles.
    - Getting Started (7, 8, 10, 11): in each one's colours.
    - Classic Mac (System 1-9): a small window with a picture and plain text.
    - Modern Mac (10.0 to 26): an icon, a centred heading and a Continue button.
-6. Check 95's colours against Windows95Theme's .theme file.
+6. [x] Check 95's colours against Windows95Theme's .theme file. Checked 2026-11-05: its [Colors] are Windows 10's
+   defaults (title 153 180 209, face 240 240 240) apart from the teal desktop; ours stay 95's own (C0C0C0, navy).
 7. [x] (Low priority, user 2026-11-03) New looks: Windows 1.0, Windows 2.0 and Windows ME. Done 2026-11-05: ME = 98's
    chrome in ME's title colours; 1.0 and 2.0 = B00merang's colours (blue bar, name in a black box, white rounded buttons).
-7. Credit every source in README.md as each look lands.
-8. Then back to Buddy: more interactivity (BUDDY.md).
+7. [x] Credit every source in README.md as each look lands.
+8. [x] Then back to Buddy: more interactivity (BUDDY.md).
