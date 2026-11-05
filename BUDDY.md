@@ -243,7 +243,8 @@ Games:
 - [x] Off = TDPT exactly as before again after everything above (one-core bench and acid checksums).
       2026-11-03: bench sum 2787108759.111 310908.9689 111997776.046 138949 5532323, acid sum 2203542241.604
       -849022.5834 179217332.271 86779540 5914166: both identical to the reference.
-- [~] Shipping size (section 0) measured and written in the release notes. Windows measured 2026-11-03: powder.exe
+- [x] Shipping size (section 0) measured and written in the release notes (v0.9.1, 2026-11-05: Windows zip 10.8 MB; Mac
+      not released: the buddy branch doesn't build on the Mac yet, see below). Windows measured 2026-11-03: powder.exe
       26.5 MB, zip 10.9 MB (v0.9.0: 3.6 MB). For the release notes: "about 7 MB bigger, for Interactive Buddy's
       Flash player (Ruffle)". Left: put it in the next release's notes, the Mac's size (Mac agent).
 - [x] Welcome tab / README: what Buddy is, that each user picks their own copy of the game's SWF (none shipped).
