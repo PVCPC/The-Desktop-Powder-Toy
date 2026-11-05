@@ -514,6 +514,11 @@ On/off things are Fun toggles; things with an amount are More fun sliders.
   overlay:window 1x, one core) 10 ticks/s = ~100 ms a frame: particles ~65, BeforeSim ~10, drawing ~25 (render_parts
   ~18 of it: the non-plain particles, still one at a time; fire 1.3, walls 0.5). Exact = checked with the overlay:off
   seeded checksum before/after.
+  Drawing speed-up DROPPED (2026-11-05, measured): in that windowed run render_parts is ~13 ms because the renderer
+  thread's sim copy has useLuaCallbacks off, so graphicscache never fills and ~300k particles take the one-at-a-time
+  loop; but that runs on the renderer thread, off the sim's path: skipping render_parts entirely gave 10.1 -> 10.3
+  ticks/s (noise). On the desktop overlay (no renderer thread) the plain-particle path already works (~2 ms). The
+  frame is the sim's; only (A)-(C) can make it faster.
 
 ## macOS (0.8.6, native arm64)
 
