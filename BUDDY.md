@@ -66,7 +66,9 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
       (new toggle BuddyStickmen);
       fireman: hose done and no fire within 60 px of where he aimed -> happy: (emotion +15, jumpUp). The game's say()
       and addEmotion() hang when called from outside (probe 2026-11-05): not used.
-      Not watched live in TDPT yet (needs real clicks in the game).
+      Watched live in TDPT 2026-11-05 (temporary hooks, removed): a script's assign(tpt, "WATR") with tptN 50 made 47
+      water (3 found no room); a FIGH put next to him kicked him once every 60 ticks; the game's explode on sand reached
+      Blast. Flail, missiles, Earthquake and Low Gravity: game side by test game_links, TPT side not watched.
 - [x] Buddy tab next to Fun.
 - [x] Shown at the screen's rate: TDPT's overlay shows ~30 frames a second at 5120x1440 (sim 7 ms + TPT drawing
       13 ms + present 10 ms), so he has his own click-through layered window over it (Windows), updated from a
