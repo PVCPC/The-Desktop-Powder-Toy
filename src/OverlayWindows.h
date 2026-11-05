@@ -3,7 +3,7 @@
 #include <functional>
 #include <vector>
 #include "common/String.h"
-#define DESKTOP_VERSION L"0.9.1" // The Desktop Powder Toy release; the GitHub tag is v + this
+#define DESKTOP_VERSION L"0.9.2" // The Desktop Powder Toy release; the GitHub tag is v + this
 
 // Overlay mode's own desktop windows (element palette, notices), Vista-styled. Windows only so far.
 namespace OverlayWindows
