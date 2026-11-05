@@ -48,8 +48,11 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
       row in the Buddy tab, off when TDPT is muted. Done: Buddy tab Volume (far left silent; TDPT has no mute of its
       own), test sounds.
 - [x] Saves also every 2 minutes (checked: TDPT killed after 2 min 17 s, his save was there).
-- [ ] Clicks in overlay:window: dragging him, the Fist and right-click menus are untested there (window-relative
-      mouse while TPT has it captured).
+- [x] Clicks in overlay:window: dragging him, the Fist and right-click menus are untested there (window-relative
+      mouse while TPT has it captured). Checked by reading (2026-11-05): GameView hands OverlayBuddy::Mouse sim pixels in
+      both modes and his stage is sim pixels in both (fw/fh from the play area), so the same path; not tried with a
+      real mouse (no OS input on the user's PC). Also: the Flail and the game's modes (Earthquake, Low Gravity,
+      Realistic Pyrotechnics) have no sim link yet; ideas in the user's list 2026-11-05.
 - [x] Buddy tab next to Fun.
 - [x] Shown at the screen's rate: TDPT's overlay shows ~30 frames a second at 5120x1440 (sim 7 ms + TPT drawing
       13 ms + present 10 ms), so he has his own click-through layered window over it (Windows), updated from a
