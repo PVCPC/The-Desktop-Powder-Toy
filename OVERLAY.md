@@ -510,6 +510,10 @@ On/off things are Fun toggles; things with an amount are More fun sliders.
   GetGUIThreadInfo caret or the window top (ColdSpark, shared with the trail). Typing untested live (needs keys).
 - [ ] Next for ~5x, all elements kept: (A) per-block particle slots so create/kill needs no lock; (B) RecalcFreeParticles
   on all cores (~5 ms); (C) review the rest one by one (PLNT, VINE, SPRK...); (D) sleeping regions, as a toggle.
+  User 2026-11-05: physics must stay exactly the same; (D) is out. Heavy scene (scratch heavy.ps1: 472k parts, 2560x720
+  overlay:window 1x, one core) 10 ticks/s = ~100 ms a frame: particles ~65, BeforeSim ~10, drawing ~25 (render_parts
+  ~18 of it: the non-plain particles, still one at a time; fire 1.3, walls 0.5). Exact = checked with the overlay:off
+  seeded checksum before/after.
 
 ## macOS (0.8.6, native arm64)
 
