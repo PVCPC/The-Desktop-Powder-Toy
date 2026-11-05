@@ -1368,7 +1368,7 @@ namespace
 	// Windows 98: grey 3D chrome, a navy-to-blue title bar, small bevelled caption buttons.
 	struct NinetyEight : Theme
 	{
-		uint32_t titleRight = 0x1084D0; // the title bar fades from navy to this
+		uint32_t titleLeft = 0x000080, titleRight = 0x1084D0; // the title bar fades from titleLeft to this
 
 		NinetyEight()
 		{
@@ -1393,7 +1393,7 @@ namespace
 			{
 				float t = bw > 1 ? float(i) / (bw - 1) : 0;
 				auto ch = [t](int a, int b) { return uint32_t(a + (b - a) * t); };
-				Line(cv, bx + i, by, 1, bh, (ch(0x00, int(titleRight >> 16)) << 16) | (ch(0x00, int(titleRight >> 8 & 0xFF)) << 8) | ch(0x80, int(titleRight & 0xFF)));
+				Line(cv, bx + i, by, 1, bh, (ch(int(titleLeft >> 16), int(titleRight >> 16)) << 16) | (ch(int(titleLeft >> 8 & 0xFF), int(titleRight >> 8 & 0xFF)) << 8) | ch(int(titleLeft & 0xFF), int(titleRight & 0xFF)));
 			}
 			text->Draw(cv, S(8), by + (bh - text->Measure(title, true).cy) / 2, title, 0xFFFFFF, true, cv.w - S(90));
 			Bevel(cv, border - 2, titleH - 2, cv.w - 2 * border + 4, cv.h - titleH - border + 4, true);
@@ -1722,6 +1722,16 @@ namespace
 		}
 	};
 
+	// Windows ME: 98's chrome, ME's darker navy fading to light blue
+	struct Millennium : NinetyEight
+	{
+		Millennium()
+		{
+			name = L"Windows ME";
+			titleLeft = 0x0A246A, titleRight = 0xA6CAF0;
+		}
+	};
+
 	// Windows 3.1: a grey sizing border, a solid navy title bar with the name centred, the control-menu box on the
 	// left, arrow buttons on the right, white dialogs.
 	struct Three : Theme
@@ -1787,6 +1797,41 @@ namespace
 			Line(cv, 0, 0, cv.w, cv.h, 0xFFFFFF);
 			cv.RoundFrame(0, 0, cv.w, cv.h, 0, 0x000000, 255);
 			cv.RoundFrame(1, 1, cv.w - 2, cv.h - 2, 0, 0x000000, 255);
+		}
+	};
+
+	// Windows 1.0 and 2.0 (B00merang's Windows-1.0 / Windows-2.0): white windows with black outlines, a blue title bar
+	// with the name in a black box, rounded white buttons; 1.0 picks in blue, 2.0 in red
+	struct Early : Three
+	{
+		static constexpr uint32_t bar = 0x5656EF;
+
+		Early(const wchar_t *n, uint32_t pick)
+		{
+			name = n;
+			tabOff[0] = tabOff[1] = tabHot[0] = tabHot[1] = 0xFFFFFF;
+			navSel[0] = navSel[1] = navSel[2] = pick, pressedInk = 0xFFFFFF;
+		}
+
+		void Frame(Canvas &cv, int titleH, int border, const std::wstring &title) override
+		{
+			Line(cv, 0, 0, cv.w, cv.h, 0xFFFFFF);
+			cv.RoundFrame(0, 0, cv.w, cv.h, 0, 0x000000, 255);
+			int b = S(4);
+			Line(cv, b, b, cv.w - 2 * b, titleH - b, bar);
+			cv.RoundFrame(b - 1, b - 1, cv.w - 2 * b + 2, titleH - b + 2, 0, 0x000000, 255);
+			auto size = text->Measure(title, true);
+			int tw = std::min(int(size.cx), cv.w - S(110)), tx = std::max(S(30), (cv.w - tw) / 2) - S(12);
+			Line(cv, tx, b, tw + S(24), titleH - b, 0x000000);
+			text->Draw(cv, tx + S(12), b + (titleH - b - size.cy) / 2, title, 0xFFFFFF, true, cv.w - S(110));
+			cv.RoundFrame(border - 1, titleH - 1, cv.w - 2 * border + 2, cv.h - titleH - border + 2, 0, 0x000000, 255);
+		}
+
+		void Button(Canvas &cv, int x, int y, int w, int h, int state) override
+		{
+			uint32_t c = state == 2 ? navSel[0] : 0xFFFFFF;
+			cv.RoundRect(x, y, w, h, S(4), c, c, 255);
+			cv.RoundFrame(x, y, w, h, S(4), 0x000000, 255);
 		}
 	};
 
@@ -2314,6 +2359,8 @@ namespace
 	Three threeTheme;
 	NinetyFive ninetyFiveTheme;
 	NinetyEight ninetyEightTheme;
+	Millennium meTheme;
+	Early twoTheme{ L"Windows 2.0", 0xFC5252 }, oneTheme{ L"Windows 1.0", 0x5057FF };
 	XP xpTheme, xpOliveTheme{ 1 }, xpSilverTheme{ 2 }, xpRoyaleTheme{ 3 }, xpNoirTheme{ 4 }, xpZuneTheme{ 5 };
 	Skinned<Vista> vistaTheme{ { skin_vista_png.AsCharSpan(), skin_vista_parts } };
 	Skinned<Seven> sevenTheme{ { skin_seven_png.AsCharSpan(), skin_seven_parts } };
@@ -2332,8 +2379,9 @@ namespace
 	Skinned<MacDark> macDarkTheme{ { skin_macosdark_png.AsCharSpan(), skin_macosdark_parts } };
 	Glass glassTheme;
 	Theme *const themes[] = { &threeTheme, &ninetyFiveTheme, &ninetyEightTheme, &xpTheme, &vistaTheme, &sevenTheme, &eightTheme, &tenTheme, &elevenTheme, &classicMacTheme, &modernMacTheme, &templeTheme,
-		&system6Theme, &system7Theme, &aquaTheme, &lionTheme, &yosemiteTheme, &glassTheme, &xpOliveTheme, &xpSilverTheme, &xpRoyaleTheme, &xpNoirTheme, &xpZuneTheme, &tenDarkTheme, &macDarkTheme }; // new ones at the end: the pref is the index
-	const std::vector<int> windowsThemes = { 0, 1, 2, 3, 4, 5, 6, 7, 8 }, macThemes = { 12, 13, 9, 14, 15, 16, 10, 17 };
+		&system6Theme, &system7Theme, &aquaTheme, &lionTheme, &yosemiteTheme, &glassTheme, &xpOliveTheme, &xpSilverTheme, &xpRoyaleTheme, &xpNoirTheme, &xpZuneTheme, &tenDarkTheme, &macDarkTheme,
+		&meTheme, &twoTheme, &oneTheme }; // new ones at the end: the pref is the index
+	const std::vector<int> windowsThemes = { 27, 26, 0, 1, 2, 25, 3, 4, 5, 6, 7, 8 }, macThemes = { 12, 13, 9, 14, 15, 16, 10, 17 };
 	constexpr int templeIndex = 11;
 	// A generation's colour schemes, the first the one its picker shows (Windows XP: Blue, Olive Green, Silver, Royale, Royale Noir, Zune)
 	const std::vector<std::vector<int>> themeColours = { { 3, 18, 19, 20, 21, 22 }, { 7, 23 }, { 10, 24 } };

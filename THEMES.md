@@ -78,6 +78,7 @@ buttons). Index of B00merang's themes: b00merang-project.github.io/windows and /
    - Classic Mac (System 1-9): a small window with a picture and plain text.
    - Modern Mac (10.0 to 26): an icon, a centred heading and a Continue button.
 6. Check 95's colours against Windows95Theme's .theme file.
-7. (Low priority, user 2026-11-03) New looks: Windows 1.0, Windows 2.0 and Windows ME.
+7. [x] (Low priority, user 2026-11-03) New looks: Windows 1.0, Windows 2.0 and Windows ME. Done 2026-11-05: ME = 98's
+   chrome in ME's title colours; 1.0 and 2.0 = B00merang's colours (blue bar, name in a black box, white rounded buttons).
 7. Credit every source in README.md as each look lands.
 8. Then back to Buddy: more interactivity (BUDDY.md).
