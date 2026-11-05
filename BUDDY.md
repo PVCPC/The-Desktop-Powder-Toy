@@ -184,7 +184,8 @@ Games:
       Done (Fun toggle "Buddy's weapons hit the sim"): tdpt_buddy_shots = each bullet's path per frame (from where it
       was, or the gun) and each flame (particles.fireClip*/flame*). Gas is pushed along; powder/liquid: the bullet stops,
       a spray back out and up; a solid: +2 pressure (glass breaks) and embers. Flames make TPT fire. Test: weapon_shots.
-      Not done: bullets stopped by sim walls in the game itself (they fly on through).
+      Done 2026-11-05: where the sim stops a bullet (powder, liquid, a solid, or a TPT wall: IsWallBlocking as METL),
+      TDPT sends stop:x,y,dx,dy and the game's bullet ends there (ricNum -1, dropped by doBullets next frame).
 - [~] Catch: dropped, the game already has him catch balls (catch, caughtBalls).
 - [x] His items as real TPT stuff (user, 2026-11-03): a setting per kind, Game / TPT / Both (Game = as now). Probed by
       using each item in the game (particles clips, objectList, root vars):

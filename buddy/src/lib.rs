@@ -156,6 +156,7 @@ struct Ground {
     booms: Vec<[f64; 3]>,         // the game's explosions since TDPT last asked: x, y, power (1 = its bomb)
     shots: Vec<[f64; 5]>,         // his weapons since TDPT last asked: a bullet's path this frame (x0, y0, x1, y1, 1) or a flame (x, y, x, y, 2)
     bullets: Vec<(f64, f64)>,     // the game's bullets last frame: where each was
+    stops: Vec<[f64; 4]>,         // bullets the sim stopped (from TDPT): where, and the way each was going
     drops: Vec<String>,           // his hoses' drops last frame (their clips' names)
     toys: bool,                   // his thrown things feel the sim (toys: command)
     toys_at: Vec<[i32; 4]>,       // the sim each one wants next frame (x, y, w, h), anywhere on his stage
@@ -208,7 +209,7 @@ const POSE: [(f64, f64); 6] = [(0.0, 0.0), (0.0, -39.4), (-22.1, -10.2), (22.1, 
 
 impl Default for Ground {
     fn default() -> Self {
-        Self { rect: [0; 4], cells: Vec::new(), want: [0; 4], last: (400.0, 300.0), air_rect: [0; 4], air: Vec::new(), cell: 4, before: ([0; 4], Vec::new()), calm: 0, zap: None, gravity: (0.0, 1.0), game_grav: 1.0, exit: None, jumped: 99, eaten: false, parts: Vec::new(), bang: None, booms: Vec::new(), shots: Vec::new(), bullets: Vec::new(), drops: Vec::new(), toys: false, toys_at: Vec::new(), patches: Vec::new(), well: None, frames: 0, hide: 0, ledge: None, carry: (0.0, 0.0), buried: 0, dig: false, support: 0 }
+        Self { rect: [0; 4], cells: Vec::new(), want: [0; 4], last: (400.0, 300.0), air_rect: [0; 4], air: Vec::new(), cell: 4, before: ([0; 4], Vec::new()), calm: 0, zap: None, gravity: (0.0, 1.0), game_grav: 1.0, exit: None, jumped: 99, eaten: false, parts: Vec::new(), bang: None, booms: Vec::new(), shots: Vec::new(), bullets: Vec::new(), stops: Vec::new(), drops: Vec::new(), toys: false, toys_at: Vec::new(), patches: Vec::new(), well: None, frames: 0, hide: 0, ledge: None, carry: (0.0, 0.0), buried: 0, dig: false, support: 0 }
     }
 }
 
@@ -621,7 +622,27 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
         // mouse) when it's new, to where it is
         let mut now = Vec::new();
         let gun = (num(v, "_xmouse"), num(v, "_ymouse"));
-        for i in 0..num(v, "bullets.length").min(64.0) as usize {
+        let count = num(v, "bullets.length").min(64.0) as usize;
+        // one the sim stopped (TDPT found where): the bullet on that line past that point ends there (the game drops a
+        // bullet with ricNum below 0 next frame)
+        let mut gone = vec![false; count];
+        for [hx, hy, dx, dy] in std::mem::take(&mut g.stops) {
+            let mut best = None;
+            for i in (0..count).filter(|&i| !gone[i]) {
+                let (u, w) = (num(v, &format!("bullets.{i}.x")) - hx, num(v, &format!("bullets.{i}.y")) - hy);
+                let along = u * dx + w * dy;
+                if along > -2.0 && (u * dy - w * dx).abs() < 3.0 && best.is_none_or(|(a, _)| along < a) {
+                    best = Some((along, i));
+                }
+            }
+            if let Some((_, i)) = best {
+                gone[i] = true;
+                for (f, n) in [("x", hx), ("y", hy), ("xv", 0.0), ("yv", 0.0), ("ricNum", -1.0)] {
+                    v.set(&format!("bullets.{i}.{f}"), Value::Number(n));
+                }
+            }
+        }
+        for i in (0..count).filter(|&i| !gone[i]) {
             let b = |v: &mut dyn RootVars, f| num(v, &format!("bullets.{i}.{f}"));
             let (x, y, speed) = (b(v, "x"), b(v, "y"), b(v, "xv").hypot(b(v, "yv")));
             let near = |&(px, py): &(f64, f64)| (x - px).hypot(y - py) < speed * 1.5 + 5.0;
@@ -792,6 +813,10 @@ impl ruffle_core::backend::storage::StorageBackend for Saves {
         std::fs::read(self.file(name)).ok()
     }
     fn put(&mut self, name: &str, value: &[u8]) -> bool {
+        // tests read the save but never write it: what one test does to him (his mood, his skin) stays out of the next run
+        if cfg!(test) && self.0 == std::path::Path::new("buddy") {
+            return true;
+        }
         // written beside, then moved over, so a crash mid-save keeps the last good one
         // a temp file per writer: two players writing the same one mix their bytes into a broken save
         let (file, part) = (self.file(name), self.file(&format!("{name}.{}.{:?}.part", std::process::id(), std::thread::current().id())));
@@ -1224,6 +1249,13 @@ fn run(mut game: Game, shared: Arc<Mutex<Shared>>) {
                 }
                 if let Some(on) = c.strip_prefix("toys:") {
                     game.ground.lock().unwrap().toys = on == "1";
+                    continue;
+                }
+                if let Some(s) = c.strip_prefix("stop:") {
+                    let n: Vec<f64> = s.split(',').filter_map(|n| n.parse().ok()).collect();
+                    if let [x, y, dx, dy] = n[..] {
+                        game.ground.lock().unwrap().stops.push([x, y, dx, dy]);
+                    }
                     continue;
                 }
                 if let Some(hide) = c.strip_prefix("hide:") {
@@ -2212,11 +2244,16 @@ mod tests {
         }
         // the Radio: placed, it plays and he dances to it
         if fire(&mut game, "Radio").is_some() {
-            for _ in 0..40 {
+            // (when he starts is the game's own dice: up to 8 s)
+            let mut danced = false;
+            for _ in 0..200 {
                 super::frame(&mut game, 25.0, mx, my, &mut out);
+                danced |= std::mem::take(&mut game.ground.lock().unwrap().shots).iter().any(|s| s[4] == 3.0);
+                if danced {
+                    break;
+                }
             }
-            let shots = std::mem::take(&mut game.ground.lock().unwrap().shots);
-            assert!(shots.iter().any(|s| s[4] == 3.0), "not dancing: {shots:?}");
+            assert!(danced, "not dancing");
         }
         // the stun gun on his head: he's being shocked
         if let Some(line) = menus.lines().find(|l| l.split('\t').nth(3) == Some("Stun Gun")) {
@@ -2264,6 +2301,35 @@ mod tests {
             let k = |p: &mut ruffle_core::Player, f: &str| match p.get_root_variable(&format!("objectList.{}.targ.{f}", n as usize - 1)) { Value::Number(v) => v, o => panic!("{f} {o:?}") };
             let (y, r) = (k(&mut p, "y"), k(&mut p, "rad"));
             assert!((y + r - (my + 100.0)).abs() < 4.0, "ball not on the block: bottom {} block {}", y + r, my + 100.0);
+        }
+        // a bullet the sim stopped (TDPT's stop: where, and its way): it ends there, and the game drops it
+        if let Some(line) = menus.lines().find(|l| l.split('\t').nth(3) == Some("Pistol")) {
+            let mut out2 = vec![0u32; 1280 * 720]; // (fire has out)
+            let pick = line.split('\t').nth(2).unwrap().to_owned();
+            game.player.lock().unwrap().call_root_method("__hostMenuCommand", vec![pick.into()]).unwrap();
+            for _ in 0..5 {
+                super::frame(&mut game, 25.0, mx, my, &mut out2);
+            }
+            game.player.lock().unwrap().handle_event(PlayerEvent::MouseMove { x: mx, y: my });
+            game.player.lock().unwrap().handle_event(PlayerEvent::MouseDown { x: mx, y: my, button: MouseButton::Left, index: None });
+            let get = |game: &mut super::Game, k: &str| match game.player.lock().unwrap().get_root_variable(k) { Value::Number(n) => n, v => panic!("{k} {v:?}") };
+            for _ in 0..10 {
+                super::frame(&mut game, 25.0, mx, my, &mut out2);
+                if get(&mut game, "bullets.length") > 0.0 {
+                    break;
+                }
+            }
+            let i = get(&mut game, "bullets.length") as usize - 1;
+            let (x, y, xv, yv) = (get(&mut game, &format!("bullets.{i}.x")), get(&mut game, &format!("bullets.{i}.y")), get(&mut game, &format!("bullets.{i}.xv")), get(&mut game, &format!("bullets.{i}.yv")));
+            let (dx, dy) = (xv / xv.hypot(yv), yv / xv.hypot(yv));
+            let (hx, hy) = (x - 30.0 * dx, y - 30.0 * dy);
+            game.ground.lock().unwrap().stops.push([hx, hy, dx, dy]);
+            super::frame(&mut game, 25.0, mx, my, &mut out2);
+            assert_eq!((get(&mut game, &format!("bullets.{i}.x")), get(&mut game, &format!("bullets.{i}.y")), get(&mut game, &format!("bullets.{i}.ricNum"))), (hx, hy, -1.0));
+            super::frame(&mut game, 25.0, mx, my, &mut out2);
+            game.player.lock().unwrap().handle_event(PlayerEvent::MouseUp { x: mx, y: my, button: MouseButton::Left });
+            let n = get(&mut game, "bullets.length") as usize;
+            assert!((0..n).all(|j| get(&mut game, &format!("bullets.{j}.x")) != hx), "not dropped");
         }
     }
 
@@ -2569,7 +2635,9 @@ mod tests {
             assert!(n < 400, "never ready");
         }
         let player = game.player.clone();
-        super::menu_command(&mut game.open, &mut game.placing, &mut player.lock().unwrap(), "select|skins|1".into());
+        // (the save may own skins already: Buy New Skins... is the last)
+        let buy = super::read_menus(&mut player.lock().unwrap()).lines().find(|l| l.split('\t').nth(3) == Some("Buy New Skins...")).expect("no Buy New Skins").split('\t').nth(2).unwrap().to_owned();
+        super::menu_command(&mut game.open, &mut game.placing, &mut player.lock().unwrap(), buy);
         for _ in 0..40 {
             super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
         }
