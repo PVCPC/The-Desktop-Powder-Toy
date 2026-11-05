@@ -47,6 +47,8 @@ drawn in software with per-pixel alpha, styled like Windows Vista Aero. They don
   - **Simulation**: play area size, pause/step/reload/clear, edges, gravity, Newtonian gravity, air, ambient heat.
   - **Display**: TPT's view modes, HUD, decorations, gravity field, TPT's full render options.
   - **Saves**: open, save, stamps, reload, TPT's options.
+  - **TPT**: TPT's own settings (brush, saves, quitting, console, clipboard, frame rate caps, edge wind, custom
+    gravity, data folder).
   - **Overlay**: where clicks go, show TPT's own menus, the shortcut list.
   Drag by the title bar; the position is saved (`Overlay.Windows.Palette.X/Y`). In Pass-through mode it fades and
   lets clicks through. The status bar says what the hovered control does.
@@ -581,7 +583,9 @@ Multicore physics on the M5 Pro, 485k sand and water: 24 -> 50 ticks/s. Build: `
       Multicore drawing toggle (Simulation tab, on): window/icon wall map by rows on all cores, fire glow only round
       the fire (checked: 330 frames of lava and fire, 0 cells differ). 1x empty: draw 12.3 -> 7 ms, present 10 -> 7.7.
       Left: sim 6 ms with nothing in it, the rest of TPT's draw, the 30 MB upload.
-- [ ] "All of TPT's Options..." opens TPT's own dialog, far too small: put those settings in a tab of their own.
+- [x] "All of TPT's Options..." opens TPT's own dialog, far too small: put those settings in a tab of their own.
+      Done: a TPT tab (between Saves and Overlay) with every option of TPT's window but its window size ones (the
+      overlay sizes it) and the air/heat/gravity ones the Simulation tab already has; Saves' "Options..." opens it.
 
 ## Ideas
 

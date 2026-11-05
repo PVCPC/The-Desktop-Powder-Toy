@@ -2808,9 +2808,9 @@ namespace
 		std::wstring query; // Elements tab search: tools from every section whose name or description has it
 		bool typing = false; // a search box has the keyboard
 		std::wstring *typed = &query; // which one: the elements' or the online saves'
-		static constexpr const wchar_t *tabNames[] = { L"Elements", L"Tools", L"Simulation", L"Display", L"Saves", L"Overlay", L"Fun", L"Welcome", L"Buddy" };
-		static constexpr int toolsTab = 1, welcomeTab = 7, buddyTab = 8; // Buddy: only once his file is chosen
-		static constexpr int tabOrder[] = { 0, 1, 2, 3, 4, 5, 6, buddyTab, welcomeTab }; // as shown (Buddy next to Fun)
+		static constexpr const wchar_t *tabNames[] = { L"Elements", L"Tools", L"Simulation", L"Display", L"Saves", L"Overlay", L"Fun", L"Welcome", L"Buddy", L"TPT" };
+		static constexpr int toolsTab = 1, welcomeTab = 7, buddyTab = 8, tptTab = 9; // Buddy: only once his file is chosen
+		static constexpr int tabOrder[] = { 0, 1, 2, 3, 4, tptTab, 5, 6, buddyTab, welcomeTab }; // as shown (Buddy next to Fun, TPT's own settings by Saves)
 
 		SideWindow()
 		{
@@ -3542,7 +3542,7 @@ namespace
 			PushButton(x + S(12) + bw + S(6), top + S(58), bw, L"Sign in\u2026", [] { GameController::Ref().OpenLogin(); }, L"Your powdertoy.co.uk account");
 			y += S(133);
 			top = Group(x, y, w, S(52), L"TPT");
-			PushButton(x + S(12), top, bw, L"Options\u2026", [] { GameController::Ref().OpenOptions(); }, L"TPT's own settings window");
+			PushButton(x + S(12), top, bw, L"Options\u2026", [this] { if (fixedTab < 0) tab = tptTab, scroll = 0; else GameController::Ref().OpenOptions(); }, L"TPT's own settings (the TPT tab)");
 			y += S(60);
 			// What's on this computer, with thumbnails: click opens (a stamp: place it), right-click for more.
 			int tw = S(124), th = S(78), cellH = th + S(22), pad = S(8);
@@ -4283,21 +4283,80 @@ namespace
 				}
 			}
 			y += S(148) + colourRows * S(32);
+		}
 
+		// The rest of TPT's own options window (Simulation has the air, heat and gravity ones), through its options model.
+		// ponytail: its window settings (scale, fullscreen, resizable) are left out: the overlay sizes TPT's window itself
+		void PaintTPT()
+		{
+			auto c = Content();
 			auto &opts = Options();
-			top = Group(x, y, w, S(36) + 3 * S(24) + 2 * S(32), L"TPT settings");
-			int half = (w - S(24)) / 2, lx = x + S(12);
-			Toggle(lx, top, L"Perfect circle brush", opts.GetPerfectCircle(), false, [&opts] { opts.SetPerfectCircle(!opts.GetPerfectCircle()); }, L"Rounder small circle brushes");
-			Toggle(lx + half, top, L"Pressure in saves", opts.GetIncludePressure(), false, [&opts] { opts.SetIncludePressure(!opts.GetIncludePressure()); },
-			       L"Saves and stamps keep the air pressure");
-			Toggle(lx, top + S(24), L"Smooth scrolling", opts.GetMomentumScroll(), false, [&opts] { opts.SetMomentumScroll(!opts.GetMomentumScroll()); }, L"Momentum scrolling in TPT's lists");
-			Toggle(lx + half, top + S(24), L"Quit without asking", opts.GetFastQuit(), false, [&opts] { opts.SetFastQuit(!opts.GetFastQuit()); }, L"No confirmation when closing TPT");
-			Toggle(lx, top + 2 * S(24), L"Show avatars", opts.GetShowAvatars(), false, [&opts] { opts.SetShowAvatars(!opts.GetShowAvatars()); }, L"Profile pictures in the online browser");
-			int ry = top + 3 * S(24) + S(4);
+			int x = c.left + S(10), w = c.right - c.left - S(20), y = c.top + S(8) - scroll;
+			int half = (w - S(24)) / 2, lx = x + S(12), bx = x + S(220), nw = std::min(S(200), x + w - S(12) - bx);
+			struct Switch { const wchar_t *name; bool (OptionsModel::*get)(); void (OptionsModel::*set)(bool); const wchar_t *tip; } switches[] = {
+				{ L"Perfect circle brush", &OptionsModel::GetPerfectCircle, &OptionsModel::SetPerfectCircle, L"Rounder small circle brushes" },
+				{ L"Pressure in saves", &OptionsModel::GetIncludePressure, &OptionsModel::SetIncludePressure, L"Saves, stamps and copies keep the air pressure" },
+				{ L"Smooth scrolling", &OptionsModel::GetMomentumScroll, &OptionsModel::SetMomentumScroll, L"Momentum scrolling in TPT's lists" },
+				{ L"Sticky categories", &OptionsModel::GetMouseClickRequired, &OptionsModel::SetMouseClickRequired, L"TPT's element menu changes category on a click, not on hover" },
+				{ L"Quit without asking", &OptionsModel::GetFastQuit, &OptionsModel::SetFastQuit, L"No confirmation when closing TPT" },
+				{ L"Ctrl+Q quits anywhere", &OptionsModel::GetGlobalQuit, &OptionsModel::SetGlobalQuit, L"Ctrl+Q quits from any of TPT's screens" },
+				{ L"Key under Esc closes console", &OptionsModel::GetGraveExitsConsole, &OptionsModel::SetGraveExitsConsole, L"Turn off if that key types 0 on your keyboard" },
+				{ L"Windows clipboard", &OptionsModel::GetNativeClipoard, &OptionsModel::SetNativeClipoard, L"Copied stamps go through the Windows clipboard: paste them into another TPT" },
+				{ L"Show avatars", &OptionsModel::GetShowAvatars, &OptionsModel::SetShowAvatars, L"Profile pictures in the online browser" },
+				{ L"Message of the day", &OptionsModel::GetAutoStartupRequest, &OptionsModel::SetAutoStartupRequest, L"Fetch TPT's message of the day and notifications at startup" },
+				{ L"Log errors to a file", &OptionsModel::GetRedirectStd, &OptionsModel::SetRedirectStd, L"Errors and other messages go to a file in the data folder (for bug reports)" },
+			};
+			int n = int(std::size(switches)), rows = (n + 2) / 2; // (and the render thread)
+			int top = Group(x, y, w, S(36) + rows * S(24) + S(32), L"TPT settings");
+			for (int i = 0; i < n; i++)
+			{
+				auto &t = switches[i];
+				Toggle(lx + (i % 2) * half, top + (i / 2) * S(24), t.name, (opts.*t.get)(), false, [&opts, t] { (opts.*t.set)(!(opts.*t.get)()); }, t.tip);
+			}
+			Toggle(lx + (n % 2) * half, top + (n / 2) * S(24), L"Separate render thread", opts.GetThreadedRendering(), false, [&opts] { opts.SetThreadedRendering(!opts.GetThreadedRendering()); },
+			       L"Draws on its own thread: can be faster with fancy effects on");
+			int ry = top + rows * S(24) + S(4);
 			Caption(lx, ry + S(3), L"Deco colour space");
-			ListButton(x + S(220), ry, std::min(S(200), x + w - S(232)), { L"sRGB", L"Linear", L"Gamma 2.2", L"Gamma 1.8" }, opts.GetDecoSpace(),
-			           [&opts](int i) { opts.SetDecoSpace(i); }, L"How deco colours blend");
-			PushButton(lx, ry + S(32), S(200), L"All of TPT's options\u2026", [] { GameController::Ref().OpenOptions(); }, L"TPT's own settings window: everything else");
+			ListButton(bx, ry, nw, { L"sRGB", L"Linear", L"Gamma 2.2", L"Gamma 1.8" }, opts.GetDecoSpace(), [&opts](int i) { opts.SetDecoSpace(i); }, L"How deco colours blend");
+			y = ry + S(48);
+
+			auto row = [&](const wchar_t *label) {
+				Caption(lx, ry + S(3), label);
+				int at = ry;
+				ry += S(32);
+				return at;
+			};
+			ry = Group(x, y, w, S(36) + 2 * S(32), L"Frame rate");
+			auto fps = opts.GetFpsLimit();
+			auto *fe = std::get_if<FpsLimitExplicit>(&fps);
+			NumberButton(bx, row(L"Simulation cap"), nw, "Simulation framerate cap (0: uncapped)", fe ? String::Build(Format::Precision(0), fe->value) : String("0"),
+			             FloatSetting(0, FpsLimitExplicit::maxSane, [](const String &s) { return s.ToNumber<float>(); }, [&opts](float v) {
+				             if (v < FpsLimitExplicit::minSane) opts.SetFpsLimit(FpsLimitNone{});
+				             else opts.SetFpsLimit(FpsLimitExplicit{ v });
+			             }), L"Simulation frames a second; 0 = as fast as it goes (TPT's default is 60)");
+			auto draw = opts.GetDrawLimit();
+			auto *de = std::get_if<DrawLimitExplicit>(&draw);
+			NumberButton(bx, row(L"Drawing cap"), nw, "Rendering framerate cap (0: the display's)", de ? String::Build(de->value) : String("0"),
+			             FloatSetting(0, float(DrawLimitExplicit::maxSane), [](const String &s) { return s.ToNumber<float>(); }, [&opts](float v) {
+				             if (v < 1) opts.SetDrawLimit(DrawLimitDisplay{});
+				             else opts.SetDrawLimit(DrawLimitExplicit{ int(v) });
+			             }), L"Frames drawn a second; 0 = the display's refresh rate");
+			y = ry + S(16);
+
+			ry = Group(x, y, w, S(36) + 4 * S(32), L"Air and gravity numbers");
+			auto number = [&](const wchar_t *label, const String &title, float v, float lo, float hi, void (OptionsModel::*set)(float), const wchar_t *tip) {
+				NumberButton(bx, row(label), nw, title, String::Build(Format::Precision(2), v),
+				             FloatSetting(lo, hi, [](const String &s) { return s.ToNumber<float>(); }, [&opts, set](float v) { (opts.*set)(v); }), tip);
+			};
+			number(L"Edge wind across", "Ambient air velocity X", opts.GetEdgeVelocityX(), -256, 256, &OptionsModel::SetEdgeVelocityX, L"Air blowing in from the edges, left to right (minus: right to left)");
+			number(L"Edge wind down", "Ambient air velocity Y", opts.GetEdgeVelocityY(), -256, 256, &OptionsModel::SetEdgeVelocityY, L"Air blowing in from the edges, downward (minus: up)");
+			number(L"Custom gravity across", "Custom gravity X", opts.GetCustomGravityX(), -1000, 1000, &OptionsModel::SetCustomGravityX, L"Sideways pull when Gravity is Custom (Simulation tab)");
+			number(L"Custom gravity down", "Custom gravity Y", opts.GetCustomGravityY(), -1000, 1000, &OptionsModel::SetCustomGravityY, L"Downward pull when Gravity is Custom (Simulation tab)");
+			y = ry + S(16);
+
+			PushButton(lx, y, S(200), L"Open data folder", [] {
+				if (auto cwd = Platform::GetCwd(); !cwd.empty()) Platform::OpenURI(cwd);
+			}, L"Where TPT keeps its saves, stamps, scripts and settings");
 		}
 
 		// TPT's settings, through its own options model (which saves the prefs).
@@ -4562,7 +4621,7 @@ namespace
 				for (int i = sx + 1; i < sx + text->Measure(tabNames[tab]).cx + pad - S(1); i++) cv.Blend(i, c.top, theme->page, 255);
 
 			// Form pages scroll: rows outside the page are put back after, and controls there dropped.
-			bool form = (tab >= 1 && tab <= 6) || tab == buddyTab;
+			bool form = (tab >= 1 && tab <= 6) || tab == buddyTab || tab == tptTab;
 			size_t firstPageHit = hits.size();
 			size_t topEnd = size_t(c.top + 1) * cv.w, bottomStart = size_t(c.bottom) * cv.w;
 			std::vector<uint32_t> above(cv.px.begin(), cv.px.begin() + topEnd), below(cv.px.begin() + bottomStart, cv.px.end());
@@ -4577,6 +4636,7 @@ namespace
 			case buddyTab: PaintFun(buddyRows, std::size(buddyRows)); break;
 			case welcomeTab: PaintWelcome(); break;
 			case toolsTab: PaintTools(); break;
+			case tptTab: PaintTPT(); break;
 			}
 			if (form)
 			{
@@ -4635,7 +4695,7 @@ namespace
 				auto c = Content();
 				Wheel(GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA * S(51), welcomeH - int(c.bottom - c.top));
 			}
-			if (msg == WM_MOUSEWHEEL && ((tab >= 1 && tab <= 6) || tab == buddyTab))
+			if (msg == WM_MOUSEWHEEL && ((tab >= 1 && tab <= 6) || tab == buddyTab || tab == tptTab))
 			{
 				auto c = Content();
 				Wheel(GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA * S(40), formH - int(c.bottom - c.top));
