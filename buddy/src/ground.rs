@@ -37,6 +37,7 @@ pub(crate) struct Ground {
     pub(crate) ledge: Option<Ledge>,         // the active window's edges he can stand on (as in the desktop app)
     pub(crate) carry: (f64, f64),            // how far that window moved while he stood on it, not yet applied
     pub(crate) buried: u32,                  // frames his head has been deep in powder
+    pub(crate) sad: u32,                     // frames he's been very sad (a tear every 20)
     pub(crate) dig: bool,                    // digging out: powder doesn't stop him (the sim shoves it out of his way as he rises)
     pub(crate) support: u8,                  // what he stands on: 0 nothing, 1 its top edge, 2 its bottom edge
 }
@@ -78,7 +79,7 @@ pub(crate) const POSE: [(f64, f64); 6] = [(0.0, 0.0), (0.0, -39.4), (-22.1, -10.
 
 impl Default for Ground {
     fn default() -> Self {
-        Self { rect: [0; 4], cells: Vec::new(), want: [0; 4], last: (400.0, 300.0), air_rect: [0; 4], air: Vec::new(), cell: 4, before: ([0; 4], Vec::new()), calm: 0, zap: None, gravity: (0.0, 1.0), game_grav: 1.0, exit: None, jumped: 99, eaten: false, parts: Vec::new(), bang: None, booms: Vec::new(), shots: Vec::new(), bullets: Vec::new(), stops: Vec::new(), drops: Vec::new(), toys: false, toys_at: Vec::new(), patches: Vec::new(), well: None, frames: 0, hide: 0, ledge: None, carry: (0.0, 0.0), buried: 0, dig: false, support: 0 }
+        Self { rect: [0; 4], cells: Vec::new(), want: [0; 4], last: (400.0, 300.0), air_rect: [0; 4], air: Vec::new(), cell: 4, before: ([0; 4], Vec::new()), calm: 0, zap: None, gravity: (0.0, 1.0), game_grav: 1.0, exit: None, jumped: 99, eaten: false, parts: Vec::new(), bang: None, booms: Vec::new(), shots: Vec::new(), bullets: Vec::new(), stops: Vec::new(), drops: Vec::new(), toys: false, toys_at: Vec::new(), patches: Vec::new(), well: None, frames: 0, hide: 0, ledge: None, carry: (0.0, 0.0), buried: 0, sad: 0, dig: false, support: 0 }
     }
 }
 
@@ -588,6 +589,27 @@ pub(crate) fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
         }
         if v.get("modeContainer.lowGrav") == Value::Bool(true) && g.shots.len() < 256 {
             g.shots.push([0.35, 0.0, 0.0, 0.0, 12.0]); // (the game's own low gravity: 0.35 of normal)
+        }
+        // his radio while its music plays (the game's playingMusic): where it is (x, y, 15)
+        if v.get("playingMusic") == Value::Bool(true) {
+            for i in 0..num(v, "objectList.length").min(64.0) as usize {
+                if v.get(&format!("objectList.{i}.targ.objectType")) == Value::String("radio".into()) {
+                    let t = |v: &mut dyn RootVars, f: &str| num(v, &format!("objectList.{i}.targ.{f}"));
+                    let b = [t(v, "x"), t(v, "y"), 0.0, 0.0, 15.0];
+                    if b.iter().all(|n| n.is_finite()) && g.shots.len() < 256 {
+                        g.shots.push(b);
+                    }
+                }
+            }
+        }
+        // sad (his emotion -50 or lower): his head (x, y, radius, how sad 0-1, 16), every third of a second
+        let e = num(v, "emotion");
+        g.sad = if e <= -50.0 { g.sad + 1 } else { 0 };
+        if g.sad % 20 == 1 && g.shots.len() < 256 {
+            let b = [num(v, "head.x"), num(v, "head.y"), num(v, "head.rad"), ((-e - 50.0) / 50.0).min(1.0), 16.0];
+            if b.iter().all(|n| n.is_finite()) {
+                g.shots.push(b);
+            }
         }
         // a script (the game's ShockScript) asking for TPT stuff: assign(tpt, "SAND") with tptX, tptY (the mouse if
         // not set) and tptN (10): x, y, how many, the element's name as up to 4 bytes (14); asked once, then cleared

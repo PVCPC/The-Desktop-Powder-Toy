@@ -614,6 +614,20 @@ fn run(mut game: Game, shared: Arc<Mutex<Shared>>) {
                     }
                     continue;
                 }
+                // TPT gold he picked up: that much more cash
+                if let Some(n) = c.strip_prefix("cash:").and_then(|n| n.parse::<f64>().ok()) {
+                    if let Value::Number(cash) = p.get_root_variable("cash") {
+                        p.set_root_variable("cash", Value::Number(cash + n)).ok();
+                    }
+                    continue;
+                }
+                // a hot floor: that part (PARTS) hops up
+                if let Some(i) = c.strip_prefix("hop:").and_then(|i| i.parse::<usize>().ok()).filter(|&i| i < PARTS.len()) {
+                    if let Value::Number(o) = p.get_root_variable(&format!("{}.oy", PARTS[i])) {
+                        p.set_root_variable(&format!("{}.oy", PARTS[i]), Value::Number(o + 4.0)).ok();
+                    }
+                    continue;
+                }
                 if let Some(s) = c.strip_prefix("stop:") {
                     let n: Vec<f64> = s.split(',').filter_map(|n| n.parse().ok()).collect();
                     if let [x, y, dx, dy] = n[..] {

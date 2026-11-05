@@ -1044,6 +1044,21 @@ fn game_links() {
         shots
     };
     run(&mut game, 5);
+    // very sad: his head, every third of a second (tears)
+    game.player.lock().unwrap().set_root_variable("emotion", Value::Number(-90.0)).unwrap();
+    let shots = run(&mut game, 25);
+    assert!(shots.iter().any(|s| s[4] == 16.0 && s[2] > 0.0 && s[3] > 0.7), "no tears: {shots:?}");
+    game.player.lock().unwrap().set_root_variable("emotion", Value::Number(0.0)).unwrap();
+    // his radio, once its music plays
+    {
+        assert!(pick(&mut game, "Radio"), "no Radio item");
+        run(&mut game, 5);
+        let mut shots = click(&mut game, &mut run);
+        for _ in 0..20 {
+            shots.extend(run(&mut game, 10));
+        }
+        assert!(shots.iter().any(|s| s[4] == 15.0), "no radio: playingMusic {:?}", game.player.lock().unwrap().get_root_variable("playingMusic"));
+    }
     game.player.lock().unwrap().call_root_method("executeText", vec!["assign(tptN, 30);assign(tpt, \"sand\")".into()]).unwrap();
     let shots = run(&mut game, 2);
     let sand = (b'S' as u32 | (b'A' as u32) << 8 | (b'N' as u32) << 16 | (b'D' as u32) << 24) as f64;

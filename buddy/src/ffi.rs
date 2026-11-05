@@ -285,7 +285,8 @@ pub unsafe extern "C" fn tdpt_buddy_booms(b: *mut Buddy, out: *mut f64, max: usi
 /// stopped fast by the sim at x0, y0, radius x1, speed y1 before, 8 the Fist at x0, y0 moving x1, y1 since the frame
 /// before, 9 a piece of gore at x0, y0 flying x1, y1 a frame, 10 the flail's ball at x0, y0 moving x1, y1 a frame, 11 the
 /// game's Earthquake shaking x0 hard, 12 its Low Gravity (x0 of normal), 13 a missile at x0, y0 moving x1, y1 a frame, 14 a
-/// script asking for x1 of the TPT element named by the bytes of y1 at x0, y0); how many
+/// script asking for x1 of the TPT element named by the bytes of y1 at x0, y0, 15 his radio playing at x0, y0, 16 he's
+/// sad: his head at x0, y0, radius x1, how sad y1 (0-1), every third of a second); how many
 /// # Safety
 /// b is from tdpt_buddy_open; out has room for 5 * max.
 #[unsafe(no_mangle)]

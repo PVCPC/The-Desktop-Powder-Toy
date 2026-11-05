@@ -72,6 +72,17 @@ hooks into his game; ffi.rs the C interface (tdpt_buddy.h); tests.rs; sound.rs.
       Watched live in TDPT 2026-11-05 (temporary hooks, removed): a script's assign(tpt, "WATR") with tptN 50 made 47
       water (3 found no room); a FIGH put next to him kicked him once every 60 ticks; the game's explode on sand reached
       Blast. Flail, missiles, Earthquake and Low Gravity: game side by test game_links, TPT side not watched.
+- [x] Four more links (user 2026-11-05, "all of them"), each a Fun toggle, off by default, with its description:
+      - Radio (BuddyRadio): his radio while root playingMusic is true -> kind 15 (x, y); TPT powders and liquids within
+        50 px get an upward kick every 30 ticks (ponytail: a steady 120 a minute, not the song's beat).
+      - Tears (BuddyTears): emotion -50 or lower -> kind 16 (head x, y, radius, how sad 0-1) every 20 frames; TPT water
+        just outside his head at eye height (inside it his own pixels take none), the second eye by how sad.
+      - Gold (BuddyGold): TPT GOLD within a part's radius + 2 is removed, "cash:n" adds n to root cash (50 a tick max).
+      - Hot floor (BuddyHotFloor): 60-400 C under his feet (not gas) -> "hop:4"/"hop:5", that leg's oy + 4, a foot
+        every 12 ticks.
+      - Lightning was already in: LIGH (like SPRK and ELEC) is ground flag 0x80, which calls the game's own shock().
+      Tests: game_links checks kinds 15 and 16. Watched live (temporary hooks, removed): 144 gold picked up -> cash 0 -> 144;
+      warm metal under his feet -> 130 hops in ~3 s; very sad -> 12 drops in 2 s; a beat lifts ~2800 sand near the radio.
 - [x] Buddy tab next to Fun.
 - [x] Shown at the screen's rate: TDPT's overlay shows ~30 frames a second at 5120x1440 (sim 7 ms + TPT drawing
       13 ms + present 10 ms), so he has his own click-through layered window over it (Windows), updated from a

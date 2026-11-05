@@ -34,7 +34,7 @@
 		bool buddy = false;                      // Interactive Buddy (OverlayBuddy; his file: Overlay.Fun.BuddySwf)
 		bool buddyPets = false;                  // the pets notice him (OverlayBuddy reads Overlay.Fun.BuddyPets)
 		bool buddyLooks = false;                 // he looks wet and frosted (Overlay.Fun.BuddyLooks)
-		bool buddyTracks = false, buddySplash = false, buddyFireman = false, buddyCarry = false, buddyGlow = false, buddyWeapons = false, buddyFlee = false, buddyDirt = false, buddyDance = false, buddyFeed = false, buddyWater = false, buddyWaterOnly = false, buddyFireOnly = false, buddyGravity = false, buddyToysSim = false, buddyFist = false, buddyBlood = false, buddyClicks = false, buddyWells = false, buddyModes = false, buddyStickmen = false, buddyScripts = false; // footprints, splashes, he puts out fires, carries sand, his guns, runs from fire, dirt, radio, feeding, hoses (Overlay.Fun.Buddy*)
+		bool buddyTracks = false, buddySplash = false, buddyFireman = false, buddyCarry = false, buddyGlow = false, buddyWeapons = false, buddyFlee = false, buddyDirt = false, buddyDance = false, buddyFeed = false, buddyWater = false, buddyWaterOnly = false, buddyFireOnly = false, buddyGravity = false, buddyToysSim = false, buddyFist = false, buddyBlood = false, buddyClicks = false, buddyWells = false, buddyModes = false, buddyStickmen = false, buddyScripts = false, buddyRadio = false, buddyTears = false, buddyGold = false, buddyHotFloor = false; // footprints, splashes, he puts out fires, carries sand, his guns, runs from fire, dirt, radio, feeding, hoses (Overlay.Fun.Buddy*)
 		// the Buddy tab (OverlayBuddy reads them from the prefs): his size and speech bubbles' (%), toys at once (0: no
 		// limit), standing on the active window, smoothing, speech
 		float buddySize = 100, buddySpeechSize = 100, buddyToys = 6, buddyVolume = 50;
@@ -182,6 +182,10 @@
 		Check(L"Buddy's game modes reach the sim", L"The game's own modes (Modes menu) act on the sim too: Earthquake shakes sand and water about while the screen shakes, and Low Gravity makes them fall about a third as hard (TPT's vertical gravity)", &fun.buddyModes, "Overlay.Fun.BuddyModes"),
 		Check(L"TPT stickmen fight Buddy", L"A TPT stickman or fighter (STKM, STKM2, FIGH) that runs into Buddy kicks him away and scares him, at most once a second", &fun.buddyStickmen, "Overlay.Fun.BuddyStickmen"),
 		Check(L"Buddy's scripts make TPT stuff", L"The game's scripting engine (Modes, Scripting Engine Access) can make TPT particles: assign(tpt, \"SAND\") makes 10 sand at the mouse; set tptX and tptY for the place and tptN for how many (up to 500), before the tpt line", &fun.buddyScripts, "Overlay.Fun.BuddyScripts"),
+		Check(L"Buddy's radio shakes the sim", L"While his radio plays music, TPT sand, water and other powders and liquids near it hop on the beat (a steady beat, not the song's own)", &fun.buddyRadio, "Overlay.Fun.BuddyRadio"),
+		Check(L"Buddy cries real tears", L"When Buddy is very sad, TPT water drips from his eyes; from both eyes the sadder he is", &fun.buddyTears, "Overlay.Fun.BuddyTears"),
+		Check(L"TPT gold is Buddy's money", L"TPT gold (GOLD) that Buddy touches is picked up and added to his game money, a dollar a pixel", &fun.buddyGold, "Overlay.Fun.BuddyGold"),
+		Check(L"Hot floors make Buddy hop", L"Standing on something warm (60 to 400 C, hot but not burning) Buddy hops from foot to foot", &fun.buddyHotFloor, "Overlay.Fun.BuddyHotFloor"),
 		Check(L"Only TPT water from his hoses", L"With the one above: the game's own water drops are hidden, so his hoses spray only TPT water (Buddy still feels the spray)", &fun.buddyWaterOnly, "Overlay.Fun.BuddyWaterOnly"),
 	};
 	bool BuddyTabShown() { return !GlobalPrefs::Ref().Get("Overlay.Fun.BuddySwf", ByteString("")).empty(); }

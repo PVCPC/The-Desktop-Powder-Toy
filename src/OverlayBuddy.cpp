@@ -58,6 +58,7 @@ namespace
 	double lastSpeed[8];          // each part's speed last tick (a splash: fast, then stopped by sand or water)
 	int hose = 0, hoseRest = 0;   // fireman: ticks left spraying, and before he looks for fire again
 	int kickRest = 0;             // ticks before a TPT stickman can kick him again (Overlay.Fun.BuddyStickmen)
+	int hopRest = 0, hopLeg = 0;  // ticks before his next hop on a hot floor, and which foot (Overlay.Fun.BuddyHotFloor)
 	float hoseX, hoseY;           // the fire he is putting out
 	std::vector<Particle> handful; // what his hand carries (Overlay.Fun.BuddyCarry); in the sim each tick, by carried
 	std::vector<int> carried;      // their ids this tick (-1: no room for that one this tick)
@@ -765,6 +766,60 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 			for (int k = 0; t > 0 && k < n * 3 && n > 0; k++)
 				if (int x = int(b[0]) + sim->rng.between(-r, r), y = int(b[1]) + sim->rng.between(-r, r); empty(x, y) && sim->create_part(-1, x, y, t) >= 0) n--;
 		}
+	// his radio playing (Overlay.Fun.BuddyRadio): TPT powders and liquids within 50 px of it hop on each beat, higher
+	// closer (ponytail: a steady 120 a minute, not the song's own beat)
+	for (size_t s = 0; s < shot && sim->currentTick % 30 == 0 && prefs.Get("Overlay.Fun.BuddyRadio", false); s++)
+		if (double *b = shots + s * 5; b[4] == 15)
+		{
+			for (int y = std::max(0, int(b[1]) - 50); y <= std::min(YRES - 1, int(b[1]) + 50); y++)
+				for (int x = std::max(0, int(b[0]) - 50); x <= std::min(XRES - 1, int(b[0]) + 50); x++)
+					if (int q = sim->pmap[y][x]; q && (elements[TYP(q)].Properties & (TYPE_PART | TYPE_LIQUID)))
+						if (double d = std::hypot(x - b[0], y - b[1]); d < 50)
+						{
+							auto &p = sim->parts[ID(q)];
+							p.vy -= float((1.5 + 1.5 * sim->rng.uniform01()) * (1 - d / 50));
+							p.vx += 0.6f * float(sim->rng.uniform01() - 0.5);
+						}
+			break; // (one radio's beat at a time)
+		}
+	// sad (Overlay.Fun.BuddyTears): TPT water drips from his eyes (just outside his head: his own pixels take none),
+	// from both when he's very sad
+	for (size_t s = 0; s < shot && prefs.Get("Overlay.Fun.BuddyTears", false); s++)
+		if (double *b = shots + s * 5; b[4] == 16 && std::isfinite(b[0] + b[1] + b[2] + b[3]))
+			for (int side : { -1, 1 })
+				if (side < 0 || sim->rng.uniform01() < b[3])
+					if (int x = int(b[0] + side * (b[2] + 2.5)), y = int(b[1] + b[2] * 0.1); empty(x, y))
+						if (int i = sim->create_part(-1, x, y, PT_WATR); i >= 0)
+							sim->parts[i].vx = float(side * 0.6), sim->parts[i].vy = -0.3f;
+	// TPT gold he touches (Overlay.Fun.BuddyGold): picked up, each grain a dollar of the game's cash
+	if (prefs.Get("Overlay.Fun.BuddyGold", false) && parts.size() == 6)
+	{
+		int got = 0;
+		for (auto &p : parts)
+			for (int y = int(p[1] - p[2] - 2); std::isfinite(p[0] + p[1] + p[2]) && y <= int(p[1] + p[2] + 2) && got < 50; y++)
+				for (int x = int(p[0] - p[2] - 2); x <= int(p[0] + p[2] + 2) && got < 50; x++)
+					if (x >= 0 && y >= 0 && x < XRES && y < YRES && TYP(sim->pmap[y][x]) == PT_GOLD && std::hypot(x - p[0], y - p[1]) < p[2] + 2)
+						sim->kill_part(ID(sim->pmap[y][x])), got++;
+		if (got) tdpt_buddy_command(buddy, ("cash:" + std::to_string(got)).c_str());
+	}
+	// a hot floor (Overlay.Fun.BuddyHotFloor): standing on something 60-400 C (warm, not burning) he hops from foot to
+	// foot, a foot every 12 ticks
+	if (hopRest > 0) hopRest--;
+	else if (prefs.Get("Overlay.Fun.BuddyHotFloor", false) && parts.size() == 6)
+	{
+		bool warm = false, hot = false;
+		for (int leg : { 4, 5 })
+			for (int y = int(parts[leg][1] + parts[leg][2]); std::isfinite(parts[leg][0] + parts[leg][1] + parts[leg][2]) && y <= int(parts[leg][1] + parts[leg][2]) + 2; y++)
+				for (int x = int(parts[leg][0] - parts[leg][2] / 2); x <= int(parts[leg][0] + parts[leg][2] / 2); x++)
+					if (x >= 0 && y >= 0 && x < XRES && y < YRES)
+						if (int q = sim->pmap[y][x]; q && !(elements[TYP(q)].Properties & TYPE_GAS))
+							warm |= sim->parts[ID(q)].temp >= 333.15f, hot |= sim->parts[ID(q)].temp >= 673.15f;
+		if (warm && !hot)
+		{
+			tdpt_buddy_command(buddy, ("hop:" + std::to_string(4 + hopLeg)).c_str());
+			hopLeg ^= 1, hopRest = 12;
+		}
+	}
 	stunned = false;
 	for (size_t s = 0; s < shot && weapons; s++)
 	{
