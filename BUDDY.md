@@ -51,8 +51,22 @@ What the game gives us (AS2, `_root`): `bodyParts` = body, head, lArm, rArm, lLe
 - [x] Clicks in overlay:window: dragging him, the Fist and right-click menus are untested there (window-relative
       mouse while TPT has it captured). Checked by reading (2026-11-05): GameView hands OverlayBuddy::Mouse sim pixels in
       both modes and his stage is sim pixels in both (fw/fh from the play area), so the same path; not tried with a
-      real mouse (no OS input on the user's PC). Also: the Flail and the game's modes (Earthquake, Low Gravity,
-      Realistic Pyrotechnics) have no sim link yet; ideas in the user's list 2026-11-05.
+      real mouse (no OS input on the user's PC).
+- [x] More links (user 2026-11-05, "do all"): shots 10-14 and two commands, test game_links (34/34 tests pass; the
+      exact checksum unchanged with them off):
+      flail's ball (objectList immovable/wreckingBall, kind 10) shoves powder/liquid like the Fist, r 17 (BuddyWeapons);
+      missiles (type missile, kind 13) leave SMKE along their path (BuddyWeapons);
+      grenades/mines/molotovs (targ.objectType) touched by HOT, SPARK or BANG in their toy patch: targ.life = 1, they go
+      off next frame (BuddyToys);
+      Earthquake (modeContainer.earthquake, shake, kind 11) jostles powders/liquids; Low Gravity (modeContainer.lowGrav,
+      game grav 0.35, kind 12) takes 0.65 of each element's Gravity off vy, vertical mode only (new toggle BuddyModes);
+      ShockScript: assign(tpt, "SAND") (+ tptX, tptY, tptN) -> kind 14 with the name packed in 4 bytes; variables.tpt
+      cleared (Undefined: "" reads back as "null") (new toggle BuddyScripts);
+      STKM/STKM2/FIGH within a part's radius + 6 -> kick:dx,dy (parts' ox/oy) + setModifier:scared:160, once a second
+      (new toggle BuddyStickmen);
+      fireman: hose done and no fire within 60 px of where he aimed -> happy: (emotion +15, jumpUp). The game's say()
+      and addEmotion() hang when called from outside (probe 2026-11-05): not used.
+      Not watched live in TDPT yet (needs real clicks in the game).
 - [x] Buddy tab next to Fun.
 - [x] Shown at the screen's rate: TDPT's overlay shows ~30 frames a second at 5120x1440 (sim 7 ms + TPT drawing
       13 ms + present 10 ms), so he has his own click-through layered window over it (Windows), updated from a

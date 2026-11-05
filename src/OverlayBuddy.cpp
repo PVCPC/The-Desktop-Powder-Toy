@@ -57,6 +57,7 @@ namespace
 	bool stunned = false;         // his stun gun was shocking him last tick (Overlay.Fun.BuddyWeapons)
 	double lastSpeed[8];          // each part's speed last tick (a splash: fast, then stopped by sand or water)
 	int hose = 0, hoseRest = 0;   // fireman: ticks left spraying, and before he looks for fire again
+	int kickRest = 0;             // ticks before a TPT stickman can kick him again (Overlay.Fun.BuddyStickmen)
 	float hoseX, hoseY;           // the fire he is putting out
 	std::vector<Particle> handful; // what his hand carries (Overlay.Fun.BuddyCarry); in the sim each tick, by carried
 	std::vector<int> carried;      // their ids this tick (-1: no room for that one this tick)
@@ -641,7 +642,15 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 					if (double d = std::pow(sim->parts[i].x - body[0], 2) + std::pow(sim->parts[i].y - body[1], 2); d < best && d > 40 * 40)
 						best = d, hoseX = sim->parts[i].x, hoseY = sim->parts[i].y, hose = 90;
 		}
-		if (hose > 0 && --hose == 0) hoseRest = 300;
+		if (hose > 0 && --hose == 0)
+		{
+			hoseRest = 300;
+			// no fire left where he aimed: he's pleased with himself (happy: the game's mood up, a hop)
+			bool out = true;
+			for (int i = 0; i <= sim->parts.active && out; i++)
+				if ((sim->parts[i].type == PT_FIRE || sim->parts[i].type == PT_PLSM) && std::hypot(sim->parts[i].x - hoseX, sim->parts[i].y - hoseY) < 60) out = false;
+			if (out) tdpt_buddy_command(buddy, "happy:");
+		}
 		for (int j = 0; hose > 0 && j < 3; j++)
 		{
 			double dx = hoseX - hand[0], dy = hoseY - hand[1], d = std::max(1.0, std::hypot(dx, dy));
@@ -702,13 +711,15 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 	for (size_t s = 0; s < shot && toys; s++)
 		if (double *b = shots + s * 5; b[4] == 7 && std::isfinite(b[0] + b[1]))
 			fling(b[0], b[1], b[2], b[3]);
-	// the game's Fist (Overlay.Fun.BuddyFist): powders and liquids it moves through go the way it goes (its knuckles
-	// about 12 px round; TPT's ticks come half as often as his frames, so half his speed a frame, kept under 10)
-	for (size_t s = 0; s < shot && prefs.Get("Overlay.Fun.BuddyFist", false); s++)
-		if (double *b = shots + s * 5; b[4] == 8 && std::isfinite(b[0] + b[1] + b[2] + b[3]) && std::hypot(b[2], b[3]) > 0.5)
-			for (int y = std::max(0, int(b[1]) - 12); y <= std::min(YRES - 1, int(b[1]) + 12); y++)
-				for (int x = std::max(0, int(b[0]) - 12); x <= std::min(XRES - 1, int(b[0]) + 12); x++)
-					if (int q = sim->pmap[y][x]; q && (isPowder(ID(q)) || isLiquid(ID(q))) && std::hypot(x + 0.5 - b[0], y + 0.5 - b[1]) <= 12)
+	// the game's Fist (Overlay.Fun.BuddyFist) and the flail's ball (Overlay.Fun.BuddyWeapons): powders and liquids they
+	// move through go the way they go (the Fist's knuckles about 12 px round, the ball 15; TPT's ticks come half as often
+	// as his frames, so half his speed a frame, kept under 10)
+	bool fist = prefs.Get("Overlay.Fun.BuddyFist", false);
+	for (size_t s = 0; s < shot; s++)
+		if (double *b = shots + s * 5, r = b[4] == 8 && fist ? 12 : b[4] == 10 && weapons ? 17 : 0; r && std::isfinite(b[0] + b[1] + b[2] + b[3]) && std::hypot(b[2], b[3]) > 0.5)
+			for (int y = std::max(0, int(b[1] - r)); y <= std::min(YRES - 1, int(b[1] + r)); y++)
+				for (int x = std::max(0, int(b[0] - r)); x <= std::min(XRES - 1, int(b[0] + r)); x++)
+					if (int q = sim->pmap[y][x]; q && (isPowder(ID(q)) || isLiquid(ID(q))) && std::hypot(x + 0.5 - b[0], y + 0.5 - b[1]) <= r)
 					{
 						auto &t = sim->parts[ID(q)];
 						t.vx = float(std::clamp(b[2] * 0.5, -10.0, 10.0) + sim->rng.uniform01() - 0.5);
@@ -723,11 +734,53 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 					if (int i = sim->create_part(-1, x, y, PT_BLOD); i >= 0)
 						sim->parts[i].vx = float(std::clamp(b[2] * 0.6, -15.0, 15.0) + sim->rng.uniform01() - 0.5),
 						sim->parts[i].vy = float(std::clamp(b[3] * 0.6, -15.0, 15.0) + sim->rng.uniform01() - 0.5);
+	// the game's modes (Overlay.Fun.BuddyModes): its Earthquake shakes powders and liquids about (harder as it shakes
+	// harder); its Low Gravity takes the same share off TPT's own pull on them (vertical gravity only)
+	bool shook = false, light = false;
+	for (size_t s = 0; s < shot && prefs.Get("Overlay.Fun.BuddyModes", false); s++)
+		if (double *b = shots + s * 5; b[4] == 11 && !shook && std::isfinite(b[0]))
+		{
+			shook = true;
+			float a = float(std::min(3.0, b[0] / 4));
+			for (int i = 0; i <= sim->parts.active; i++)
+				if (auto &p = sim->parts[i]; p.type && (elements[p.type].Properties & (TYPE_PART | TYPE_LIQUID)))
+					p.vx += a * float(sim->rng.uniform01() - 0.5), p.vy += a * 0.5f * float(sim->rng.uniform01() - 0.5);
+		}
+		else if (b[4] == 12 && !light && sim->gravityMode == GRAV_VERTICAL && b[0] >= 0 && b[0] < 1)
+		{
+			light = true; // ponytail: takes it off before TPT's own update (loss applies after), close to 0.35 of the pull
+			for (int i = 0; i <= sim->parts.active; i++)
+				if (auto &p = sim->parts[i]; p.type && !(elements[p.type].Properties & (TYPE_SOLID | TYPE_ENERGY)))
+					p.vy -= elements[p.type].Gravity * float(1 - b[0]);
+		}
+	// the game's scripts asking for TPT stuff (Overlay.Fun.BuddyScripts): that many of the named element around where
+	// they asked, in empty spots
+	for (size_t s = 0; s < shot && prefs.Get("Overlay.Fun.BuddyScripts", false); s++)
+		if (double *b = shots + s * 5; b[4] == 14 && std::isfinite(b[0] + b[1] + b[2] + b[3]))
+		{
+			ByteString name;
+			for (int k = 0; k < 4; k++)
+				if (char c = char((uint32_t(b[3]) >> (8 * k)) & 0xFF)) name += c;
+			int t = SimulationData::CRef().GetParticleType(name), n = int(b[2]), r = 2 + int(std::sqrt(b[2]));
+			for (int k = 0; t > 0 && k < n * 3 && n > 0; k++)
+				if (int x = int(b[0]) + sim->rng.between(-r, r), y = int(b[1]) + sim->rng.between(-r, r); empty(x, y) && sim->create_part(-1, x, y, t) >= 0) n--;
+		}
 	stunned = false;
 	for (size_t s = 0; s < shot && weapons; s++)
 	{
 		stunned |= shots[s * 5 + 4] == 6;
 		double *b = shots + s * 5;
+		if (b[4] == 13 && std::isfinite(b[0] + b[1] + b[2] + b[3]))
+		{
+			// a missile: TPT smoke along the way it came this frame
+			for (int k = 0; k < 6; k++)
+			{
+				double f = sim->rng.uniform01();
+				if (int x = int(b[0] - b[2] * f) + sim->rng.between(-2, 2), y = int(b[1] - b[3] * f) + sim->rng.between(-2, 2); empty(x, y))
+					sim->create_part(-1, x, y, PT_SMKE);
+			}
+			continue;
+		}
 		if (b[4] >= 3) continue;
 		if (b[4] == 2)
 		{
@@ -780,6 +833,20 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 			break;
 		}
 	}
+	// TPT stickmen and fighters (Overlay.Fun.BuddyStickmen): one touching him kicks him away from it, and he's scared
+	// (the game's own scared mood); once a second at most
+	if (kickRest > 0) kickRest--;
+	else if (prefs.Get("Overlay.Fun.BuddyStickmen", false) && parts.size() == 6)
+		for (int i = 0; i <= sim->parts.active && !kickRest; i++)
+			if (int t = sim->parts[i].type; t == PT_STKM || t == PT_STKM2 || t == PT_FIGH)
+				for (auto &p : parts)
+					if (double dx = p[0] - sim->parts[i].x, dy = p[1] - sim->parts[i].y, d = std::hypot(dx, dy); std::isfinite(d) && d < p[2] + 6)
+					{
+						d = std::max(d, 1.0);
+						tdpt_buddy_command(buddy, ("kick:" + std::to_string(dx / d * 8) + "," + std::to_string(dy / d * 8 - 3)).c_str());
+						kickRest = 60;
+						break;
+					}
 	// Running from fire: fire, lava or plasma within 100 px of him and he runs 250 px away from (most of) it, with the game's
 	// own run (its runToPoint action); again 2 s later if it's still there. Not while he burns: then the game's own panic
 	if (fleeRest > 0) fleeRest--;

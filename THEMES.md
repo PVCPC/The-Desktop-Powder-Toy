@@ -63,7 +63,7 @@ Also: github.com/bartekl1/windows-ui-assets (icons, cursors, sounds and wallpape
 buttons). Index of B00merang's themes: b00merang-project.github.io/windows and /macos.
 
 ## To do (in order)
-1. [ ] Private PVCPC copies of every repo above (2026-11-05: needs the user's OK to create the repos).
+1. [~] Private PVCPC copies of every repo above: dropped (user 2026-11-05, no new repos). Local mirrors in scratch only.
 2. [x] Swap each look to its source's images, oldest Windows first: 3.1, 95, 98, Vista, 7, 8, 10, then 11 (from the PC),
    then the Macs: System 1-6, System 7, Mac OS 8-9, 10.0-10.6, 10.7-10.9, 10.10-10.15, 11-15, 26. Then TempleOS's
    real font.

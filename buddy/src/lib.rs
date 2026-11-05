@@ -676,6 +676,13 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
             let patch = patches.iter_mut().find(|p| { let [px, py, w, h] = p.rect; x >= px as f64 && y >= py as f64 && x < (px + w) as f64 && y < (py + h) as f64 });
             let mut patch = patch.map(|p| { p.swap(&mut g); p });
             let wet = !(mass >= 0.6) && grav.is_finite() && g.float(x, y, &mut xv, &mut yv, r, grav);
+            // his grenades, mines and molotovs: TPT fire, lava, a spark or a blast on one sets it off (its fuse, life, to 1)
+            if matches!(v.get(&s("targ.objectType")), Value::String(o) if o == "grenade" || o == "mine" || o == "molotov")
+                && g.touch(x, y, r) & (4 | SPARK | BANG) != 0
+                && num(v, &s("targ.life")) > 1.0
+            {
+                v.set(&s("targ.life"), Value::Number(1.0));
+            }
             let (ax, ay) = g.wind(x, y);
             xv += 0.1 * ax;
             yv += 0.1 * ay;
@@ -693,6 +700,41 @@ fn hook_ground(p: &mut Player, ground: &Arc<Mutex<Ground>>) {
             }
         }
         g.patches = patches;
+        // the flail's ball (x, y, its move a frame, 10) and missiles (x, y, their move a frame, 13)
+        for i in 0..num(v, "objectList.length").min(64.0) as usize {
+            let kind = match v.get(&format!("objectList.{i}.type")) {
+                Value::String(t) if t == "immovable" && v.get(&format!("objectList.{i}.group")) == Value::String("wreckingBall".into()) => 10.0,
+                Value::String(t) if t == "missile" => 13.0,
+                _ => continue,
+            };
+            let t = |v: &mut dyn RootVars, f: &str| num(v, &format!("objectList.{i}.targ.{f}"));
+            let b = [t(v, "x"), t(v, "y"), t(v, "xv"), t(v, "yv"), kind];
+            if b.iter().all(|n| n.is_finite()) && g.shots.len() < 256 {
+                g.shots.push(b);
+            }
+        }
+        // the game's modes: Earthquake shaking (how hard, 11), Low Gravity (the game's gravity then, 12)
+        if v.get("modeContainer.earthquake") == Value::Bool(true) && num(v, "shake") > 0.5 && g.shots.len() < 256 {
+            g.shots.push([num(v, "shake"), 0.0, 0.0, 0.0, 11.0]);
+        }
+        if v.get("modeContainer.lowGrav") == Value::Bool(true) && g.shots.len() < 256 {
+            g.shots.push([0.35, 0.0, 0.0, 0.0, 12.0]); // (the game's own low gravity: 0.35 of normal)
+        }
+        // a script (the game's ShockScript) asking for TPT stuff: assign(tpt, "SAND") with tptX, tptY (the mouse if
+        // not set) and tptN (10): x, y, how many, the element's name as up to 4 bytes (14); asked once, then cleared
+        if let Value::String(name) = v.get("variables.tpt")
+            && !name.is_empty()
+        {
+            let or = |v: &mut dyn RootVars, k: &str, d: f64| Some(num(v, k)).filter(|n| n.is_finite()).unwrap_or(d);
+            let (mx, my) = (num(v, "_xmouse"), num(v, "_ymouse"));
+            let (x, y) = (or(v, "variables.tptX", mx), or(v, "variables.tptY", my));
+            let n = or(v, "variables.tptN", 10.0).clamp(1.0, 500.0);
+            let code = name.bytes().take(4).enumerate().fold(0u32, |c, (k, b)| c | (b.to_ascii_uppercase() as u32) << (8 * k));
+            if g.shots.len() < 256 {
+                g.shots.push([x, y, n, code as f64, 14.0]);
+            }
+            v.set("variables.tpt", Value::Undefined);
+        }
         // his stun gun shocking him
         if v.get("beingShocked") == Value::Bool(true) && g.shots.len() < 256 {
             g.shots.push([num(v, "body.x"), num(v, "body.y"), 0.0, 0.0, 6.0]);
@@ -1251,6 +1293,29 @@ fn run(mut game: Game, shared: Arc<Mutex<Shared>>) {
                     game.ground.lock().unwrap().toys = on == "1";
                     continue;
                 }
+                // he put a fire out (fireman): pleased, a hop
+                if c == "happy:" {
+                    if let Value::Number(e) = p.get_root_variable("emotion") {
+                        p.set_root_variable("emotion", Value::Number((e + 15.0).min(100.0))).ok();
+                    }
+                    p.call_root_method("addAction", vec!["jumpUp".into(), 5.into()]).ok();
+                    continue;
+                }
+                // a TPT stickman or fighter kicked him: knocked that way (dx, dy a frame) and scared
+                if let Some(s) = c.strip_prefix("kick:") {
+                    let n: Vec<f64> = s.split(',').filter_map(|n| n.parse().ok()).collect();
+                    if let [dx, dy] = n[..] {
+                        for part in PARTS {
+                            for (f, d) in [("ox", dx), ("oy", dy)] {
+                                if let Value::Number(o) = p.get_root_variable(&format!("{part}.{f}")) {
+                                    p.set_root_variable(&format!("{part}.{f}"), Value::Number(o - d)).ok();
+                                }
+                            }
+                        }
+                        p.call_root_method("addAction", vec!["setModifier:scared:160".into(), 5.into()]).ok();
+                    }
+                    continue;
+                }
                 if let Some(s) = c.strip_prefix("stop:") {
                     let n: Vec<f64> = s.split(',').filter_map(|n| n.parse().ok()).collect();
                     if let [x, y, dx, dy] = n[..] {
@@ -1609,7 +1674,9 @@ pub unsafe extern "C" fn tdpt_buddy_booms(b: *mut Buddy, out: *mut f64, max: usi
 /// dances at x0, y0, 4 a new drop from his hose at x0, y0 with speed x1, y1 a frame, 5 his gravity pulls to x0, y0, x1
 /// hard: 1 weak vortex, 2 gravity shifter, 3 strong vortex, 6 his stun gun is shocking him, 7 a toy of his
 /// stopped fast by the sim at x0, y0, radius x1, speed y1 before, 8 the Fist at x0, y0 moving x1, y1 since the frame
-/// before, 9 a piece of gore at x0, y0 flying x1, y1 a frame); how many
+/// before, 9 a piece of gore at x0, y0 flying x1, y1 a frame, 10 the flail's ball at x0, y0 moving x1, y1 a frame, 11 the
+/// game's Earthquake shaking x0 hard, 12 its Low Gravity (x0 of normal), 13 a missile at x0, y0 moving x1, y1 a frame, 14 a
+/// script asking for x1 of the TPT element named by the bytes of y1 at x0, y0); how many
 /// # Safety
 /// b is from tdpt_buddy_open; out has room for 5 * max.
 #[unsafe(no_mangle)]
@@ -2670,5 +2737,69 @@ mod tests {
         super::frame(&mut game, 25.0, cx, cy, &mut out);
         assert!(!matches!(game.player.lock().unwrap().get_root_variable("skinStoreWindow._x"), Value::Number(_)), "didn't close");
     }
+    // the game's other links to the sim: a script asking for TPT sand, its Earthquake and Low Gravity modes, missiles, the
+    // flail's ball, and a grenade set off by TPT fire on it (its fuse was over 100 frames)
+    #[test]
+    fn game_links() {
+        let Some(path) = std::env::var_os("TDPT_BUDDY_SWF") else { return };
+        let mut game = super::open(path.to_str().unwrap(), 1280, 720).unwrap();
+        let mut out = vec![0u32; 1280 * 720];
+        while !super::frame(&mut game, 25.0, 0.0, 0.0, &mut out) {}
+        let menus = super::read_menus(&mut game.player.lock().unwrap());
+        let (mx, my) = (400.0, 300.0);
+        let mut run = |game: &mut super::Game, n: usize| {
+            for _ in 0..n {
+                super::frame(game, 25.0, mx, my, &mut out);
+            }
+            std::mem::take(&mut game.ground.lock().unwrap().shots)
+        };
+        let pick = |game: &mut super::Game, label: &str| {
+            let Some(line) = menus.lines().find(|l| l.split('\t').nth(3) == Some(label)) else { return false };
+            let c = line.split('\t').nth(2).unwrap().to_owned();
+            game.player.lock().unwrap().call_root_method("__hostMenuCommand", vec![c.into()]).unwrap();
+            true
+        };
+        // pressed for 3 frames
+        let click = |game: &mut super::Game, run: &mut dyn FnMut(&mut super::Game, usize) -> Vec<[f64; 5]>| {
+            game.player.lock().unwrap().handle_event(PlayerEvent::MouseMove { x: mx, y: my });
+            game.player.lock().unwrap().handle_event(PlayerEvent::MouseDown { x: mx, y: my, button: MouseButton::Left, index: None });
+            let shots = run(game, 3);
+            game.player.lock().unwrap().handle_event(PlayerEvent::MouseUp { x: mx, y: my, button: MouseButton::Left });
+            shots
+        };
+        run(&mut game, 5);
+        game.player.lock().unwrap().call_root_method("executeText", vec!["assign(tptN, 30);assign(tpt, \"sand\")".into()]).unwrap();
+        let shots = run(&mut game, 2);
+        let sand = (b'S' as u32 | (b'A' as u32) << 8 | (b'N' as u32) << 16 | (b'D' as u32) << 24) as f64;
+        assert!(shots.iter().any(|s| s[4] == 14.0 && s[2] == 30.0 && s[3] == sand), "no sand asked: {shots:?}");
+        assert!(!run(&mut game, 2).iter().any(|s| s[4] == 14.0), "asked twice");
+        if pick(&mut game, "Earthquake") && pick(&mut game, "Low Gravity") {
+            let shots = run(&mut game, 20);
+            assert!(shots.iter().any(|s| s[4] == 11.0 && s[0] > 0.5) && shots.iter().any(|s| s[4] == 12.0 && s[0] == 0.35), "{shots:?}");
+            pick(&mut game, "Earthquake");
+            pick(&mut game, "Low Gravity");
+        }
+        for (item, kind) in [("Missiles", 13.0), ("Medieval Flail", 10.0)] {
+            if pick(&mut game, item) {
+                run(&mut game, 5);
+                let mut shots = click(&mut game, &mut run);
+                shots.extend(run(&mut game, 10));
+                assert!(shots.iter().any(|s| s[4] == kind), "{item}: {shots:?}");
+            }
+        }
+        if pick(&mut game, "Grenades") {
+            game.ground.lock().unwrap().toys = true;
+            run(&mut game, 5);
+            game.ground.lock().unwrap().booms.clear();
+            click(&mut game, &mut run);
+            // fire everywhere round each toy (TDPT's patches, each frame)
+            for _ in 0..10 {
+                let mut g = game.ground.lock().unwrap();
+                g.patches = g.toys_at.iter().map(|&r| super::Patch { rect: r, cells: vec![super::HOT; (r[2] * r[3]) as usize], ..Default::default() }).collect();
+                drop(g);
+                run(&mut game, 1);
+            }
+            assert!(!game.ground.lock().unwrap().booms.is_empty(), "the grenade didn't go off");
+        }
+    }
 }
-
