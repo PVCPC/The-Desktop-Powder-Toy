@@ -44,6 +44,7 @@ enum class OverlayLayer
 };
 
 void ApplyOverlay(SDL_Window *window);
+void OverlayWindowOnTop(bool on); // Normal window: kept over other windows (pref Overlay.WindowOnTop, on by default)
 void OverlaySetLayer(OverlayLayer layer);
 OverlayLayer OverlayGetLayer();
 void OverlaySetInput(OverlayInput input);
@@ -51,6 +52,7 @@ OverlayInput OverlayGetInput();
 void OverlayLoadKeys(); // (re)reads the hotkeys from Overlay.Keys.* in powder.pref
 extern bool overlayAutoPass; // clicks pass through while a full-screen app or game is in front (Overlay.AutoPassThrough)
 extern bool overlayMenuUsed; // a menu window was clicked since another app came to the front: Auto still catches clicks
+extern bool overlayMenuGliding; // a menu is mid smooth-scroll: draw at the screen's rate, not the idle few frames
 // Presents the frame (0xRRGGBB pixels, w x h) scaled to the window, with per-pixel alpha. Also polls the hotkeys.
 void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h);
 // Each new sim frame, before it's presented: the particles it was rendered from, so frames drawn between sim ticks

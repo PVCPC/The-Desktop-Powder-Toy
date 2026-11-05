@@ -552,20 +552,20 @@ ask for permissions again after an update.
 Multicore physics on the M5 Pro, 485k sand and water: 24 -> 50 ticks/s. Build: `tools/package-mac.sh`.
 
 ## User list 2026-11-04 (screenshots: Buddy huge at the largest size slider, tiny at the smallest; solid bars on the taskbar)
-- [ ] 1. Menus don't scroll at a high fps (the glide runs off the menu's Tick: check its rate, redraw each step).
-- [ ] 2. Buddy's buy menus: no pictures, can't click, move or close them.
+- [x] 1. Menus don't scroll at a high fps (the glide runs off the menu's Tick: check its rate, redraw each step). Done: a glide step counts as busy, so the menu redraws every frame while it moves.
+- [x] 2. Buddy's buy menus: no pictures, can't click, move or close them. Done: the game's windows open in the middle of the stage (not its top-left corner, under TDPT's menu), and a drag is fed to the game in small steps (one big jump a frame left the title bar and dropped the drag). Test: store_window.
 - [ ] 3. Buddy size slider: at its ends he looks broken; is the taskbar his floor? (check his floor at every size)
-- [ ] 4. The fist item should push sand around.
-- [ ] 5. Hitting Buddy with the fist near windows shakes the windows a lot.
-- [ ] 6. Slider under "typing sparks" for how often they come.
-- [ ] 7. Buddy still jumps and flies about as soon as sand touches his feet.
-- [ ] 8. How to switch between TPT controls and Buddy's (pours sand while using grenades / molotovs): needs a clear switch.
-- [ ] 10. TPT's menu window on top by default (a toggle).
+- [x] 4. The fist item should push sand around. Done: Fun "Buddy's fist shoves sand" (shot kind 8: the Fist moving).
+- [x] 5. Hitting Buddy with the fist near windows shakes the windows a lot. Done: his air push is capped at 12 px a frame.
+- [x] 6. Slider under "typing sparks" for how often they come. Done: Fun "Typing spark chance".
+- [x] 7. Buddy still jumps and flies about as soon as sand touches his feet. Done: out of powder a part rises 3 px a frame at most (it popped out at once, up to a foot's height, and his springs threw him).
+- [x] 8. How to switch between TPT controls and Buddy's (pours sand while using grenades / molotovs): needs a clear switch. Done: Ctrl+Alt+B (Shortcuts) or Buddy tab "Clicks go to the game": every click goes to his game.
+- [x] 10. TPT's menu window on top by default (a toggle). Done: Size "Stay on top" (on by default): the menu windows, and TDPT's own window as a Normal window.
 - [ ] 11. Blood and gore mode: does it interact with the sim? (answer; add if not)
 - [ ] 12. Grenade on a sand pile with every Fun extra on: big lag spike; didn't push, light or land on the sand.
 - [ ] 13. Fire hose water particles not as fast as the game's water.
-- [ ] 14. Fire and water particles fewer than the game's effects suggest; is TPT smoke meant to look black?
-- [ ] 15. Water and effects on the taskbar: nicer than the solid bars.
+- [ ] 14. Fire and water particles fewer than the game's effects suggest; is TPT smoke meant to look black? Smoke: no, it is a glow added onto black; glows (no solid, liquid or powder under them) are now see-through as dark as they are.
+- [x] 15. Water and effects on the taskbar: nicer than the solid bars. Done: drips are rare short rivulets with a bead at the end, not a 10 px streak on every touch.
 
 ## UI fixes (user 2026-11-03)
 - [x] Gradient wallpaper painted over icon names and soft icon edges: it now leaves each icon's whole grid cell (name

@@ -220,11 +220,12 @@ namespace
 		bool petHoles = false, showers = false;  // pets use holes in windows; meteor showers on their nights
 		bool taskThrow = false, taskPop = false; // Ctrl-drag a taskbar button off to throw a block; apps that open pop one out
 		bool tilt = false, weekday = false, typing = false; // gravity leans to the active window; weather by weekday; typing sparks
+		float typingChance = 40;                 // how many key presses in a hundred puff typing sparks
 		float meteors = 0;                       // big meteors an hour at night
 		bool buddy = false;                      // Interactive Buddy (OverlayBuddy; his file: Overlay.Fun.BuddySwf)
 		bool buddyPets = false;                  // the pets notice him (OverlayBuddy reads Overlay.Fun.BuddyPets)
 		bool buddyLooks = false;                 // he looks wet and frosted (Overlay.Fun.BuddyLooks)
-		bool buddyTracks = false, buddySplash = false, buddyFireman = false, buddyCarry = false, buddyGlow = false, buddyWeapons = false, buddyFlee = false, buddyDirt = false, buddyDance = false, buddyFeed = false, buddyWater = false, buddyWaterOnly = false, buddyFireOnly = false, buddyGravity = false, buddyToysSim = false, buddyWells = false; // footprints, splashes, he puts out fires, carries sand, his guns, runs from fire, dirt, radio, feeding, hoses (Overlay.Fun.Buddy*)
+		bool buddyTracks = false, buddySplash = false, buddyFireman = false, buddyCarry = false, buddyGlow = false, buddyWeapons = false, buddyFlee = false, buddyDirt = false, buddyDance = false, buddyFeed = false, buddyWater = false, buddyWaterOnly = false, buddyFireOnly = false, buddyGravity = false, buddyToysSim = false, buddyFist = false, buddyClicks = false, buddyWells = false; // footprints, splashes, he puts out fires, carries sand, his guns, runs from fire, dirt, radio, feeding, hoses (Overlay.Fun.Buddy*)
 		// the Buddy tab (OverlayBuddy reads them from the prefs): his size and speech bubbles' (%), toys at once (0: no
 		// limit), standing on the active window, smoothing, speech
 		float buddySize = 100, buddySpeechSize = 100, buddyToys = 6, buddyVolume = 50;
@@ -280,6 +281,7 @@ namespace
 		Check(L"Sparkle trail", L"The mouse pointer leaves a short trail of cold sparks over the desktop", &fun.trail, "Overlay.Fun.Trail"),
 		Check(L"Confetti", L"Wiggle the mouse quickly from side to side to throw a burst of confetti", &fun.confetti, "Overlay.Fun.Confetti"),
 		Check(L"Typing sparks", L"Typing now and then puffs a few cold sparks up from the text cursor (or from the top of the window you're typing in)", &fun.typing, "Overlay.Fun.Typing"),
+		Slide(L"Typing spark chance", L"How often a key press puffs typing sparks: 100% every key, 40% about two keys in five", &fun.typingChance, 5, 100, "Overlay.Fun.TypingChance", 8),
 
 		{ L"Taskbar and apps" },
 		Check(L"Throw from the taskbar", L"Hold Ctrl and drag an app's taskbar button up off the taskbar: a stone block in its icon's colour drops from the pointer, thrown the way you moved", &fun.taskThrow, "Overlay.Fun.TaskThrow"),
@@ -339,6 +341,7 @@ namespace
 		{ L"Windows", L"Walk through: windows don't touch him. Active window: as in the desktop Interactive Buddy, he stands on the top edge of the window you're using (and its bottom edge from inside it) and rides along when you move it. Solid: every window and icon is solid to him like it is to sand (needs Open windows are walls)", nullptr, nullptr, 0, 0, "Overlay.Buddy.Windows", 0, 1 },
 		Slide(L"Volume", L"How loud the game's sounds are (far left: silent)", &fun.buddyVolume, 0, 100, "Overlay.Buddy.Volume", 8),
 		Check(L"Smooth motion", L"The game's 120 Hz smoothing of his movement", &fun.buddySmooth, "Overlay.Buddy.Smooth"),
+		Check(L"Clicks go to the game", L"On: every left click on the sim is the game's (throw grenades, fire guns, use the item you picked anywhere), not TPT's. Off: only clicks on Buddy, his toys and the game's windows are; the rest draw with TPT. Ctrl+Alt+B switches it from any app", &fun.buddyClicks, "Overlay.Buddy.GameClicks"),
 		{ L"Game" },
 		{ L"Menus", L"The game's own menus, as in the desktop app (also on right-clicking Buddy): load and save, skins and the skin store, items and weapons, modes and the mode store, the game's settings, help", nullptr, nullptr, 0, 0, "", 0, 2 },
 		{ L"Save", L"Brings in your save from the desktop Interactive Buddy app (money, skins, items, modes). Buddy's save here is kept beside it as a .bak", nullptr, nullptr, 0, 0, "", 0, 3 },
@@ -360,6 +363,7 @@ namespace
 		Check(L"Buddy's gravity items pull the sim", L"His weak and strong gravity vortexes and the gravity shifter also pull sand, water and gas toward them, not just Buddy", &fun.buddyGravity, "Overlay.Fun.BuddyGravity"),
 		Check(L"TPT black holes pull Buddy", L"Black holes (NBHL) near him pull him and his toys in the way the game's own Gravity Vortex does: a few weakly, 100 or more strongly", &fun.buddyWells, "Overlay.Fun.BuddyWells"),
 		Check(L"Buddy's toys feel the sim", L"Balls, infants, the magical orb and the radio rest on sand, float in water (the bowling ball sinks), get blown by explosions and splash what they land in hard", &fun.buddyToysSim, "Overlay.Fun.BuddyToys"),
+		Check(L"Buddy's fist shoves sand", L"With the game's Fist picked (Items, Hand), moving it through sand, snow or water shoves them along the way it moves, harder the faster", &fun.buddyFist, "Overlay.Fun.BuddyFist"),
 		Check(L"Buddy runs from fire and lava", L"Fire, lava or plasma close to Buddy and he runs away from it, the way he runs in his own game. (With Fireman on he still sprays water at fires further away)", &fun.buddyFlee, "Overlay.Fun.BuddyFlee"),
 		Check(L"Buddy gets dirty", L"Coal, dust, gunpowder, clay, oil, broken metal and smoke leave dark smudges on Buddy, more the longer he's in them. Water washes them off; otherwise they wear off in about a minute", &fun.buddyDirt, "Overlay.Fun.BuddyDirt"),
 		Check(L"Pets dance to Buddy's radio", L"When Buddy dances to his radio, the desktop pets dance along with him", &fun.buddyDance, "Overlay.Fun.BuddyDance"),
@@ -2471,6 +2475,8 @@ namespace
 			                       owner, nullptr, GetModuleHandleW(nullptr), nullptr);
 			SetWindowLongPtrW(hwnd, GWLP_USERDATA, LONG_PTR(this));
 			if (appWindow) DragAcceptFiles(hwnd, TRUE);
+			// TDPT's menus stay over other apps' windows (Size: Stay on top, on by default)
+			if (appWindow && GlobalPrefs::Ref().Get("Overlay.WindowOnTop", true)) SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 			BOOL noFade = TRUE;
 			DwmSetWindowAttribute(hwnd, DWMWA_TRANSITIONS_FORCEDISABLED, &noFade, sizeof(noFade));
 			// Creation measured the client area before Proc could say "no frame"; measure again, or the canvas
@@ -2767,6 +2773,7 @@ namespace
 			scrollWas = scroll;
 			if (scroll == scrollGoal) scrollGoal = -1;
 			dirty = true;
+			overlayMenuGliding = true;
 		}
 		int fixedTab = -1;    // a tab torn off into its own window: shows only that one
 		bool closing = false; // closed: Tick drops it (not from inside its own click)
@@ -4140,16 +4147,22 @@ namespace
 				for (int i = 0, k = S(4), ax = bx + bw - S(20), ay = by + S(10); i <= k; i++) Line(cv, ax + i, ay + i, 2 * (k - i) + 1, 1, theme->ink); // the arrow
 			}
 			y += ah + S(8);
-			top = Group(x, y, w, S(166), L"Shortcuts (any app)");
+#ifdef _WIN32
+			int keyRows = 6;
+#else
+			int keyRows = 5; // ponytail: the Mac's hotkeys are its five; Buddy's clicks key is Windows only for now
+#endif
+			top = Group(x, y, w, S(166) + (keyRows - 5) * S(26), L"Shortcuts (any app)");
 			std::wstring rows[][2] = {
 				{ L"Next input mode", key("CycleInput", "Ctrl+Alt+O") },
 				{ L"Pass-through on/off", key("PassThrough", "Ctrl+Alt+P") },
 				{ L"Locked on/off", key("Locked", "Ctrl+Alt+L") },
 				{ L"Show/hide this window", key("Palette", "Ctrl+Alt+E") },
 				{ L"Clear the sim", key("Clear", "Ctrl+Alt+C") },
+				{ L"Clicks: TPT or Buddy", key("BuddyClicks", "Ctrl+Alt+B") },
 			};
-			const char *names[] = { "CycleInput", "PassThrough", "Locked", "Palette", "Clear" };
-			for (int i = 0; i < 5; i++)
+			const char *names[] = { "CycleInput", "PassThrough", "Locked", "Palette", "Clear", "BuddyClicks" };
+			for (int i = 0; i < keyRows; i++)
 			{
 				int ry = top + i * S(26);
 				Caption(x + S(12), ry, rows[i][0]);
@@ -4159,14 +4172,25 @@ namespace
 					recording = rec ? "" : name;
 				}, L"Ctrl, Alt, Shift or Win plus a letter, digit or F key");
 			}
-			y += S(174);
+			y += S(174) + (keyRows - 5) * S(26);
 			top = Group(x, y, w, S(108), L"Size");
 			Caption(x + S(12), top + S(56), L"Runs as");
 			int mx = x + S(200);
 			mx += Toggle(mx, top + S(56), L"Desktop overlay", !overlayWindowed, true, [] { Restart(ui::Engine::Ref().windowFrameOps.scale, false); },
 			             L"Over the desktop (restarts TPT; the scene comes along)") + S(18);
-			Toggle(mx, top + S(56), L"Normal window", overlayWindowed, true, [] { Restart(ui::Engine::Ref().windowFrameOps.scale, true); },
-			       L"TPT's own window with these side windows; resize it for more or less room (restarts TPT; the scene comes along)");
+			mx += Toggle(mx, top + S(56), L"Normal window", overlayWindowed, true, [] { Restart(ui::Engine::Ref().windowFrameOps.scale, true); },
+			             L"TPT's own window with these side windows; resize it for more or less room (restarts TPT; the scene comes along)") + S(18);
+			bool onTop = GlobalPrefs::Ref().Get("Overlay.WindowOnTop", true);
+			Toggle(mx, top + S(56), L"Stay on top", onTop, false, [onTop] {
+				OverlayWindowOnTop(!onTop);
+				// the menu windows (the resizable panels: menu and torn-off tabs)
+				EnumThreadWindows(GetCurrentThreadId(), [](HWND h, LPARAM top) {
+					wchar_t cls[32];
+					if (GetClassNameW(h, cls, 32) && !wcscmp(cls, L"TPTOverlayPanel") && GetWindowLongPtrW(h, GWL_STYLE) & WS_THICKFRAME)
+						SetWindowPos(h, top ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+					return TRUE;
+				}, LPARAM(!onTop));
+			}, L"TDPT's menu windows (and its own window, as a Normal window) stay over your other windows, even while you use them. Off: they go behind whatever you click");
 			// The sim's pixel size: a different sim size, so TPT restarts with the scene carried over.
 			Caption(x + S(12), top + S(28), L"Sim pixel size");
 			int sx = x + S(200);
@@ -6080,6 +6104,13 @@ void OverlayWindows::SaveScene()
 	SaveSceneTiles();
 }
 
+void OverlayWindows::ToggleBuddyClicks()
+{
+	fun.buddyClicks = !fun.buddyClicks;
+	GlobalPrefs::Ref().Set("Overlay.Buddy.GameClicks", fun.buddyClicks);
+	Notify(fun.buddyClicks ? "Clicks: Buddy's game" : "Clicks: TPT");
+}
+
 void OverlayWindows::ClearSim()
 {
 	GameController::Ref().ClearSim();
@@ -7728,7 +7759,7 @@ static void TickWindowWalls()
 		bool typed = keyAt > lastKey + 0.005;
 		lastKey = keyAt;
 		POINT at{ -1, -1 };
-		if (typed && sim->rng.uniform01() < 0.4f)
+		if (typed && sim->rng.uniform01() < fun.typingChance / 100)
 		{
 			double cx, cy;
 			// from the window's top: a caret is inside the window, and sparks can't start inside a wall
@@ -7748,7 +7779,7 @@ static void TickWindowWalls()
 		lastInput = li.dwTime, lastPoint = pt;
 		GUITHREADINFO gi{ sizeof(gi) };
 		POINT at{ -1, -1 };
-		if (typed && sim->rng.uniform01() < 0.4f)
+		if (typed && sim->rng.uniform01() < fun.typingChance / 100)
 		{
 			if (GetGUIThreadInfo(0, &gi) && gi.hwndCaret)
 				at = { gi.rcCaret.left, gi.rcCaret.top }, ClientToScreen(gi.hwndCaret, &at);

@@ -18,6 +18,7 @@ namespace OverlayWindows
 	void TogglePalette();
 	void SaveScene(); // for the next run (on quitting)
 	void ClearSim(); // the clear hotkey
+	void ToggleBuddyClicks(); // its hotkey: left clicks to Buddy's game or to TPT (Overlay.Buddy.GameClicks)
 	void SetPassThrough(bool on);
 	void Notify(const char *message); // a short fading notice over TPT's window
 	bool HideTPTMenus(); // TPT's own side bar and tool strip, replaced by the Elements window while it's open

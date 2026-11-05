@@ -2,6 +2,7 @@
 #include "SimulationConfig.h"
 #include "simulation/ElementDefs.h"
 #include "simulation/Simulation.h"
+#include "simulation/SimulationData.h"
 #include <algorithm>
 #include "OverlayWindows.h"
 #include "OverlayWalls.h"
@@ -66,7 +67,7 @@ namespace
 		float x, y, vx, vy;
 	};
 	std::vector<Moving> moving;
-	enum : uint8_t { OnParticle = 1, OnWall = 2, Moves = 4 };
+	enum : uint8_t { OnParticle = 1, OnWall = 2, Moves = 4, Gas = 8 }; // Gas: a gas particle (smoke, fire) is there
 	std::vector<uint8_t> frameOccupied;
 	double framePeriod = 1 / 60.0, frameAt = 0;
 
@@ -91,6 +92,7 @@ bool overlayWindowed = false;
 bool overlayIdle = false;
 bool overlayAutoPass = true;
 bool overlayMenuUsed = false;
+bool overlayMenuGliding = false;
 
 #ifdef _WIN32
 namespace
@@ -147,7 +149,7 @@ namespace
 			return pressed;
 		}
 	};
-	Hotkey cycleInput, passThroughKey, lockedKey, paletteKey, clearKey;
+	Hotkey cycleInput, passThroughKey, lockedKey, paletteKey, clearKey, buddyClicksKey;
 
 	bool cursorMiss = false; // GPU frames: the mouse is over a see-through pixel (our window can't tell by itself)
 
@@ -182,7 +184,7 @@ namespace
 	};
 	std::vector<Moving> moving;
 	// XRES x YRES, of the shown frame (sized at the first sim frame: the sim size is set at start-up)
-	enum : uint8_t { OnParticle = 1, OnWall = 2, Moves = 4 };
+	enum : uint8_t { OnParticle = 1, OnWall = 2, Moves = 4, Gas = 8 }; // Gas: a gas particle (smoke, fire) is there
 	std::vector<uint8_t> frameOccupied;
 	double framePeriod = 1 / 60.0, frameAt = 0; // seconds between sim frames, and when the newest came
 	DrawLimit busyLimit = DrawLimitExplicit{ 60 }; // the draw rate while something moves (GPU frames: the screen's)
@@ -814,6 +816,7 @@ void OverlayLoadKeys()
 	lockedKey = Hotkey::Parse(prefs.Get("Overlay.Keys.Locked", ByteString("Ctrl+Alt+L")));
 	paletteKey = Hotkey::Parse(prefs.Get("Overlay.Keys.Palette", ByteString("Ctrl+Alt+E")));
 	clearKey = Hotkey::Parse(prefs.Get("Overlay.Keys.Clear", ByteString("Ctrl+Alt+C")));
+	buddyClicksKey = Hotkey::Parse(prefs.Get("Overlay.Keys.BuddyClicks", ByteString("Ctrl+Alt+B")));
 #elif defined(__APPLE__)
 	auto &prefs = GlobalPrefs::Ref();
 	OverlayMac::SetHotkeys({ prefs.Get("Overlay.Keys.CycleInput", ByteString("Ctrl+Alt+O")), prefs.Get("Overlay.Keys.PassThrough", ByteString("Ctrl+Alt+P")),
@@ -866,8 +869,18 @@ std::pair<Vec2<int>, int> OverlaySimSize(int scale)
 #endif
 }
 
+static SDL_Window *mainSdlWindow = nullptr;
+
+void OverlayWindowOnTop(bool on)
+{
+	GlobalPrefs::Ref().Set("Overlay.WindowOnTop", on);
+	if (overlayWindowed && mainSdlWindow) SDL_SetWindowAlwaysOnTop(mainSdlWindow, on ? SDL_TRUE : SDL_FALSE);
+}
+
 void ApplyOverlay(SDL_Window *window)
 {
+	mainSdlWindow = window;
+	if (overlayWindowed) SDL_SetWindowAlwaysOnTop(window, GlobalPrefs::Ref().Get("Overlay.WindowOnTop", true) ? SDL_TRUE : SDL_FALSE);
 #ifdef _WIN32
 	SDL_SysWMinfo info;
 	SDL_VERSION(&info.version);
@@ -937,6 +950,10 @@ void OverlayTickUI()
 	{
 		OverlayWindows::ClearSim();
 	}
+	else if (buddyClicksKey.Pressed())
+	{
+		OverlayWindows::ToggleBuddyClicks();
+	}
 	OverlayWindows::Tick();
 #elif defined(__APPLE__)
 	for (int key; (key = OverlayMac::TakeHotkey()) >= 0;)
@@ -984,7 +1001,7 @@ void OverlayFrameParts(const RenderableSimulation &sim, bool zoom)
 				moving.push_back({ float(x), float(y), vx, vy }), moves = true;
 		}
 		lastType[i] = p.type, lastX[i] = p.x, lastY[i] = p.y;
-		if (p.type && x >= 0 && y >= 0 && x < XRES && y < YRES) frameOccupied[y * XRES + x] = OnParticle | (moves ? Moves : 0);
+		if (p.type && x >= 0 && y >= 0 && x < XRES && y < YRES) frameOccupied[y * XRES + x] = OnParticle | (moves ? Moves : 0) | (SimulationData::CRef().elements[p.type].Properties & TYPE_GAS ? Gas : 0);
 	}
 	std::fill(lastType.begin() + n, lastType.end(), 0);
 	OverlayWindows::FrameWalls(frameOccupied, OnWall);
@@ -1035,12 +1052,20 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 	argb.resize(size_t(w) * h);
 	float fade = 1; // TPT's menus
 	bool buddyOn = false;
+	// TPT draws its glows (fire, smoke, plasma) as light added onto black: in the sim, where no solid, liquid or
+	// powder is, as see-through as they are dark (alpha = the brightest channel: the same colours, premultiplied),
+	// instead of solid, which made smoke black blobs over the desktop
+	bool glows = w == WINDOWW && frameOccupied.size() >= size_t(XRES) * YRES;
 	OverlayBands(h, [&](int y0, int y1) {
 		for (int i = y0 * w; i < y1 * w; i++)
 		{
 			auto c = vid[i] & 0xFFFFFF;
 			argb[i] = c ? c | 0xFF000000 : empty;
 		}
+		for (int y = y0; glows && y < std::min(y1, YRES); y++)
+			for (int x = 0; x < XRES; x++)
+				if (auto c = vid[size_t(y) * w + x] & 0xFFFFFF; c && (frameOccupied[size_t(y) * XRES + x] & (OnParticle | Gas)) != OnParticle)
+					argb[size_t(y) * w + x] = c | std::max({ c >> 16, (c >> 8) & 0xFF, c & 0xFF, 2u }) << 24;
 	});
 	if (w == WINDOWW && h == WINDOWH)
 	{
@@ -1093,7 +1118,7 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 	// Drawing at the screen's rate only pays while something moves: particles, a window, the menus fading, or TPT in
 	// use. Idle, a few frames a second keep up with slow changes and spot the next move, for a fraction of the CPU.
 	static double busyUntil = 0;
-	if (!moving.empty() || buddyOn || catchEmpty || !cursorMiss || (fade > 0 && fade < 1) || !OverlayWindows::WindowShifts().empty() || OverlayDebrisFlying())
+	if (!moving.empty() || buddyOn || catchEmpty || !cursorMiss || (fade > 0 && fade < 1) || !OverlayWindows::WindowShifts().empty() || OverlayDebrisFlying() || std::exchange(overlayMenuGliding, false))
 		busyUntil = Now() + 1;
 	overlayIdle = Now() >= busyUntil;
 	ui::Engine::Ref().SetDrawingFrequencyLimit(overlayIdle ? DrawLimit(DrawLimitExplicit{ 15 }) : busyLimit);
@@ -1218,7 +1243,7 @@ void OverlayPresent(SDL_Window *window, const uint32_t *vid, int w, int h)
 	// use. Idle, a few frames a second keep up with slow changes and spot the next move, for a fraction of the CPU.
 	static double busyUntil = 0;
 	auto shifts = OverlayWindows::WindowShifts();
-	if (!moving.empty() || buddyOn || (catchEmpty && OverlayMac::Active()) || overDrawn || (fade > 0 && fade < 1) || !shifts.empty() || OverlayDebrisFlying())
+	if (!moving.empty() || buddyOn || (catchEmpty && OverlayMac::Active()) || overDrawn || (fade > 0 && fade < 1) || !shifts.empty() || OverlayDebrisFlying() || std::exchange(overlayMenuGliding, false))
 		busyUntil = Now() + 1;
 	overlayIdle = Now() >= busyUntil;
 	ui::Engine::Ref().SetDrawingFrequencyLimit(overlayIdle ? DrawLimit(DrawLimitExplicit{ 15 }) : DrawLimit(DrawLimitDisplay{}));

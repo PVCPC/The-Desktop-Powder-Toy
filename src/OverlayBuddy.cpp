@@ -513,9 +513,10 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 		dirt[k] = std::max(0, dirt[k] - 1); // a minute to wear off
 		if (!std::isfinite(p[0] + p[1] + p[2] + p[3] + p[4])) continue;
 		int cx = int(p[0]) / CELL, cy = int(p[1]) / CELL;
-		// only fast moves (kicks, throws): he feels the air too, so a slow drift would feed itself and float him away
-		if (p[0] >= 0 && p[1] >= 0 && cx < XCELLS && cy < YCELLS && std::hypot(p[3], p[4]) > 4)
-			sim->vx[cy][cx] += 0.1f * float(p[3]), sim->vy[cy][cx] += 0.1f * float(p[4]);
+		// only fast moves (kicks, throws): he feels the air too, so a slow drift would feed itself and float him away;
+		// and no more than at 12 px a frame: punched across the screen, his air piled up into blast pressure (shaking windows)
+		if (double v = std::hypot(p[3], p[4]); p[0] >= 0 && p[1] >= 0 && cx < XCELLS && cy < YCELLS && v > 4)
+			sim->vx[cy][cx] += float(0.1 * p[3] * std::min(1.0, 12 / v)), sim->vy[cy][cx] += float(0.1 * p[4] * std::min(1.0, 12 / v));
 		for (int y = std::max(0, int(p[1] - p[2]) - 2); y <= std::min(YRES - 1, int(p[1] + p[2]) + 2); y++)
 			for (int x = std::max(0, int(p[0] - p[2]) - 2); x <= std::min(XRES - 1, int(p[0] + p[2]) + 2); x++)
 				if (int q = sim->pmap[y][x]; q && std::hypot(x + 0.5 - p[0], y + 0.5 - p[1]) <= p[2] + 2)
@@ -675,6 +676,18 @@ void OverlayBuddy::Walls(std::vector<OverlayWall> &walls)
 	for (size_t s = 0; s < shot && toys; s++)
 		if (double *b = shots + s * 5; b[4] == 7 && std::isfinite(b[0] + b[1]))
 			fling(b[0], b[1], b[2], b[3]);
+	// the game's Fist (Overlay.Fun.BuddyFist): powders and liquids it moves through go the way it goes (its knuckles
+	// about 12 px round; TPT's ticks come half as often as his frames, so half his speed a frame, kept under 10)
+	for (size_t s = 0; s < shot && prefs.Get("Overlay.Fun.BuddyFist", false); s++)
+		if (double *b = shots + s * 5; b[4] == 8 && std::isfinite(b[0] + b[1] + b[2] + b[3]) && std::hypot(b[2], b[3]) > 0.5)
+			for (int y = std::max(0, int(b[1]) - 12); y <= std::min(YRES - 1, int(b[1]) + 12); y++)
+				for (int x = std::max(0, int(b[0]) - 12); x <= std::min(XRES - 1, int(b[0]) + 12); x++)
+					if (int q = sim->pmap[y][x]; q && (isPowder(ID(q)) || isLiquid(ID(q))) && std::hypot(x + 0.5 - b[0], y + 0.5 - b[1]) <= 12)
+					{
+						auto &t = sim->parts[ID(q)];
+						t.vx = float(std::clamp(b[2] * 0.5, -10.0, 10.0) + sim->rng.uniform01() - 0.5);
+						t.vy = float(std::clamp(b[3] * 0.5, -10.0, 10.0) - sim->rng.uniform01());
+					}
 	stunned = false;
 	for (size_t s = 0; s < shot && weapons; s++)
 	{
@@ -830,8 +843,9 @@ bool OverlayBuddy::Mouse(int x, int y, int what)
 	heldX = x, heldY = y;
 	if (what == 1)
 	{
-		// only a press on him, his toys or the game's windows; everywhere else stays TPT's
-		if (!drawn || !tdpt_buddy_hit(buddy, x, y)) return false;
+		// only a press on him, his toys or the game's windows; everywhere else stays TPT's (unless the Buddy tab's
+		// Clicks go to the game is on)
+		if (!drawn || (!GlobalPrefs::Ref().Get("Overlay.Buddy.GameClicks", false) && !tdpt_buddy_hit(buddy, x, y))) return false;
 		held = true;
 		tdpt_buddy_mouse(buddy, x, y, 1);
 		return true;

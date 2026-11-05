@@ -90,6 +90,9 @@ struct Game {
     size: (u32, u32),
     scale: u32, // screen pixels per stage pixel he's drawn at (sharp on a screen TDPT shows at a bigger pixel size)
     mouse: (f64, f64),
+    held: bool, // the left button is down in the game
+    open: [bool; WINDOWS.len()], // which of the game's windows were open
+    placing: u32,                // frames left to look for windows a menu command opened (place_windows)
     ready: bool,
     readback: [Option<wgpu::Buffer>; 2], // the GPU copies the frame into one while we read last frame's from the other
     pending: Option<Copy>,                // last frame's copy, not read yet
@@ -126,7 +129,7 @@ fn open_with<A: ruffle_core::backend::audio::AudioBackend + 'static>(path: &str,
         .build();
     load_fonts(&mut player.lock().unwrap());
     player.lock().unwrap().audio_mut().set_volume(0.0); // silent until TDPT says how loud
-    Ok(Game { player, ground: Default::default(), size: (w, h), scale: 1, mouse: (-1.0, -1.0), ready: false, readback: [None, None], pending: None, drawn: HashMap::new(), settings: SETTINGS, applied: [f64::NAN; 5] })
+    Ok(Game { player, ground: Default::default(), size: (w, h), scale: 1, mouse: (-1.0, -1.0), held: false, open: [false; WINDOWS.len()], placing: 0, ready: false, readback: [None, None], pending: None, drawn: HashMap::new(), settings: SETTINGS, applied: [f64::NAN; 5] })
 }
 
 // The sim around him, so he stands on it, floats in it and burns in it: one byte per sim pixel over rect (x, y, w, h sim
@@ -409,7 +412,10 @@ impl Ground {
         }
         let len = sx.hypot(sy);
         let (nx, ny) = if len > 1e-9 { (-sx / len, -sy / len) } else { (0.0, -1.0) };
-        for _ in 0..(2.0 * r) as usize + 2 {
+        // out of powder at most 3 px a frame: sand poured over a foot lifts him over a few frames, instead of popping the
+        // foot out at once, which his springy body turned into a jump (out of solids at once)
+        let soft = self.cell((*x - nx * r) as i32, (*y - ny * r) as i32) & POWDER != 0;
+        for _ in 0..if soft { 3 } else { (2.0 * r) as usize + 2 } {
             if self.overlap(*x, *y, r).0 == 0 {
                 break;
             }
@@ -833,9 +839,26 @@ fn frame(b: &mut Game, dt_ms: f64, mx: f64, my: f64, out: &mut [u32]) -> bool {
         b.drawn.clear(); // the buffers are a new size: cleared whole
         (b.pending, b.readback) = (None, [None, None]); // and the copy on its way is the old size (its buffer still mapped)
     }
+    if b.placing > 0 {
+        b.placing -= 1;
+        place_windows(&mut b.open, b.size, &mut p);
+    }
+    // the Fist moving: where it is and how fast, for the sim to be shoved by it
+    if b.ready && (mx, my) != b.mouse && b.mouse.0 >= 0.0 && matches!(p.get_root_variable("item"), Value::String(i) if i == "Fist")
+        && let Ok(mut g) = b.ground.lock() && g.shots.len() < 256
+    {
+        g.shots.push([mx, my, mx - b.mouse.0, my - b.mouse.1, 8.0]);
+    }
     if (mx, my) != b.mouse {
+        // held, in steps of a few pixels: the game's windows drop a drag the moment the mouse is off their title bar,
+        // which one jump a frame (the mouse is read once a frame) always is
+        let (ox, oy) = b.mouse;
+        let n = if b.held && ox >= 0.0 { ((mx - ox).hypot(my - oy) / 6.0).ceil().clamp(1.0, 200.0) as usize } else { 1 };
+        for i in 1..=n {
+            let t = i as f64 / n as f64;
+            p.handle_event(PlayerEvent::MouseMove { x: (ox + (mx - ox) * t) * k, y: (oy + (my - oy) * t) * k });
+        }
         b.mouse = (mx, my);
-        p.handle_event(PlayerEvent::MouseMove { x: mx * k, y: my * k });
     }
     if b.ready && let Ok(mut g) = b.ground.lock() {
         if let Some((x, y, power)) = g.blast() {
@@ -1037,6 +1060,35 @@ fn hit(hits: &[(char, [f64; 4])], x: f64, y: f64) -> bool {
 // The game's own menus (hidden on the desktop), read through the bridge, as lines for TDPT's right-click menu:
 // "depth\tflags\tcommand\tlabel", flags p: a submenu, g: greyed, c: ticked, s: a separator; command for the game's
 // __hostMenuCommand.
+// A command for the game's __hostMenuCommand; the windows it opens are put in the middle (place_windows)
+fn menu_command(open: &mut [bool; WINDOWS.len()], placing: &mut u32, p: &mut Player, c: String) -> Option<Value> {
+    *open = open_windows(p);
+    *placing = 30;
+    p.call_root_method("__hostMenuCommand", vec![c.into()]).ok()
+}
+
+fn open_windows(p: &mut Player) -> [bool; WINDOWS.len()] {
+    WINDOWS.map(|w| matches!(p.get_root_variable(&format!("{w}._x")), Value::Number(_))) // (a clip reads as null)
+}
+
+// The game opens its windows (a frame or two after the command) near its 640x480 stage's top left; TDPT's stage is
+// the whole screen, where that's a far corner, often under TDPT's own menu: in the middle instead.
+fn place_windows(open: &mut [bool; WINDOWS.len()], stage: (u32, u32), p: &mut Player) {
+    let now = open_windows(p);
+    for ((w, was), now) in WINDOWS.iter().zip(*open).zip(now) {
+        if now && !was {
+            let mut size = |v: &str| match p.get_root_variable(&format!("{w}.{v}")) { Value::Number(n) => n, _ => 0.0 };
+            let (ww, wh) = (size("width"), size("height"));
+            p.set_root_variable(&format!("{w}._x"), ((stage.0 as f64 - ww) / 2.0).round().max(0.0).into()).ok();
+            p.set_root_variable(&format!("{w}._y"), ((stage.1 as f64 - wh) / 2.0).round().max(0.0).into()).ok();
+        }
+    }
+    *open = now;
+}
+
+// the game's windows (its _root variables), each opened from one of its menus
+const WINDOWS: [&str; 9] = ["itemStoreWindow", "skinStoreWindow", "modeStoreWindow", "statsWindow", "helpWindow", "aboutWindow", "updatesWindow", "scriptWindow", "faceWindow"];
+
 const MENUS: [(&str, &str); 6] = [("file", "File"), ("skins", "Skins"), ("item", "Items"), ("modes", "Modes"), ("settings", "Settings"), ("help", "Help")];
 
 fn read_menus(p: &mut Player) -> String {
@@ -1169,7 +1221,7 @@ fn run(mut game: Game, shared: Arc<Mutex<Shared>>) {
                 }
                 match c.strip_prefix("act:").map(str::to_owned) {
                     Some(action) => p.call_root_method("addAction", vec![action.into(), 5.into()]).ok(),
-                    None => p.call_root_method("__hostMenuCommand", vec![c.into()]).ok(),
+                    None => menu_command(&mut game.open, &mut game.placing, &mut p, c),
                 };
             }
             let k = game.scale.max(1) as f64; // clicks come in stage pixels, the player wants the frame's
@@ -1182,6 +1234,7 @@ fn run(mut game: Game, shared: Arc<Mutex<Shared>>) {
                 if let PlayerEvent::MouseDown { x, y, .. } = c {
                     p.handle_event(PlayerEvent::MouseMove { x, y }); // over what's pressed first
                 }
+                game.held = matches!(c, PlayerEvent::MouseDown { .. });
                 p.handle_event(c);
             }
             drop(p);
@@ -1512,7 +1565,8 @@ pub unsafe extern "C" fn tdpt_buddy_booms(b: *mut Buddy, out: *mut f64, max: usi
 /// His weapons since the last call (up to max): x0, y0, x1, y1, kind each (1 a bullet's path, 2 a flame at x0, y0, 3 he
 /// dances at x0, y0, 4 a new drop from his hose at x0, y0 with speed x1, y1 a frame, 5 his gravity pulls to x0, y0, x1
 /// hard: 1 weak vortex, 2 gravity shifter, 3 strong vortex, 6 his stun gun is shocking him, 7 a toy of his
-/// stopped fast by the sim at x0, y0, radius x1, speed y1 before); how many
+/// stopped fast by the sim at x0, y0, radius x1, speed y1 before, 8 the Fist at x0, y0 moving x1, y1 since the frame
+/// before); how many
 /// # Safety
 /// b is from tdpt_buddy_open; out has room for 5 * max.
 #[unsafe(no_mangle)]
@@ -1644,6 +1698,7 @@ mod tests {
         let g = super::Ground { rect: [0, 0, 200, 200], cells: (0..200 * 200).map(|i| (i / 200 >= 100) as u16).collect(), ..Default::default() };
         let (mut x, mut y, mut xv, mut yv) = (50.0, 95.0, 1.0, 6.0);
         let n = g.push_out(&mut x, &mut y, &mut xv, &mut yv, 10.0).expect("in the floor");
+        g.push_out(&mut x, &mut y, &mut xv, &mut yv, 10.0); // (3 px a frame: two frames)
         assert!(n.1 < -0.9 && y <= 90.5 && y > 88.0, "{n:?} {y}");
         assert!(yv < 0.0 && xv < 1.0, "bounces up with friction: {xv} {yv}");
         assert!(g.under(x, y, 10.0));
@@ -1661,7 +1716,10 @@ mod tests {
         let (mut x, mut y, mut xv, mut yv) = (50.0, 105.0, 0.0, 0.0);
         assert!(sand(true).push_out(&mut x, &mut y, &mut xv, &mut yv, 10.0).is_none() && y == 105.0, "pushed down: {y}");
         let (mut x, mut y, mut xv, mut yv) = (50.0, 95.0, 0.0, 3.0);
-        assert!(sand(false).push_out(&mut x, &mut y, &mut xv, &mut yv, 10.0).is_some() && y <= 90.5, "sank in: {y}");
+        let g = sand(false);
+        assert!(g.push_out(&mut x, &mut y, &mut xv, &mut yv, 10.0).is_some());
+        g.push_out(&mut x, &mut y, &mut xv, &mut yv, 10.0);
+        assert!(y <= 90.5, "sank in: {y}");
     }
 
     #[test]
@@ -2473,6 +2531,52 @@ mod tests {
             // the desktop app's own native build of v1.01
             assert_eq!(super::hex(&sha2::Sha256::digest(&swf)), "9720616ea241c1b7a4004c90b91ed100dfa21812701141a6bc89a961d28ae9eb");
         }
+    }
+
+    // the game's windows open in the middle of TDPT's stage, and follow a drag even at a big jump a frame
+    #[test]
+    fn store_window() {
+        let Some(path) = std::env::var_os("TDPT_BUDDY_SWF") else { return };
+        let mut game = super::open(path.to_str().unwrap(), 1280, 720).unwrap();
+        let mut out = vec![0u32; 1280 * 720];
+        let mut n = 0;
+        while !super::frame(&mut game, 25.0, 0.0, 0.0, &mut out) {
+            n += 1;
+            assert!(n < 400, "never ready");
+        }
+        let player = game.player.clone();
+        super::menu_command(&mut game.open, &mut game.placing, &mut player.lock().unwrap(), "select|skins|1".into());
+        for _ in 0..40 {
+            super::frame(&mut game, 25.0, 0.0, 0.0, &mut out);
+        }
+        let at = |game: &super::Game| {
+            let mut p = game.player.lock().unwrap();
+            match (p.get_root_variable("skinStoreWindow._x"), p.get_root_variable("skinStoreWindow._y")) {
+                (Value::Number(x), Value::Number(y)) => (x, y),
+                other => panic!("no store: {other:?}"),
+            }
+        };
+        let (x, y) = at(&game);
+        assert_eq!((x, y), (515.0, 193.0), "not in the middle");
+        // its title bar, dragged 75 px a frame
+        let (mx, my) = (x + 100.0, y + 15.0);
+        super::frame(&mut game, 25.0, mx, my, &mut out);
+        game.player.lock().unwrap().handle_event(PlayerEvent::MouseDown { x: mx, y: my, button: MouseButton::Left, index: None });
+        game.held = true;
+        for i in 1..=4 {
+            super::frame(&mut game, 25.0, mx - 60.0 * i as f64, my + 45.0 * i as f64, &mut out);
+        }
+        game.player.lock().unwrap().handle_event(PlayerEvent::MouseUp { x: mx - 240.0, y: my + 180.0, button: MouseButton::Left });
+        // (a frame behind the mouse: the game moves it on its next frame)
+        let (dx, dy) = at(&game);
+        assert!((dx - (x - 240.0)).abs() < 10.0 && (dy - (y + 180.0)).abs() < 10.0, "didn't follow the drag: {dx},{dy}");
+        // closed again (its close button), so the game's save doesn't keep it open for the other tests
+        let (cx, cy) = (dx + 235.0, dy + 16.0);
+        super::frame(&mut game, 25.0, cx, cy, &mut out);
+        game.player.lock().unwrap().handle_event(PlayerEvent::MouseDown { x: cx, y: cy, button: MouseButton::Left, index: None });
+        game.player.lock().unwrap().handle_event(PlayerEvent::MouseUp { x: cx, y: cy, button: MouseButton::Left });
+        super::frame(&mut game, 25.0, cx, cy, &mut out);
+        assert!(!matches!(game.player.lock().unwrap().get_root_variable("skinStoreWindow._x"), Value::Number(_)), "didn't close");
     }
 }
 

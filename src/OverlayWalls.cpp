@@ -582,8 +582,17 @@ void OverlayApplyWalls(Simulation *sim, const std::vector<OverlayWall> &walls)
 					add(-1, 0, 15, 255), add(1, 0, 15, 255), add(0, -1, 15, 255), add(0, 1, 15, 255);
 				}
 				break;
-			case M::MarkWater: // a streak running down
-				for (int j = 0; j < 10; j++) add(0, j, 4 - j * 0.3f, 140);
+			case M::MarkWater: // now and then a rivulet running down, as long as it likes, a bead at its end (a straight
+				// streak under every touch made water lying along an edge one solid band)
+				// (rare and strong, mostly short: water touching an edge all along it every tick still dries faster than it
+				// streaks, so the edge stays ragged)
+				if (sim->rng.uniform01() < 0.006f)
+				{
+					float u = sim->rng.uniform01();
+					int len = 3 + int(25 * u * u * u);
+					for (int j = 0; j < len; j++) add(0, j, 70 - j * 40.f / len, 140);
+					add(0, len, 110, 160), add(-1, len, 40, 160), add(1, len, 40, 160);
+				}
 				break;
 			}
 		};
